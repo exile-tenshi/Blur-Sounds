@@ -1,0 +1,93 @@
+{
+  "name": "blur-sounds",
+  "private": true,
+  "version": "1.0.0",
+  "author": "Blur Sounds",
+  "description": "Mix microphone and application audio through VB-Audio Hi-Fi Cable at studio quality.",
+  "type": "module",
+  "main": "dist-electron/index.js",
+  "scripts": {
+    "dev": "vite",
+    "build:engine": "dotnet build \"engine/VoiceMeeterEngine/VoiceMeeterEngine.csproj\"",
+    "build:engine:release": "powershell -ExecutionPolicy Bypass -File \"scripts/publish-engine.ps1\"",
+    "build": "npm run build:engine:release && vite build",
+    "check:hifi": "powershell -ExecutionPolicy Bypass -File \"scripts/check-hifi-cable.ps1\"",
+    "dist": "npm run check:hifi && powershell -ExecutionPolicy Bypass -File \"scripts/build-installer.ps1\"",
+    "portable": "npm run check:hifi && powershell -ExecutionPolicy Bypass -File \"scripts/build-portable.ps1\"",
+    "run:app": "powershell -ExecutionPolicy Bypass -File \"scripts/run-app.ps1\"",
+    "lint": "oxlint src vite.config.ts",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vite-plugin-electron": "^1.1.0",
+    "vite-plugin-electron-renderer": "^1.0.0"
+  },
+  "build": {
+    "appId": "com.blursounds.app",
+    "productName": "Blur Sounds",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "resources/engine",
+        "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "requestedExecutionLevel": "asInvoker",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "include": "installer/windows/nsis/hifi-notice.nsh",
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Blur Sounds",
+      "installerLanguages": [
+        "en_US"
+      ],
+      "displayLanguageSelector": false
+    }
+  }
+}
