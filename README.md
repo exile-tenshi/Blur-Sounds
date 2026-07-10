@@ -1,32 +1,53 @@
-# React + TypeScript + Vite
+# Blur Sounds
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Mix your microphone and application audio through **VB-Audio Hi-Fi Cable** — built for clean routing into Discord, VRChat, and other apps.
 
-Currently, two official plugins are available:
+**Download:** [Blur Sounds 1.0.0](https://github.com/exile-tenshi/Blur-Sounds/releases/tag/v1.0.0)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## Beta / Application Testers
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Huge shoutout to the people who sat through the fails, the grit, and the late-night rebuilds:
 
-## Expanding the Oxlint configuration
+### Compatibility testing team
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+- **sadpringles** — compatibility testing lead. Absolute legend.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+### Huge shoutouts
+
+- **mariposa**
+- **where**
+- the **black cat in VRChat**
+- **faded staff** — for listening to the fails
+
+Thank you for testing Blur Sounds when it was still breaking. This release exists because you kept listening.
+
+---
+
+## Requirements
+
+- Windows 10/11
+- [VB-Audio Hi-Fi Cable](https://vb-audio.com/Cable/index.htm)
+
+## Quick start
+
+1. Install Hi-Fi Cable
+2. Install [Blur Sounds](https://github.com/exile-tenshi/Blur-Sounds/releases/latest)
+3. Open the app → **Apply clean audio settings**
+4. Pick your mic + apps, then **Start stream**
+5. Set Discord / VRChat / etc. to **Hi-Fi Cable Output**
+
+## Build from source
+
+```bash
+npm install
+npm run build:engine:release
+npm run start
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Installer:
+
+```bash
+npm run dist
+```
