@@ -308,9 +308,10 @@ internal sealed class AudioEngine : IDisposable
             State = state,
             HelperConnected = true,
             Message = message,
-            LatencyMs = LatencyTuning.CaptureBufferMilliseconds
-                + LatencyTuning.LiveEdgeMaxMilliseconds
-                + LatencyTuning.OutputLatencyMilliseconds,
+            LatencyMs = LatencyTuning.MicCaptureBufferMilliseconds
+                + LatencyTuning.MicCaptureMaxMilliseconds
+                + LatencyTuning.OutputStageBufferMilliseconds
+                + LatencyTuning.HiFiOutputLatencyMilliseconds,
             UnderrunCount = CaptureDiagnostics.TotalUnderruns,
             SelectedMicrophoneReady = microphoneSources.Values.Any(source => source.IsReady),
             SelectedInputReady = outputBroadcast is not null &&
@@ -545,7 +546,7 @@ internal sealed class AudioEngine : IDisposable
         var minSamples = Math.Max(
             mixFormat.Channels,
             source.CaptureSampleRate * mixFormat.Channels * LatencyTuning.AppLoopbackWarmupMilliseconds / 1000);
-        await WarmupCaptureAsync(() => source.BufferedSamples, minSamples, 250);
+        await WarmupCaptureAsync(() => source.BufferedSamples, minSamples, 80);
         AttachAppToMixer(appId, source);
     }
 
@@ -1636,7 +1637,7 @@ internal sealed class MicSource : IDisposable
             deviceName: deviceName,
             jitterBufferMilliseconds: 0,
             holdLastOnUnderrun: false,
-            enableTrim: false);
+            enableTrim: true);
         var provider = CapturePipeline.Build(captureBuffer, captureFormat, mixFormat, comfortCapture);
         var noiseSuppressionProvider = new NoiseSuppressionSampleProvider(provider);
         var volumeProvider = new FullBlockVolumeSampleProvider(noiseSuppressionProvider) { Volume = 1f };
