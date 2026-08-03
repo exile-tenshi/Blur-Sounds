@@ -70,7 +70,7 @@ internal static class AudioSessionMonitor
     }
 
     /// <summary>Refresh session peaks off the hot meter path (about every 2s).</summary>
-    public static void RefreshInBackground(MMDeviceEnumerator _)
+    public static void RefreshInBackground()
     {
         _ = Task.Run(() =>
         {

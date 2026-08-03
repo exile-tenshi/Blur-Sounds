@@ -260,7 +260,7 @@ internal sealed class AudioEngine : IDisposable
 
     public void RefreshSessionPeaksInBackground()
     {
-        AudioSessionMonitor.RefreshInBackground(enumerator);
+        AudioSessionMonitor.RefreshInBackground();
     }
 
     public EngineTelemetry GetTelemetry()
