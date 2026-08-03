@@ -1,7 +1,9 @@
 import type {
   AudioSnapshot,
+  HifiCableEndpointStatus,
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
+  SetMicrophoneNoiseSuppressionPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteMutedPayload,
@@ -21,6 +23,7 @@ export const audioChannels = {
   setRouteMuted: 'audio:setRouteMuted',
   setMicrophoneMuted: 'audio:setMicrophoneMuted',
   setMicrophoneVolume: 'audio:setMicrophoneVolume',
+  setMicrophoneNoiseSuppression: 'audio:setMicrophoneNoiseSuppression',
   subscribeSnapshot: 'audio:subscribeSnapshot',
   openHifiCablePlaybackSettings: 'system:openHifiCablePlaybackSettings',
   openHifiCableRecordingSettings: 'system:openHifiCableRecordingSettings',
@@ -49,6 +52,7 @@ export interface AudioControlApi {
   setRouteMuted: (payload: SetRouteMutedPayload) => Promise<AudioSnapshot>
   setMicrophoneMuted: (payload: SetMicrophoneMutedPayload) => Promise<AudioSnapshot>
   setMicrophoneVolume: (payload: SetMicrophoneVolumePayload) => Promise<AudioSnapshot>
+  setMicrophoneNoiseSuppression: (payload: SetMicrophoneNoiseSuppressionPayload) => Promise<AudioSnapshot>
   subscribeSnapshot: (listener: (snapshot: AudioSnapshot) => void) => () => void
   openHifiCablePlaybackSettings: () => Promise<void>
   openHifiCableRecordingSettings: () => Promise<void>
