@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { ClipLookbackSeconds } from '../../shared/appSettings'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 
