@@ -256,9 +256,10 @@ internal sealed class SmoothCaptureBuffer
         }
 
         var channels = Math.Max(1, floatFormat.Channels);
+        // Trim as soon as we drift past one packet so latency cannot climb.
         var minExcessBeforeTrim = Math.Max(
             channels,
-            floatFormat.SampleRate * channels * 200 / 1000);
+            floatFormat.SampleRate * channels * LatencyTuning.MaxTrimPassMilliseconds / 1000);
         if (excess < minExcessBeforeTrim)
         {
             return;
