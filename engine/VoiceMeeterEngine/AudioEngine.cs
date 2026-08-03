@@ -799,6 +799,9 @@ internal sealed class AudioEngine : IDisposable
                 }
 
                 var newMic = await CreateMicSourceWithRetryAsync(device, config.MicrophoneId!);
+                newMic.SetVolume(Math.Clamp(config.Volume, 0f, 4f));
+                newMic.SetMuted(config.Muted);
+                newMic.SetNoiseSuppression(config.NoiseSuppression);
                 microphoneSources[slotId] = newMic;
                 await AttachMicrophoneToMixerAsync(slotId, newMic);
                 message = $"Bound microphone: {device.FriendlyName}";
@@ -867,6 +870,7 @@ internal sealed class AudioEngine : IDisposable
                     MicrophoneId = slot.MicrophoneId,
                     Muted = slot.Muted,
                     Volume = Math.Clamp(slot.Volume, 0f, 4f),
+                    NoiseSuppression = slot.NoiseSuppression,
                 })
                 .ToList();
         }
@@ -911,6 +915,7 @@ internal sealed class AudioEngine : IDisposable
 
             source.SetVolume(Math.Clamp(slot.Volume, 0f, 4f));
             source.SetMuted(slot.Muted);
+            source.SetNoiseSuppression(slot.NoiseSuppression);
         }
     }
 
@@ -1518,6 +1523,7 @@ internal sealed class MicSource : IDisposable
     private readonly SmoothCaptureBuffer captureBuffer;
     private readonly WaveFormat captureFormat;
     private readonly int captureSampleRate;
+    private readonly NoiseSuppressionSampleProvider noiseSuppressionProvider;
     private readonly FullBlockVolumeSampleProvider volumeProvider;
     private float baseVolume = 1f;
     private bool muted;
@@ -1529,6 +1535,7 @@ internal sealed class MicSource : IDisposable
         MicWasapiCapture capture,
         SmoothCaptureBuffer captureBuffer,
         WaveFormat captureFormat,
+        NoiseSuppressionSampleProvider noiseSuppressionProvider,
         FullBlockVolumeSampleProvider volumeProvider,
         int mixSampleRate)
     {
@@ -1540,6 +1547,7 @@ internal sealed class MicSource : IDisposable
         this.captureBuffer = captureBuffer;
         this.captureFormat = captureFormat;
         this.captureSampleRate = captureFormat.SampleRate;
+        this.noiseSuppressionProvider = noiseSuppressionProvider;
         this.volumeProvider = volumeProvider;
         SampleProvider = volumeProvider;
         IsReady = false;
@@ -1577,6 +1585,11 @@ internal sealed class MicSource : IDisposable
     {
         baseVolume = Math.Clamp(volume, 0f, 4f);
         ApplyVolume();
+    }
+
+    public void SetNoiseSuppression(bool enabled)
+    {
+        noiseSuppressionProvider.SetEnabled(enabled);
     }
 
     private void ApplyVolume()
@@ -1625,7 +1638,8 @@ internal sealed class MicSource : IDisposable
             holdLastOnUnderrun: false,
             enableTrim: false);
         var provider = CapturePipeline.Build(captureBuffer, captureFormat, mixFormat, comfortCapture);
-        var volumeProvider = new FullBlockVolumeSampleProvider(provider) { Volume = 1f };
+        var noiseSuppressionProvider = new NoiseSuppressionSampleProvider(provider);
+        var volumeProvider = new FullBlockVolumeSampleProvider(noiseSuppressionProvider) { Volume = 1f };
         return Task.FromResult(new MicSource(
             selectionId,
             device.ID,
@@ -1633,6 +1647,7 @@ internal sealed class MicSource : IDisposable
             capture,
             captureBuffer,
             captureFormat,
+            noiseSuppressionProvider,
             volumeProvider,
             mixFormat.SampleRate));
     }

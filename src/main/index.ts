@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, nativeImage } from 'electron'
 import type { RoutingStore } from './audio/routingStore.js'
 import { registerAudioIpc } from './ipc/audioIpc.js'
+import { registerClipIpc } from './ipc/clipIpc.js'
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -54,6 +55,7 @@ async function createMainWindow(): Promise<void> {
   })
 
   audioStore = registerAudioIpc(mainWindow)
+  registerClipIpc(mainWindow)
 
   mainWindow.on('closed', () => {
     shutdownAudioStore()

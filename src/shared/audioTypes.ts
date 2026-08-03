@@ -55,6 +55,7 @@ export interface MicrophoneSlot {
   deviceId?: string
   muted: boolean
   volume: number
+  noiseSuppression?: boolean
 }
 
 export interface DeviceSelection {
@@ -158,6 +159,11 @@ export interface SetMicrophoneMutedPayload {
 export interface SetMicrophoneVolumePayload {
   slotId?: string
   volume: number
+}
+
+export interface SetMicrophoneNoiseSuppressionPayload {
+  slotId?: string
+  noiseSuppression: boolean
 }
 
 export interface SetRouteVolumePayload {

@@ -2,7 +2,15 @@
 
 Mix your microphone and application audio through **VB-Audio Hi-Fi Cable** — built for clean routing into Discord, VRChat, and other apps.
 
-**Download:** [Blur Sounds 1.0.0](https://github.com/exile-tenshi/Blur-Sounds/releases/tag/v1.0.0)
+**Download:** [Blur Sounds releases](https://github.com/exile-tenshi/Blur-Sounds/releases/latest)
+
+---
+
+## What’s new
+
+- **Clip recordings** — capture your desktop or a game/window to an `.mp4` (falls back to `.webm` if MP4 codecs aren’t available). Files land in `Desktop\Blur Sounds Clips`.
+- **Microphone noise suppression** — toggle per mic in Mix levels to cut steady background noise.
+- **Portable Desktop folder** — `npm run portable` builds the app and copies it to `Desktop\Blur Sounds`.
 
 ---
 
@@ -33,10 +41,11 @@ Thank you for testing Blur Sounds when it was still breaking. This release exist
 ## Quick start
 
 1. Install Hi-Fi Cable
-2. Install [Blur Sounds](https://github.com/exile-tenshi/Blur-Sounds/releases/latest)
+2. Install [Blur Sounds](https://github.com/exile-tenshi/Blur-Sounds/releases/latest) — or run `npm run portable` to place a folder on your Desktop
 3. Open the app → **Apply clean audio settings**
 4. Pick your mic + apps, then **Start stream**
 5. Set Discord / VRChat / etc. to **Hi-Fi Cable Output**
+6. Optional: enable **Noise suppression** on your mic, or use **Clip recordings** to save desktop/game takes as MP4
 
 ## Build from source
 
@@ -50,4 +59,10 @@ Installer:
 
 ```bash
 npm run dist
+```
+
+Portable Desktop folder:
+
+```bash
+npm run portable
 ```

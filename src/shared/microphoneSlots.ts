@@ -10,6 +10,7 @@ export function createMicrophoneSlot(partial?: Partial<MicrophoneSlot>): Microph
     deviceId: partial?.deviceId,
     muted: partial?.muted ?? false,
     volume: partial?.volume ?? DEFAULT_INPUT_GAIN,
+    noiseSuppression: partial?.noiseSuppression ?? false,
   }
 }
 
@@ -24,6 +25,7 @@ export function normalizeMicrophoneSlots(selection: DeviceSelection): Microphone
       deviceId: slot.deviceId,
       muted: slot.muted ?? false,
       volume: slot.volume ?? DEFAULT_INPUT_GAIN,
+      noiseSuppression: slot.noiseSuppression ?? false,
     }))
   }
 
@@ -34,6 +36,7 @@ export function normalizeMicrophoneSlots(selection: DeviceSelection): Microphone
         deviceId: selection.microphoneId,
         muted: selection.microphoneMuted ?? false,
         volume: selection.microphoneVolume ?? DEFAULT_INPUT_GAIN,
+        noiseSuppression: false,
       },
     ]
   }

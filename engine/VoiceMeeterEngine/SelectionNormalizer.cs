@@ -13,6 +13,9 @@ internal sealed class MicrophoneSlotConfig
 
     [System.Text.Json.Serialization.JsonPropertyName("volume")]
     public float Volume { get; set; } = 1f;
+
+    [System.Text.Json.Serialization.JsonPropertyName("noiseSuppression")]
+    public bool NoiseSuppression { get; set; }
 }
 
 internal static class SelectionNormalizer
