@@ -10,6 +10,7 @@ import {
 } from '../shared/hifiCable'
 import { AppLibraryPanel } from './components/AppLibraryPanel'
 import { AudioRoutingPanel } from './components/AudioRoutingPanel'
+import { ClipRecordingPanel } from './components/ClipRecordingPanel'
 import { InputVolumeList } from './components/InputVolumeList'
 import { useAudioControlState } from './hooks/useAudioControlState'
 
@@ -50,6 +51,7 @@ function App() {
     setRouteMuted,
     setMicrophoneMuted,
     setMicrophoneVolume,
+    setMicrophoneNoiseSuppression,
     refreshSnapshot,
     startEngine,
     stopEngine,
@@ -79,8 +81,10 @@ function App() {
       ready: snapshot.engine.selectedMicrophoneReady,
       muted: slot.muted,
       volume: slot.volume,
+      noiseSuppression: slot.noiseSuppression ?? false,
       onSetMuted: (muted: boolean) => setMicrophoneMuted(slot.id, muted),
       onSetVolume: (volume: number) => setMicrophoneVolume(slot.id, volume),
+      onSetNoiseSuppression: (enabled: boolean) => setMicrophoneNoiseSuppression(slot.id, enabled),
     }))
 
   const cableDefaults = getHifiCableSelectionDefaults(snapshot.devices)
@@ -99,7 +103,8 @@ function App() {
           </div>
           <p className="hero-copy">
             Capture your microphone, mix in app audio, and send everything through VB-Audio Hi-Fi Cable
-            at {HIFI_CABLE_QUALITY.label}.
+            at {HIFI_CABLE_QUALITY.label}. Clip desktop or games to MP4 on your Desktop whenever you need a
+            quick take.
           </p>
         </div>
 
@@ -233,6 +238,8 @@ function App() {
         onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
         onSelectRecording={(deviceId) => updateSelection('recordingDeviceId', deviceId)}
       />
+
+      <ClipRecordingPanel />
 
       <section className="content-grid two-up">
         <AppLibraryPanel

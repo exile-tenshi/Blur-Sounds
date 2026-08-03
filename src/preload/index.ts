@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { audioChannels, type AudioControlApi } from '../shared/audioApi.js'
+import { clipChannels, type ClipControlApi } from '../shared/clipApi.js'
 
 const audioControlApi: AudioControlApi = {
   getSnapshot: () => ipcRenderer.invoke(audioChannels.getSnapshot),
@@ -20,6 +21,9 @@ const audioControlApi: AudioControlApi = {
     ipcRenderer.invoke(audioChannels.setMicrophoneMuted, payload),
   setMicrophoneVolume: (payload: Parameters<AudioControlApi['setMicrophoneVolume']>[0]) =>
     ipcRenderer.invoke(audioChannels.setMicrophoneVolume, payload),
+  setMicrophoneNoiseSuppression: (
+    payload: Parameters<AudioControlApi['setMicrophoneNoiseSuppression']>[0],
+  ) => ipcRenderer.invoke(audioChannels.setMicrophoneNoiseSuppression, payload),
   openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
   openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
   applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
@@ -36,4 +40,14 @@ const audioControlApi: AudioControlApi = {
   },
 }
 
+const clipControlApi: ClipControlApi = {
+  listSources: () => ipcRenderer.invoke(clipChannels.listSources),
+  getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
+  ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
+  saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
+  openOutputFolder: () => ipcRenderer.invoke(clipChannels.openOutputFolder),
+  notifyRecordingState: (payload) => ipcRenderer.invoke(clipChannels.notifyRecordingState, payload),
+}
+
 contextBridge.exposeInMainWorld('audioControl', audioControlApi)
+contextBridge.exposeInMainWorld('clipControl', clipControlApi)

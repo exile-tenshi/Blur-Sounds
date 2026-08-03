@@ -7,6 +7,7 @@ import type {
   RoutedInput,
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
+  SetMicrophoneNoiseSuppressionPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteMutedPayload,
@@ -475,6 +476,30 @@ export class RoutingStore {
     }
 
     if (this.isEngineActive()) {
+      await this.engine.updateMix(this.selection, this.getSortedRoutes())
+    }
+
+    return this.emitCachedSnapshot()
+  }
+
+  async setMicrophoneNoiseSuppression(
+    payload: SetMicrophoneNoiseSuppressionPayload,
+  ): Promise<AudioSnapshot> {
+    const slots = normalizeMicrophoneSlots(this.selection)
+    const slotId = payload.slotId ?? slots.find((slot) => slot.deviceId)?.id ?? slots[0]?.id
+
+    if (!slotId) {
+      return this.emitCachedSnapshot()
+    }
+
+    this.selection = {
+      ...this.selection,
+      microphones: updateMicrophoneSlot(slots, slotId, {
+        noiseSuppression: payload.noiseSuppression,
+      }),
+    }
+
+    if (this.canSyncMixLevels()) {
       await this.engine.updateMix(this.selection, this.getSortedRoutes())
     }
 

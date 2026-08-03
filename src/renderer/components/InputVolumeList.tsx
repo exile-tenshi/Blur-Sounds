@@ -5,7 +5,7 @@ import {
   readRouteEqualizer,
   type RouteEqualizerSettings,
 } from '../../shared/audioConstants'
-import type { AudioApplication, MicrophoneSlot, RoutedInput } from '../../shared/audioTypes'
+import type { AudioApplication, RoutedInput } from '../../shared/audioTypes'
 import { GainSlider } from './GainSlider'
 import { GraphicalEqualizer } from './GraphicalEqualizer'
 import { LevelMeter } from './LevelMeter'
@@ -17,8 +17,10 @@ interface MicrophoneSourceControl {
   ready: boolean
   muted: boolean
   volume: number
+  noiseSuppression: boolean
   onSetMuted: (muted: boolean) => Promise<void>
   onSetVolume: (volume: number) => Promise<void>
+  onSetNoiseSuppression: (enabled: boolean) => Promise<void>
 }
 
 interface InputVolumeListProps {
@@ -156,6 +158,16 @@ const MicrophoneSourceCard = memo(function MicrophoneSourceCard({
         onCommit={(volume) => void source.onSetVolume(volume)}
       />
       <p className="muted gain-hint">100% = original level · up to {MAX_INPUT_GAIN * 100}% boost</p>
+      <label className="eq-toggle noise-toggle">
+        <input
+          type="checkbox"
+          checked={source.noiseSuppression}
+          disabled={source.muted}
+          onChange={(event) => void source.onSetNoiseSuppression(event.target.checked)}
+        />
+        <span className="eq-toggle-track" />
+        <span>Noise suppression</span>
+      </label>
       <LevelMeter
         level={engineActive && !source.muted ? source.level : 0}
         label={`${source.name} level`}

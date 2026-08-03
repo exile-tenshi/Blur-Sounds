@@ -74,6 +74,8 @@ function resolveAudioControl(): AudioControlApi | undefined {
     setRouteMuted: (payload) => ipcRenderer.invoke(audioChannels.setRouteMuted, payload),
     setMicrophoneMuted: (payload) => ipcRenderer.invoke(audioChannels.setMicrophoneMuted, payload),
     setMicrophoneVolume: (payload) => ipcRenderer.invoke(audioChannels.setMicrophoneVolume, payload),
+    setMicrophoneNoiseSuppression: (payload) =>
+      ipcRenderer.invoke(audioChannels.setMicrophoneNoiseSuppression, payload),
     openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
     openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
     applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
@@ -332,6 +334,14 @@ export function useAudioControlState() {
     setSnapshot(await audioControl.setMicrophoneVolume({ slotId, volume }))
   }, [])
 
+  const setMicrophoneNoiseSuppression = useCallback(async (slotId: string, noiseSuppression: boolean) => {
+    const audioControl = resolveAudioControl()
+    if (!audioControl) {
+      return
+    }
+    setSnapshot(await audioControl.setMicrophoneNoiseSuppression({ slotId, noiseSuppression }))
+  }, [])
+
   const refreshSnapshot = useCallback(async () => {
     const audioControl = resolveAudioControl()
     if (!audioControl) {
@@ -394,6 +404,7 @@ export function useAudioControlState() {
     setRouteMuted,
     setMicrophoneMuted,
     setMicrophoneVolume,
+    setMicrophoneNoiseSuppression,
     refreshSnapshot,
     startEngine,
     stopEngine,
