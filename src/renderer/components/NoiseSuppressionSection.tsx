@@ -232,10 +232,20 @@ function MicEditorCard({
               <LevelMeter
                 level={engineActive && !slot.muted ? microphoneLevel : 0}
                 label={`${deviceName || 'Microphone'} level`}
+                idleLabel={
+                  !engineActive
+                    ? 'Start stream'
+                    : slot.muted
+                      ? 'Paused'
+                      : !slot.deviceId
+                        ? 'Pick mic'
+                        : undefined
+                }
               />
               <p className="muted">
-                Each mic has its own suppression settings. Mixer, clips, and this editor all stay
-                active together.
+                {!engineActive
+                  ? 'Levels only move while the stream is running — click Start stream in the header.'
+                  : 'Each mic has its own suppression settings. Mixer, clips, and this editor all stay active together.'}
               </p>
             </div>
             <div className="noise-preset-row">
