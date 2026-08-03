@@ -225,6 +225,54 @@ export function formatHifiCableUnavailableMessage(info: HifiCableInfo): string {
   return formatHifiCableMissingMessage()
 }
 
+export function formatHifiCableRecordingUnavailableMessage(): string {
+  return 'Hi-Fi Cable Output (recording) is missing or disabled. Enable it under Windows Sound → Recording, then Refresh. Other apps listen on Output — without it the mix never leaves the cable.'
+}
+
+/** Warn when Start continues despite incomplete / mismatched cable formats. */
+export function describeHifiFormatStartWarning(result: {
+  playbackConfigured: boolean
+  recordingConfigured: boolean
+  playbackStatus?: HifiCableEndpointStatus
+  recordingStatus?: HifiCableEndpointStatus
+  message?: string
+}): string | undefined {
+  const playbackOk =
+    result.playbackStatus?.atStudioQuality === true || result.playbackConfigured
+  const recordingOk =
+    result.recordingStatus?.atStudioQuality === true || result.recordingConfigured
+
+  if (playbackOk && recordingOk) {
+    const playbackRate = result.playbackStatus?.sampleRate
+    const recordingRate = result.recordingStatus?.sampleRate
+    if (
+      playbackRate &&
+      recordingRate &&
+      playbackRate !== recordingRate
+    ) {
+      return (
+        `Hi-Fi Cable Input is ${playbackRate} Hz but Output is ${recordingRate} Hz. ` +
+        'The cable is bit-perfect — both sides must match or listeners hear silence. ' +
+        'Click Apply clean audio settings (48 kHz · 24-bit) on both endpoints.'
+      )
+    }
+
+    return undefined
+  }
+
+  if (!result.playbackConfigured && !result.recordingConfigured) {
+    return (
+      result.message ||
+      'Hi-Fi Cable format was not applied. Set Input and Output to 48 kHz · 24-bit in Windows Sound, then Start again.'
+    )
+  }
+
+  return (
+    result.message ||
+    'Hi-Fi Cable format was only applied partially. Confirm Input and Output both show 48 kHz · 24-bit.'
+  )
+}
+
 export function getHifiCableSetupSteps(): string[] {
   return [
     `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,

@@ -127,6 +127,9 @@ export interface EngineStatus {
   underrunCount: number
   selectedMicrophoneReady: boolean
   selectedInputReady: boolean
+  /** False when Hi-Fi Cable Output keep-alive capture is not running. */
+  hifiOutputActive?: boolean
+  hifiOutputError?: string
   outputLevel: number
   outputPullLevel?: number
   mixPullLevel?: number

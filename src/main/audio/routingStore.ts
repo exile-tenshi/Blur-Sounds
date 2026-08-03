@@ -38,8 +38,10 @@ import { remapStaleApplicationRoutes } from '../../shared/appRouteRemap.js'
 import { createDefaultEngineStatus, normalizeEngineStatus } from '../../shared/engineStatus.js'
 import {
   detectHifiCableDependency,
+  describeHifiFormatStartWarning,
   findHifiCablePlaybackDevice,
   findHifiCableRecordingDevice,
+  formatHifiCableRecordingUnavailableMessage,
   formatHifiCableUnavailableMessage,
   getHifiCableSelectionDefaults,
   isHifiCablePlaybackDevice,
@@ -679,11 +681,24 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
-    // Prefer studio format, but do not block Start if PolicyConfig fails — the cable may
-    // already be usable and silence is worse than a format warning.
+    if (!hifiCable.recordingReady) {
+      this.setEngineError(formatHifiCableRecordingUnavailableMessage())
+      return this.emitCachedSnapshot()
+    }
+
+    // Prefer clean 48 kHz on both Input and Output. Soft-fail only on hard exceptions —
+    // still surface partial / mismatched format results so Start does not look "healthy"
+    // while the bit-perfect VB-Audio loop is silent.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
+      const formatWarning = describeHifiFormatStartWarning(result)
+      if (formatWarning) {
+        this.engineStatus = {
+          ...this.engineStatus,
+          message: formatWarning,
+        }
+      }
     } catch (error) {
       this.engineStatus = {
         ...this.engineStatus,
