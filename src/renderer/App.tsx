@@ -3,16 +3,11 @@ import './App.css'
 import logoUrl from './assets/logo.svg?url'
 import { normalizeMicrophoneSlots, hasActiveMicrophoneSlot } from '../shared/microphoneSlots'
 import type { AudioSnapshot } from '../shared/audioTypes'
-import {
-  formatHifiCableDisabledMessage,
-  getHifiCableSelectionDefaults,
-  getHifiCableSetupSteps,
-  HIFI_CABLE_DOWNLOAD_URL,
-  HIFI_CABLE_QUALITY,
-} from '../shared/hifiCable'
+import { HIFI_CABLE_QUALITY } from '../shared/hifiCable'
 import { AppLibraryPanel } from './components/AppLibraryPanel'
 import { AudioRoutingPanel } from './components/AudioRoutingPanel'
 import { ClipRecordingPanel } from './components/ClipRecordingPanel'
+import { HifiSetupPanel } from './components/HifiSetupPanel'
 import { InputVolumeList } from './components/InputVolumeList'
 import { NoiseSuppressionSection } from './components/NoiseSuppressionSection'
 import { ClipRecorderProvider, useClipRecorderContext } from './context/ClipRecorderContext'
@@ -148,9 +143,6 @@ const AppShell = memo(function AppShell() {
       onSetVolume: (volume: number) => setMicrophoneVolume(slot.id, volume),
     }))
 
-  const cableDefaults = getHifiCableSelectionDefaults(snapshot.devices)
-  const setupSteps = getHifiCableSetupSteps()
-
   return (
     <div className="app-frame">
       <SidebarNav
@@ -248,15 +240,12 @@ const AppShell = memo(function AppShell() {
               recordingDevices={recordingDevices}
               engine={snapshot.engine}
               engineActive={isEngineActive}
-              hifiCable={snapshot.hifiCable}
-              onApplyStudioSettings={() => void applyHifiCableStudioSettings()}
-              onOpenPlaybackSettings={() => void openHifiCablePlaybackSettings()}
-              onOpenRecordingSettings={() => void openHifiCableRecordingSettings()}
               onSelectMicrophoneSlot={selectMicrophoneSlot}
               onAddMicrophoneSlot={addMicrophoneSlotToSelection}
               onRemoveMicrophoneSlot={removeMicrophoneSlotFromSelection}
               onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
               onSelectRecording={(deviceId) => updateSelection('recordingDeviceId', deviceId)}
+              onOpenSetup={() => void setActiveSection('setup')}
             />
 
             <section className="content-grid two-up">
@@ -303,70 +292,17 @@ const AppShell = memo(function AppShell() {
         </div>
 
         {activeSection === 'setup' ? (
-          <section className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Setup</p>
-                <h2>Hi-Fi Cable</h2>
-                <p className="section-help">
-                  Blur Sounds requires VB-Audio Hi-Fi Cable & ASIO Bridge for the clean mix path.
-                </p>
-              </div>
-            </div>
-
-            {!snapshot.hifiCable.installed ? (
-              <div className="notice dependency-notice">
-                <strong>VB-Audio Hi-Fi Cable required</strong>
-                <p>
-                  Expected devices: Input → <strong>{cableDefaults.inputDeviceName}</strong> ·
-                  Recording → <strong>{cableDefaults.recordingDeviceName}</strong>.
-                </p>
-              </div>
-            ) : null}
-            {snapshot.hifiCable.installed && !snapshot.hifiCable.playbackReady ? (
-              <div className="notice dependency-notice">
-                <strong>Hi-Fi Cable is disabled</strong>
-                <p>{formatHifiCableDisabledMessage()}</p>
-              </div>
-            ) : null}
-
-            <div className="button-row hifi-settings-buttons">
-              <a
-                className="secondary-button dependency-download"
-                href={HIFI_CABLE_DOWNLOAD_URL}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Download Hi-Fi Cable & ASIO Bridge
-              </a>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void applyHifiCableStudioSettings()}
-              >
-                Apply clean audio settings
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void openHifiCablePlaybackSettings()}
-              >
-                Open Playback settings
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void openHifiCableRecordingSettings()}
-              >
-                Open Recording settings
-              </button>
-            </div>
-            <ol className="hifi-setup-steps-compact">
-              {setupSteps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-          </section>
+          <HifiSetupPanel
+            selection={snapshot.selection}
+            playbackDevices={playbackDevices}
+            recordingDevices={recordingDevices}
+            hifiCable={snapshot.hifiCable}
+            onApplyStudioSettings={() => void applyHifiCableStudioSettings()}
+            onOpenPlaybackSettings={() => void openHifiCablePlaybackSettings()}
+            onOpenRecordingSettings={() => void openHifiCableRecordingSettings()}
+            onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
+            onSelectRecording={(deviceId) => updateSelection('recordingDeviceId', deviceId)}
+          />
         ) : null}
       </main>
     </div>
