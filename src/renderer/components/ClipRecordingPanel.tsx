@@ -1,5 +1,5 @@
 import type { ClipLookbackSeconds } from '../../shared/appSettings'
-import { useClipRecorder } from '../hooks/useClipRecorder'
+import { useClipRecorderContext } from '../context/ClipRecorderContext'
 
 export function ClipRecordingPanel() {
   const {
@@ -25,7 +25,7 @@ export function ClipRecordingPanel() {
     refreshSources,
     clipIt,
     openOutputFolder,
-  } = useClipRecorder()
+  } = useClipRecorderContext()
 
   const desktopSources = sources.filter((source) => source.kind === 'screen')
   const windowSources = sources.filter((source) => source.kind === 'window')

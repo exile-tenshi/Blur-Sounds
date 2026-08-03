@@ -14,6 +14,7 @@ import { AudioRoutingPanel } from './components/AudioRoutingPanel'
 import { ClipRecordingPanel } from './components/ClipRecordingPanel'
 import { InputVolumeList } from './components/InputVolumeList'
 import { NoiseSuppressionSection } from './components/NoiseSuppressionSection'
+import { ClipRecorderProvider, useClipRecorderContext } from './context/ClipRecorderContext'
 import { useAppSettings } from './hooks/useAppSettings'
 import { useAudioControlState } from './hooks/useAudioControlState'
 import { SidebarNav } from './layout/SidebarNav'
@@ -34,7 +35,57 @@ function getEngineStatusLabel(engine: AudioSnapshot['engine']): string {
   return engine.state
 }
 
-function App() {
+function FeatureStatusStrip({
+  isEngineActive,
+  nsEnabledCount,
+}: {
+  isEngineActive: boolean
+  nsEnabledCount: number
+}) {
+  const { status, clipIt, bufferingEnabled } = useClipRecorderContext()
+  const clipping = status.bufferState === 'clipping'
+
+  return (
+    <div className="feature-status-strip panel">
+      <div className="feature-status-item">
+        <span className={`status-dot${isEngineActive ? '' : ' idle'}`} />
+        <span>{isEngineActive ? 'Stream live' : 'Stream idle'}</span>
+      </div>
+      <div className="feature-status-item">
+        <span className={`status-dot${nsEnabledCount > 0 ? '' : ' idle'}`} />
+        <span>
+          {nsEnabledCount > 0
+            ? `Noise on · ${nsEnabledCount} mic${nsEnabledCount === 1 ? '' : 's'}`
+            : 'Noise idle'}
+        </span>
+      </div>
+      <div className="feature-status-item">
+        <span
+          className={`status-dot${status.buffering || clipping ? '' : ' idle'}${clipping ? ' hot' : ''}`}
+        />
+        <span>
+          {clipping
+            ? 'Clipping…'
+            : status.buffering
+              ? `Clip buffer · ${Math.round(status.bufferedSeconds)}s`
+              : bufferingEnabled
+                ? 'Clip buffer arming'
+                : 'Clip buffer off'}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="primary-button clip-it-button compact"
+        disabled={!status.buffering || clipping}
+        onClick={() => void clipIt()}
+      >
+        {clipping ? 'Clipping…' : 'Clip it'}
+      </button>
+    </div>
+  )
+}
+
+function AppShell() {
   const { activeSection, setActiveSection } = useAppSettings()
   const {
     snapshot,
@@ -45,6 +96,7 @@ function App() {
     playbackDevices,
     updateSelection,
     selectMicrophoneSlot,
+    ensureMicrophoneDevice,
     addMicrophoneSlotToSelection,
     removeMicrophoneSlotFromSelection,
     openHifiCablePlaybackSettings,
@@ -74,6 +126,10 @@ function App() {
   const hasMixSources =
     hasActiveMicrophoneSlot(microphoneSlots) ||
     snapshot.routedInputs.some((route) => route.target === 'hifi-cable')
+
+  const nsEnabledCount = microphoneSlots.filter(
+    (slot) => slot.deviceId && (slot.noiseSuppressionSettings?.enabled ?? slot.noiseSuppression),
+  ).length
 
   const microphoneSources = microphoneSlots
     .filter((slot) => slot.deviceId)
@@ -113,8 +169,8 @@ function App() {
               </div>
             </div>
             <p className="hero-copy">
-              Mix mic + apps, shape noise suppression, and clip desktop or games from a rolling
-              background buffer at {HIFI_CABLE_QUALITY.label}.
+              Mixer, noise suppression, and clips all stay active together — switch sections to edit
+              them. Clean path: {HIFI_CABLE_QUALITY.label}.
             </p>
           </div>
 
@@ -159,6 +215,8 @@ function App() {
           </div>
         </header>
 
+        <FeatureStatusStrip isEngineActive={isEngineActive} nsEnabledCount={nsEnabledCount} />
+
         {error ? <p className="notice error">{error}</p> : null}
         {isInitialLoading ? (
           <section className="loading-shell panel">
@@ -173,9 +231,10 @@ function App() {
             {snapshot.engine.message}
           </p>
         ) : null}
-        {!isInitialLoading && hasMixSources && !isEngineActive && activeSection === 'mixer' ? (
+        {!isInitialLoading && hasMixSources && !isEngineActive ? (
           <p className="notice">
             Stream is stopped. Click <strong>Start stream</strong> to send audio to Hi-Fi Cable Input.
+            Noise and clip buffer can still be configured now.
           </p>
         ) : null}
 
@@ -229,11 +288,18 @@ function App() {
             microphoneDevices={microphoneDevices}
             microphoneLevel={snapshot.engine.microphoneLevel}
             engineActive={isEngineActive}
+            onEnsureDevice={ensureMicrophoneDevice}
             onChange={(slotId, settings) => setMicrophoneNoiseSuppression(slotId, settings)}
+            onSelectDeviceForSlot={selectMicrophoneSlot}
+            onAddSlot={addMicrophoneSlotToSelection}
+            onRemoveSlot={removeMicrophoneSlotFromSelection}
           />
         ) : null}
 
-        {activeSection === 'clips' ? <ClipRecordingPanel /> : null}
+        {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}
+        <div className={activeSection === 'clips' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'clips'}>
+          <ClipRecordingPanel />
+        </div>
 
         {activeSection === 'setup' ? (
           <section className="panel">
@@ -303,6 +369,14 @@ function App() {
         ) : null}
       </main>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <ClipRecorderProvider>
+      <AppShell />
+    </ClipRecorderProvider>
   )
 }
 
