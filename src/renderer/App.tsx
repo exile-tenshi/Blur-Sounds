@@ -28,6 +28,10 @@ function getEngineStatusLabel(engine: AudioSnapshot['engine']): string {
     return 'idle — click Start stream'
   }
 
+  if (engine.state === 'running' && engine.hifiOutputActive === false) {
+    return 'running — Output silent'
+  }
+
   return engine.state
 }
 
@@ -192,11 +196,17 @@ const AppShell = memo(function AppShell() {
                 type="button"
                 className="primary-button"
                 onClick={() => void startEngine()}
-                disabled={isEngineBusy || !snapshot.hifiCable.playbackReady}
+                disabled={
+                  isEngineBusy ||
+                  !snapshot.hifiCable.playbackReady ||
+                  !snapshot.hifiCable.recordingReady
+                }
                 title={
                   !snapshot.hifiCable.playbackReady
                     ? 'Install or enable Hi-Fi Cable Input in Setup first'
-                    : 'Start the mix — meters and noise cleanup only move while streaming'
+                    : !snapshot.hifiCable.recordingReady
+                      ? 'Enable Hi-Fi Cable Output under Windows Sound → Recording'
+                      : 'Start the mix — meters and noise cleanup only move while streaming'
                 }
               >
                 {isEngineBusy ? 'Starting...' : 'Start stream'}
