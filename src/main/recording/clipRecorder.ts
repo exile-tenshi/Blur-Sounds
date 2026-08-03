@@ -67,7 +67,8 @@ async function getSourcesWithTimeout(
       desktopCapturer.getSources(options),
       new Promise<Electron.DesktopCapturerSource[]>((_, reject) => {
         timer = setTimeout(() => {
-          reject(new Error('Timed out while listing capture sources.'))
+          // Only used when starting the buffer — never from clip:listSources.
+          reject(new Error('Timed out while starting desktop capture.'))
         }, timeoutMs)
       }),
     ])
