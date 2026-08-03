@@ -36,29 +36,7 @@ export function registerClipIpc(
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     try {
       const preferredId = settings.get().clip.sourceId
-      const { desktopCapturer } = await import('electron')
-      const preferWindow = Boolean(preferredId?.startsWith('window:'))
-      const primaryTypes: Array<'screen' | 'window'> = preferWindow ? ['window'] : ['screen']
-
-      // Avoid enumerating every window when capturing a screen — that freezes Clips.
-      let capturerSources = await desktopCapturer.getSources({
-        types: primaryTypes,
-        thumbnailSize: { width: 0, height: 0 },
-        fetchWindowIcons: false,
-      })
-      let match = preferredId
-        ? capturerSources.find((source) => source.id === preferredId)
-        : capturerSources.find((source) => source.id.startsWith('screen:')) ?? capturerSources[0]
-
-      if (!match && preferredId) {
-        const fallbackTypes: Array<'screen' | 'window'> = preferWindow ? ['screen'] : ['window']
-        capturerSources = await desktopCapturer.getSources({
-          types: fallbackTypes,
-          thumbnailSize: { width: 0, height: 0 },
-          fetchWindowIcons: false,
-        })
-        match = capturerSources.find((source) => source.id === preferredId)
-      }
+      const match = await recorder.resolveCaptureSource(preferredId)
 
       if (!match) {
         callback({})
@@ -70,6 +48,7 @@ export function registerClipIpc(
         audio: 'loopback',
       })
     } catch {
+      // Timeout / capturer hang — fail the getDisplayMedia request instead of freezing forever.
       callback({})
     }
   })

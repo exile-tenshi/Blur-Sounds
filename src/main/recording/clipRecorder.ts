@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, desktopCapturer, shell } from 'electron'
+import { app, desktopCapturer, screen, shell } from 'electron'
 import {
   forwardRollSeconds,
   type ClipLookbackSeconds,
@@ -15,8 +15,7 @@ import type {
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
-const MAX_WINDOW_SOURCES = 30
-const CAPTURER_TIMEOUT_MS = 2500
+const CAPTURER_TIMEOUT_MS = 3000
 
 function sanitizeFilePart(value: string): string {
   return (
@@ -47,24 +46,15 @@ function extensionForMime(mimeType: string): string {
   return 'mp4'
 }
 
-function mapSources(
-  sources: Electron.DesktopCapturerSource[],
-  kindFilter?: ClipSource['kind'],
-): ClipSource[] {
-  return sources
-    .filter((source) => source.name.trim().length > 0)
-    .map((source) => {
-      const isScreen = source.id.startsWith('screen:')
-      return {
-        id: source.id,
-        name: source.name,
-        kind: isScreen ? ('screen' as const) : ('window' as const),
-        displayId: source.display_id || undefined,
-      } satisfies ClipSource
-    })
-    .filter((source) => (kindFilter ? source.kind === kindFilter : true))
-    .filter((source) => !/blur sounds/i.test(source.name))
-    .sort((left, right) => left.name.localeCompare(right.name))
+export function toDisplaySourceId(displayId: number): string {
+  return `display:${displayId}`
+}
+
+export function parseDisplaySourceId(sourceId: string | undefined): string | undefined {
+  if (!sourceId?.startsWith('display:')) {
+    return undefined
+  }
+  return sourceId.slice('display:'.length)
 }
 
 async function getSourcesWithTimeout(
@@ -98,7 +88,6 @@ export class ClipRecorderService {
   private bufferedSeconds = 0
   private lastClipPath?: string
   private error?: string
-  private listSourcesInFlight = new Map<string, Promise<ClipSource[]>>()
 
   constructor(private readonly settings: SettingsStore) {}
 
@@ -134,43 +123,68 @@ export class ClipRecorderService {
   }
 
   /**
-   * Names-only source list. Default is screens only — window enumeration freezes
-   * many Windows desktops inside desktopCapturer.getSources.
+   * Instant desktop list via Electron's screen API — never calls desktopCapturer.
+   * Window listing is intentionally unsupported in the picker (freezes many PCs).
    */
   async listSources(options?: { includeWindows?: boolean }): Promise<ClipSource[]> {
-    const includeWindows = options?.includeWindows === true
-    const cacheKey = includeWindows ? 'windows' : 'screens'
-    const existing = this.listSourcesInFlight.get(cacheKey)
-    if (existing) {
-      return existing
+    if (options?.includeWindows) {
+      throw new Error(
+        'Game/window scanning is disabled because it freezes this PC. Use a Desktop source.',
+      )
     }
 
-    const pending = this.listSourcesInternal(includeWindows).finally(() => {
-      this.listSourcesInFlight.delete(cacheKey)
-    })
-    this.listSourcesInFlight.set(cacheKey, pending)
-    return pending
+    const displays = screen.getAllDisplays()
+    const primaryId = screen.getPrimaryDisplay().id
+
+    return displays
+      .slice()
+      .sort((left, right) => {
+        if (left.id === primaryId) {
+          return -1
+        }
+        if (right.id === primaryId) {
+          return 1
+        }
+        return left.bounds.x - right.bounds.x
+      })
+      .map((display, index) => {
+        const isPrimary = display.id === primaryId
+        return {
+          id: toDisplaySourceId(display.id),
+          name: isPrimary ? `Screen ${index + 1} (Primary)` : `Screen ${index + 1}`,
+          kind: 'screen' as const,
+          displayId: String(display.id),
+        } satisfies ClipSource
+      })
   }
 
-  private async listSourcesInternal(includeWindows: boolean): Promise<ClipSource[]> {
-    if (!includeWindows) {
-      const screenSources = await getSourcesWithTimeout({
-        types: ['screen'],
-        thumbnailSize: { width: 0, height: 0 },
-        fetchWindowIcons: false,
-      })
-      return mapSources(screenSources, 'screen')
+  /**
+   * Resolve a real DesktopCapturerSource for getDisplayMedia.
+   * Only called when the user starts the buffer — not when opening Clips.
+   */
+  async resolveCaptureSource(
+    preferredSourceId?: string,
+  ): Promise<Electron.DesktopCapturerSource | undefined> {
+    const displayId = parseDisplaySourceId(preferredSourceId)
+    // 1x1 thumbs — some Electron builds hang on 0x0.
+    const sources = await getSourcesWithTimeout({
+      types: ['screen'],
+      thumbnailSize: { width: 1, height: 1 },
+      fetchWindowIcons: false,
+    })
+
+    if (sources.length === 0) {
+      return undefined
     }
 
-    const windowSources = await getSourcesWithTimeout(
-      {
-        types: ['window'],
-        thumbnailSize: { width: 0, height: 0 },
-        fetchWindowIcons: false,
-      },
-      2000,
-    )
-    return mapSources(windowSources, 'window').slice(0, MAX_WINDOW_SOURCES)
+    if (displayId) {
+      const match = sources.find((source) => String(source.display_id) === displayId)
+      if (match) {
+        return match
+      }
+    }
+
+    return sources.find((source) => source.id.startsWith('screen:')) ?? sources[0]
   }
 
   setRecordingState(payload: {

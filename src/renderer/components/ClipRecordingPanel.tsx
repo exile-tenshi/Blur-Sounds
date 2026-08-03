@@ -24,17 +24,14 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
     isBusy,
     lastSavedPath,
     refreshSources,
-    loadWindowSources,
     clipIt,
     openOutputFolder,
   } = useClipRecorderContext()
 
   const desktopSources = sources.filter((source) => source.kind === 'screen')
-  const windowSources = sources.filter((source) => source.kind === 'window')
   const selectedSource = sources.find((source) => source.id === selectedSourceId)
   const clipping = status.bufferState === 'clipping'
 
-  // Screens only when Clips opens — never auto-scan windows or thumbnails.
   useEffect(() => {
     if (!isActive) {
       return
@@ -66,16 +63,9 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
       <div className="clip-layout">
         <div className="clip-preview">
           <div className="clip-preview-empty">
-            <p>
-              {selectedSource
-                ? selectedSource.kind === 'screen'
-                  ? `Desktop · ${selectedSource.name}`
-                  : `Window · ${selectedSource.name}`
-                : 'Pick a desktop source to buffer.'}
-            </p>
+            <p>{selectedSource ? `Desktop · ${selectedSource.name}` : 'Pick a desktop source.'}</p>
             <p className="muted">
-              Previews are disabled so Clips stays responsive. Capture still works when the buffer
-              is on.
+              Desktop list is instant. Capture starts only when you turn the buffer on.
             </p>
           </div>
         </div>
@@ -90,10 +80,9 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             disabled={isBusy || clipping}
             onChange={(event) => void selectSource(event.target.value)}
           >
-            {desktopSources.length === 0 && windowSources.length === 0 ? (
-              <option value="">{isBusy ? 'Loading screens…' : 'No capture sources found'}</option>
-            ) : null}
-            {desktopSources.length > 0 ? (
+            {desktopSources.length === 0 ? (
+              <option value="">No displays found</option>
+            ) : (
               <optgroup label="Desktop">
                 {desktopSources.map((source) => (
                   <option key={source.id} value={source.id}>
@@ -101,20 +90,10 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
                   </option>
                 ))}
               </optgroup>
-            ) : null}
-            {windowSources.length > 0 ? (
-              <optgroup label="Games & windows">
-                {windowSources.map((source) => (
-                  <option key={source.id} value={source.id}>
-                    [Game / window] {source.name}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
+            )}
           </select>
           <p className="muted">
-            Desktop sources load instantly. Game/window scanning is optional because it can freeze
-            Windows for several seconds.
+            Game/window capture is disabled on this build — desktop capture avoids the Windows freeze.
           </p>
 
           <div className="clip-duration-block">
@@ -168,15 +147,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               disabled={isBusy || clipping}
               onClick={() => void refreshSources()}
             >
-              {isBusy ? 'Working…' : 'Refresh desktops'}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={isBusy || clipping}
-              onClick={() => void loadWindowSources()}
-            >
-              Load game windows
+              Refresh desktops
             </button>
             <button
               type="button"
