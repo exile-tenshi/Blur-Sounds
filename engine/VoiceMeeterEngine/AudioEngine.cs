@@ -197,6 +197,14 @@ internal sealed class AudioEngine : IDisposable
         previous?.Stop();
         previous?.Dispose();
         nextBroadcast.Play();
+
+        // Format rebind can invalidate the VB-Audio Output keep-alive client.
+        if (UsesHifiCableInput())
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+        }
+
         foreach (var source in microphoneSources.Values)
         {
             source.Start();
@@ -319,6 +327,8 @@ internal sealed class AudioEngine : IDisposable
             SelectedInputReady = outputBroadcast is not null &&
                 !string.IsNullOrWhiteSpace(selection.InputDeviceId) &&
                 string.Equals(boundInputSelectionId, selection.InputDeviceId, StringComparison.Ordinal),
+            HifiOutputActive = !UsesHifiCableInput() || hifiOutputActivator?.IsActive == true,
+            HifiOutputError = UsesHifiCableInput() ? hifiOutputActivator?.LastError : null,
             OutputLevel = ComputeMixedOutputLevel(),
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
@@ -1136,11 +1146,22 @@ internal sealed class AudioEngine : IDisposable
         if (UsesHifiCableInput())
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
-            hifiOutputActivator.Start();
-            if (hifiOutputActivator.IsActive != true)
+            try
+            {
+                hifiOutputActivator.Start();
+            }
+            catch (Exception ex)
             {
                 hifiOutputWarning =
-                    " Hi-Fi Cable Output could not be opened — other apps may hear silence until Recording → Hi-Fi Cable Output is enabled.";
+                    $" Hi-Fi Cable Output keep-alive failed ({ex.Message}) — listeners on Hi-Fi Cable Output will hear silence.";
+            }
+
+            if (hifiOutputActivator.IsActive != true)
+            {
+                var detail = hifiOutputActivator.LastError;
+                hifiOutputWarning = string.IsNullOrWhiteSpace(detail)
+                    ? " Hi-Fi Cable Output could not be opened — other apps will hear silence until Recording → Hi-Fi Cable Output is Enabled and matching Input format (48 kHz · 24-bit)."
+                    : $" {detail}";
             }
         }
 
@@ -1168,19 +1189,32 @@ internal sealed class AudioEngine : IDisposable
 
         lock (gate)
         {
+            // Always start WASAPI render after sources are primed — Bind alone does not Play.
             outputBroadcast?.Play();
         }
 
         lock (gate)
         {
-            state = "running";
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
-            var hifiSuffix = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true
+            var hifiActive = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true;
+            var hifiSuffix = hifiActive
                 ? " Hi-Fi Cable Output is active."
                 : hifiOutputWarning;
+
+            // Still mark running so Input playback continues, but surface Output failure loudly.
+            state = "running";
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to input.{routeSuffix}{hifiSuffix}"
                 : $"Streaming mix to input.{routeSuffix}{hifiSuffix}";
+
+            if (UsesHifiCableInput() && !hifiActive)
+            {
+                // Keep state running (Input may still be useful) but prefer the Output error text.
+                message = string.IsNullOrWhiteSpace(hifiOutputActivator?.LastError)
+                    ? message
+                    : hifiOutputActivator!.LastError +
+                      " Mix is playing to Hi-Fi Cable Input, but Output listeners will hear silence.";
+            }
         }
     }
 
