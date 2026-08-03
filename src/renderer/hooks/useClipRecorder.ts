@@ -14,9 +14,16 @@ interface TimedChunk {
   at: number
 }
 
+/** Stable across renders — recreating this object was re-firing Clips refresh in a loop. */
+let cachedClipControl: ClipControlApi | undefined
+
 function resolveClipControl(): ClipControlApi | undefined {
   if (window.clipControl) {
     return window.clipControl
+  }
+
+  if (cachedClipControl) {
+    return cachedClipControl
   }
 
   if (!window.require) {
@@ -25,7 +32,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 
   const { ipcRenderer } = window.require('electron') as typeof import('electron')
 
-  return {
+  cachedClipControl = {
     listSources: (options) => ipcRenderer.invoke(clipChannels.listSources, options),
     getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
     ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
@@ -45,7 +52,11 @@ function resolveClipControl(): ClipControlApi | undefined {
       }
     },
   }
+  return cachedClipControl
 }
+
+/** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
+export const CLIPS_PICKER_BUILD = 4
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -133,6 +144,9 @@ export function useClipRecorder() {
   const clipItRef = useRef<() => Promise<void>>(async () => {})
   const lastUiStatusAtRef = useRef(0)
   const startingRef = useRef(false)
+  const refreshInFlightRef = useRef(false)
+  const clipControlRef = useRef(clipControl)
+  clipControlRef.current = clipControl
 
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -208,38 +222,44 @@ export function useClipRecorder() {
 
   /** Instant display list — never touches desktopCapturer (that was hanging Clips open). */
   const refreshSources = useCallback(async () => {
-    if (!clipControl) {
+    const control = clipControlRef.current
+    if (!control) {
       setError('Clip bridge did not load. Relaunch the Electron app.')
       return
     }
+    if (refreshInFlightRef.current) {
+      return
+    }
 
+    refreshInFlightRef.current = true
     try {
-      const clipSettings = await clipControl.getSettings()
+      const clipSettings = await control.getSettings()
       setLookbackSecondsState(clipSettings.lookbackSeconds)
       lookbackRef.current = clipSettings.lookbackSeconds
       setKeybinds(clipSettings.keybinds)
       setBufferingEnabledState(clipSettings.bufferingEnabled)
 
-      const screens = await clipControl.listSources({ includeWindows: false })
+      const screens = await control.listSources({ includeWindows: false })
       setSources(screens)
 
       // Migrate old capturer ids (screen:/window:) to display:* ids.
-      const preferred =
-        clipSettings.sourceId?.startsWith('display:')
-          ? clipSettings.sourceId
-          : screens[0]?.id
+      const preferred = clipSettings.sourceId?.startsWith('display:')
+        ? clipSettings.sourceId
+        : screens[0]?.id
       applySourceSelection(screens, preferred)
       if (preferred && preferred !== clipSettings.sourceId) {
-        await clipControl.setSettings({ sourceId: preferred })
+        await control.setSettings({ sourceId: preferred })
       }
 
-      const nextStatus = await clipControl.getStatus()
+      const nextStatus = await control.getStatus()
       setStatus(nextStatus)
       setError(undefined)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to list clip sources.')
+    } finally {
+      refreshInFlightRef.current = false
     }
-  }, [applySourceSelection, clipControl])
+  }, [applySourceSelection])
 
   const stopBuffering = useCallback(async () => {
     if (forwardTimerRef.current) {

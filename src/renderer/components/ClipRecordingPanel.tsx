@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { ClipLookbackSeconds } from '../../shared/appSettings'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
+import { CLIPS_PICKER_BUILD } from '../hooks/useClipRecorder'
 
 export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean }) {
   const {
@@ -31,13 +32,16 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
   const desktopSources = sources.filter((source) => source.kind === 'screen')
   const selectedSource = sources.find((source) => source.id === selectedSourceId)
   const clipping = status.bufferState === 'clipping'
+  const refreshSourcesRef = useRef(refreshSources)
+  refreshSourcesRef.current = refreshSources
 
+  // Only when Clips becomes active — never re-run on callback identity changes.
   useEffect(() => {
     if (!isActive) {
       return
     }
-    void refreshSources()
-  }, [isActive, refreshSources])
+    void refreshSourcesRef.current()
+  }, [isActive])
 
   return (
     <section className="panel clip-panel">
@@ -193,6 +197,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
           <p className="muted clip-folder">
             Save folder: {status.outputFolder || 'Desktop/Blur Sounds Clips'}
           </p>
+          <p className="muted">Clips picker build {CLIPS_PICKER_BUILD}</p>
           {lastSavedPath ? <p className="notice success">Saved clip: {lastSavedPath}</p> : null}
           {error ? <p className="notice error">{error}</p> : null}
           {status.error ? <p className="notice error">{status.error}</p> : null}
