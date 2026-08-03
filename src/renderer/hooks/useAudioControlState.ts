@@ -211,6 +211,43 @@ export function useAudioControlState() {
     )
   }, [snapshot.selection])
 
+  const ensureMicrophoneDevice = useCallback(
+    async (deviceId: string): Promise<string | undefined> => {
+      const audioControl = resolveAudioControl()
+      if (!audioControl || !deviceId) {
+        return undefined
+      }
+
+      const slots = normalizeMicrophoneSlots(snapshot.selection)
+      const existing = slots.find((slot) => slot.deviceId === deviceId)
+      if (existing) {
+        return existing.id
+      }
+
+      const emptySlot = slots.find((slot) => !slot.deviceId)
+      if (emptySlot) {
+        const next = await audioControl.setDeviceSelection({
+          microphones: updateMicrophoneSlot(slots, emptySlot.id, { deviceId }),
+        })
+        setSnapshot(next)
+        return emptySlot.id
+      }
+
+      const withNewSlot = addMicrophoneSlot(slots)
+      const newSlot = withNewSlot[withNewSlot.length - 1]
+      if (!newSlot) {
+        return undefined
+      }
+
+      const next = await audioControl.setDeviceSelection({
+        microphones: updateMicrophoneSlot(withNewSlot, newSlot.id, { deviceId }),
+      })
+      setSnapshot(next)
+      return newSlot.id
+    },
+    [snapshot.selection],
+  )
+
   const addMicrophoneSlotToSelection = useCallback(async () => {
     const audioControl = resolveAudioControl()
     if (!audioControl) {
@@ -414,6 +451,7 @@ export function useAudioControlState() {
     playbackDevices,
     updateSelection,
     selectMicrophoneSlot,
+    ensureMicrophoneDevice,
     addMicrophoneSlotToSelection,
     removeMicrophoneSlotFromSelection,
     openHifiCablePlaybackSettings,
