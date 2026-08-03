@@ -135,8 +135,9 @@ export class NativeEngineBridge {
   async updateMix(selection: DeviceSelection, routes: RoutedInput[]): Promise<void> {
     return this.enqueueEngineOperation(async () => {
       await this.ensureHelper()
+      // Volume/EQ/NS updates are fire-and-forget — waiting 80ms per change freezes the UI
+      // when sliders or rapid toggles queue many commands.
       this.sendCommand('updateVolumes', toEngineVolumePayload(selection, routes))
-      await this.waitForCommandRoundTrip()
     })
   }
 

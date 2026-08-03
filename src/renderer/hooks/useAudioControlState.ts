@@ -149,9 +149,9 @@ export function useAudioControlState() {
 
     const unsubscribe = audioControl
       ? audioControl.subscribeSnapshot((nextSnapshot) => {
-          // Throttle high-frequency meter updates so React isn't painting ~15 times/sec.
+          // Match main-process telemetry (~500ms) so React isn't thrashing the UI.
           const now = Date.now()
-          if (now - lastTelemetryUiAtRef.current >= 200) {
+          if (now - lastTelemetryUiAtRef.current >= 500) {
             lastTelemetryUiAtRef.current = now
             setSnapshot(nextSnapshot)
             return
@@ -159,7 +159,7 @@ export function useAudioControlState() {
 
           pendingTelemetryRef.current = nextSnapshot
           if (!telemetryTimerRef.current) {
-            telemetryTimerRef.current = setTimeout(flushTelemetry, 200)
+            telemetryTimerRef.current = setTimeout(flushTelemetry, 500)
           }
         })
       : () => {}

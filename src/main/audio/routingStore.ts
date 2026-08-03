@@ -195,10 +195,12 @@ export class RoutingStore {
   private telemetryByAppId = new Map<string, EngineRouteTelemetry>()
   private telemetryEmitTimer?: ReturnType<typeof setTimeout>
   private lastTelemetryEmitAt = 0
-  private readonly telemetryEmitIntervalMs = 200
+  private readonly telemetryEmitIntervalMs = 500
   private lastRouteRemapAt = 0
   private readonly routeRemapIntervalMs = 2000
   private hifiCableFormatStatus?: HifiCableFormatResult
+  private pendingMixSync = false
+  private mixSyncInFlight?: Promise<void>
 
   constructor() {
     this.engine.subscribe((status, routeTelemetry) => {
@@ -207,6 +209,41 @@ export class RoutingStore {
       this.applyTelemetryToRoutes()
       this.maybeRemapApplicationRoutes()
       this.scheduleTelemetryEmit()
+    })
+  }
+
+  /** Coalesce rapid volume/EQ/NS updates so the UI never waits on a backlog of engine IPC. */
+  private scheduleMixSync(): void {
+    if (!this.canSyncMixLevels()) {
+      return
+    }
+
+    this.pendingMixSync = true
+    if (this.mixSyncInFlight) {
+      return
+    }
+
+    this.mixSyncInFlight = (async () => {
+      while (this.pendingMixSync) {
+        this.pendingMixSync = false
+        if (!this.canSyncMixLevels()) {
+          break
+        }
+
+        try {
+          await this.engine.updateMix(this.selection, this.getSortedRoutes())
+        } catch (error) {
+          this.setEngineError(
+            error instanceof Error ? error.message : 'Unable to update mix levels.',
+          )
+          break
+        }
+      }
+    })().finally(() => {
+      this.mixSyncInFlight = undefined
+      if (this.pendingMixSync) {
+        this.scheduleMixSync()
+      }
     })
   }
 
@@ -455,10 +492,7 @@ export class RoutingStore {
       microphones: updateMicrophoneSlot(slots, slotId, { muted: payload.muted }),
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -475,10 +509,7 @@ export class RoutingStore {
       microphones: updateMicrophoneSlot(slots, slotId, { volume: clampVolume(payload.volume) }),
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -512,10 +543,7 @@ export class RoutingStore {
       }),
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -572,10 +600,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -587,10 +612,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -602,10 +624,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 

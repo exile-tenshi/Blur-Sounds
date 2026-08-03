@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_NOISE_SUPPRESSION,
   normalizeNoiseSuppression,
@@ -39,12 +39,28 @@ function SliderField({
   disabled?: boolean
   onChange: (value: number) => void
 }) {
+  const [localValue, setLocalValue] = useState(value)
+  const localValueRef = useRef(value)
+  const isDraggingRef = useRef(false)
+
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      setLocalValue(value)
+      localValueRef.current = value
+    }
+  }, [value])
+
+  const commitValue = (nextValue: number) => {
+    localValueRef.current = nextValue
+    onChange(nextValue)
+  }
+
   return (
     <label className={`ns-slider${disabled ? ' disabled' : ''}`}>
       <span>
         {label}
         <strong>
-          {value}
+          {localValue}
           {suffix ?? ''}
         </strong>
       </span>
@@ -53,9 +69,34 @@ function SliderField({
         min={min}
         max={max}
         step={step}
-        value={value}
+        value={localValue}
         disabled={disabled}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onPointerDown={() => {
+          isDraggingRef.current = true
+        }}
+        onPointerUp={() => {
+          isDraggingRef.current = false
+          commitValue(localValueRef.current)
+        }}
+        onPointerCancel={() => {
+          isDraggingRef.current = false
+          commitValue(localValueRef.current)
+        }}
+        onChange={(event) => {
+          const nextValue = Number(event.target.value)
+          localValueRef.current = nextValue
+          setLocalValue(nextValue)
+        }}
+        onKeyUp={(event) => {
+          if (
+            event.key === 'ArrowLeft' ||
+            event.key === 'ArrowRight' ||
+            event.key === 'Home' ||
+            event.key === 'End'
+          ) {
+            commitValue(localValueRef.current)
+          }
+        }}
       />
     </label>
   )

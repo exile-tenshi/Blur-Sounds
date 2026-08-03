@@ -26,7 +26,7 @@ function resolveClipControl(): ClipControlApi | undefined {
   const { ipcRenderer } = window.require('electron') as typeof import('electron')
 
   return {
-    listSources: () => ipcRenderer.invoke(clipChannels.listSources),
+    listSources: (options) => ipcRenderer.invoke(clipChannels.listSources, options),
     getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
     ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
     saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
@@ -203,7 +203,7 @@ export function useClipRecorder() {
     [clipControl],
   )
 
-  const refreshSources = useCallback(async () => {
+  const refreshSources = useCallback(async (options?: { includeThumbnails?: boolean }) => {
     if (!clipControl) {
       setError('Clip bridge did not load. Relaunch the Electron app.')
       return
@@ -211,7 +211,7 @@ export function useClipRecorder() {
 
     try {
       const [nextSources, clipSettings] = await Promise.all([
-        clipControl.listSources(),
+        clipControl.listSources({ includeThumbnails: options?.includeThumbnails === true }),
         clipControl.getSettings(),
       ])
       setSources(nextSources)
@@ -272,10 +272,9 @@ export function useClipRecorder() {
         return
       }
 
+      // Source list may be empty until Clips opens — capture only needs the saved source id.
       const source = sources.find((item) => item.id === sourceId)
-      if (!source) {
-        return
-      }
+      const sourceName = source?.name ?? status.sourceName ?? 'Desktop'
 
       const mimeType = pickRecorderMimeType()
       if (!mimeType) {
@@ -290,7 +289,7 @@ export function useClipRecorder() {
       try {
         await clipControl.ensureOutputFolder()
         await clipControl.setSettings({ sourceId })
-        const stream = await captureDesktopStream(source.id)
+        const stream = await captureDesktopStream(sourceId)
         streamRef.current = stream
         chunksRef.current = []
 
@@ -311,8 +310,8 @@ export function useClipRecorder() {
             {
               buffering: true,
               bufferState: clippingRef.current ? 'clipping' : 'buffering',
-              sourceId: source.id,
-              sourceName: source.name,
+              sourceId,
+              sourceName,
               bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
             },
             { skipIpc: !clippingRef.current },
@@ -329,8 +328,8 @@ export function useClipRecorder() {
           {
             buffering: true,
             bufferState: 'buffering',
-            sourceId: source.id,
-            sourceName: source.name,
+            sourceId,
+            sourceName,
             bufferedSeconds: 0,
           },
           { forceUi: true },
@@ -360,6 +359,7 @@ export function useClipRecorder() {
       clipControl,
       selectedSourceId,
       sources,
+      status.sourceName,
       stopBuffering,
       stopTracks,
       syncStatus,
@@ -509,10 +509,27 @@ export function useClipRecorder() {
   )
 
   useEffect(() => {
-    void refreshSources()
-    void clipControl?.ensureOutputFolder().then((folder) => {
-      setStatus((current) => ({ ...current, outputFolder: folder }))
-    })
+    // Lightweight boot: settings/status only. Window thumbnails are loaded when Clips opens.
+    void (async () => {
+      if (!clipControl) {
+        return
+      }
+      try {
+        const [clipSettings, nextStatus, folder] = await Promise.all([
+          clipControl.getSettings(),
+          clipControl.getStatus(),
+          clipControl.ensureOutputFolder(),
+        ])
+        setLookbackSecondsState(clipSettings.lookbackSeconds)
+        lookbackRef.current = clipSettings.lookbackSeconds
+        setKeybinds(clipSettings.keybinds)
+        setBufferingEnabledState(clipSettings.bufferingEnabled)
+        setSelectedSourceId(clipSettings.sourceId ?? '')
+        setStatus({ ...nextStatus, outputFolder: folder })
+      } catch {
+        // Ignore boot errors; Clips section can retry.
+      }
+    })()
 
     const unsubscribe = clipControl?.onTriggerClip(() => {
       void clipItRef.current()
@@ -528,7 +545,7 @@ export function useClipRecorder() {
       }
       stopTracks()
     }
-  }, [clipControl, refreshSources, stopTracks])
+  }, [clipControl, stopTracks])
 
   useEffect(() => {
     if (!listeningForKeybind) {

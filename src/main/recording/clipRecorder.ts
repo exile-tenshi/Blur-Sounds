@@ -89,10 +89,12 @@ export class ClipRecorderService {
     }
   }
 
-  async listSources(): Promise<ClipSource[]> {
+  async listSources(options?: { includeThumbnails?: boolean }): Promise<ClipSource[]> {
+    const includeThumbnails = options?.includeThumbnails === true
     const sources = await desktopCapturer.getSources({
       types: ['screen', 'window'],
-      thumbnailSize: { width: 160, height: 90 },
+      // Thumbnails are expensive on busy desktops — only generate when the Clips UI asks.
+      thumbnailSize: includeThumbnails ? { width: 160, height: 90 } : { width: 0, height: 0 },
       fetchWindowIcons: false,
     })
 
@@ -105,9 +107,10 @@ export class ClipRecorderService {
           name: source.name,
           kind: isScreen ? 'screen' : 'window',
           displayId: source.display_id || undefined,
-          thumbnailDataUrl: source.thumbnail.isEmpty()
-            ? undefined
-            : source.thumbnail.toDataURL(),
+          thumbnailDataUrl:
+            includeThumbnails && !source.thumbnail.isEmpty()
+              ? source.thumbnail.toDataURL()
+              : undefined,
         } satisfies ClipSource
       })
       .sort((left, right) => {
