@@ -216,25 +216,22 @@ internal sealed class AudioEngine : IDisposable
             return;
         }
 
-        var recoveredAny = false;
+        // Only recover hard failures (dead process / real error). Peak-based recreation
+        // was re-scanning every audio endpoint and rebinding loopbacks every few seconds.
+        var needsRecovery = false;
         foreach (var route in routeConfigs.Values.Where(route =>
                      string.Equals(route.Target, "hifi-cable", StringComparison.OrdinalIgnoreCase)))
         {
             if (!appLoopbackSources.TryGetValue(route.AppId, out var source))
             {
-                continue;
+                needsRecovery = true;
+                break;
             }
 
-            if (int.TryParse(route.AppId, out var routeProcessId) &&
-                AudioProcessResolver.ShouldRecreateLoopbackCapture(
-                    enumerator,
-                    routeProcessId,
-                    source.CaptureProcessId,
-                    source.Level,
-                    route.ProcessName))
+            if (!AudioProcessResolver.IsProcessRunning(source.CaptureProcessId))
             {
-                recoveredAny = true;
-                continue;
+                needsRecovery = true;
+                break;
             }
 
             if (!string.Equals(source.State, "error", StringComparison.OrdinalIgnoreCase))
@@ -245,14 +242,14 @@ internal sealed class AudioEngine : IDisposable
             if (string.IsNullOrWhiteSpace(source.LastError) ||
                 source.LastError.Contains("Buffer full", StringComparison.OrdinalIgnoreCase))
             {
-                recoveredAny = true;
                 continue;
             }
 
-            recoveredAny = true;
+            needsRecovery = true;
+            break;
         }
 
-        if (!recoveredAny)
+        if (!needsRecovery)
         {
             return;
         }
@@ -321,7 +318,8 @@ internal sealed class AudioEngine : IDisposable
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
             MicrophoneLevel = ComputeMicrophoneOutputLevel(),
-            SessionLevels = AudioSessionMonitor.GetActiveSessionPeaks(enumerator)
+            // Cached ~2s — full COM endpoint scan every telemetry tick freezes the helper.
+            SessionLevels = AudioSessionMonitor.GetCachedOrScan(enumerator)
                 .Select(session => new SessionLevelTelemetry
                 {
                     ProcessId = session.ProcessId,
@@ -1267,7 +1265,6 @@ internal sealed class AudioEngine : IDisposable
             foreach (var includeProcessTree in new[] { true, false })
             {
                 ProcessLoopbackPool.Evict(targetProcessId);
-                await Task.Delay(150);
 
                 try
                 {
@@ -1305,6 +1302,7 @@ internal sealed class AudioEngine : IDisposable
                         throw;
                     }
 
+                    // Only wait after a failed reuse attempt, not on the first try.
                     await Task.Delay(150);
                 }
             }

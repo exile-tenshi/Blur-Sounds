@@ -149,9 +149,9 @@ export function useAudioControlState() {
 
     const unsubscribe = audioControl
       ? audioControl.subscribeSnapshot((nextSnapshot) => {
-          // Match main-process telemetry (~500ms) so React isn't thrashing the UI.
+          // Match main-process telemetry (~1s) so React isn't thrashing the UI.
           const now = Date.now()
-          if (now - lastTelemetryUiAtRef.current >= 500) {
+          if (now - lastTelemetryUiAtRef.current >= 1000) {
             lastTelemetryUiAtRef.current = now
             setSnapshot(nextSnapshot)
             return
@@ -159,7 +159,7 @@ export function useAudioControlState() {
 
           pendingTelemetryRef.current = nextSnapshot
           if (!telemetryTimerRef.current) {
-            telemetryTimerRef.current = setTimeout(flushTelemetry, 500)
+            telemetryTimerRef.current = setTimeout(flushTelemetry, 1000)
           }
         })
       : () => {}

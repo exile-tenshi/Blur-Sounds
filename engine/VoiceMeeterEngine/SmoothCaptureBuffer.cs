@@ -54,19 +54,22 @@ internal sealed class FloatCaptureRing
                 sampleCount = capacity;
             }
 
-            for (var index = 0; index < sampleCount; index++)
+            var overflow = count + sampleCount - capacity;
+            if (overflow > 0)
             {
-                if (count < capacity)
-                {
-                    storage[(head + count) % capacity] = samples[offset + index];
-                    count++;
-                }
-                else
-                {
-                    storage[head] = samples[offset + index];
-                    head = (head + 1) % capacity;
-                }
+                head = (head + overflow) % capacity;
+                count -= overflow;
             }
+
+            var writePos = (head + count) % capacity;
+            var firstPart = Math.Min(sampleCount, capacity - writePos);
+            Array.Copy(samples, offset, storage, writePos, firstPart);
+            if (firstPart < sampleCount)
+            {
+                Array.Copy(samples, offset + firstPart, storage, 0, sampleCount - firstPart);
+            }
+
+            count += sampleCount;
         }
     }
 
@@ -75,9 +78,16 @@ internal sealed class FloatCaptureRing
         lock (gate)
         {
             var samplesToRead = Math.Min(sampleCount, count);
-            for (var index = 0; index < samplesToRead; index++)
+            if (samplesToRead <= 0)
             {
-                destination[offset + index] = storage[(head + index) % capacity];
+                return 0;
+            }
+
+            var firstPart = Math.Min(samplesToRead, capacity - head);
+            Array.Copy(storage, head, destination, offset, firstPart);
+            if (firstPart < samplesToRead)
+            {
+                Array.Copy(storage, 0, destination, offset + firstPart, samplesToRead - firstPart);
             }
 
             head = (head + samplesToRead) % capacity;
