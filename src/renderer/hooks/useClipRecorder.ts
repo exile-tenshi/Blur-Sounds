@@ -56,7 +56,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 5
+export const CLIPS_PICKER_BUILD = 6
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -239,21 +239,17 @@ export function useClipRecorder() {
       setKeybinds(clipSettings.keybinds)
       setBufferingEnabledState(clipSettings.bufferingEnabled)
 
-      const screens = await control.listSources({ includeWindows: false })
-      // Keep any previously loaded windows in the picker.
-      let merged = screens
-      setSources((current) => {
-        const windows = current.filter((source) => source.kind === 'window')
-        merged = [...screens, ...windows]
-        return merged
-      })
+      // Screens + live games/apps (process list). No desktopCapturer freeze on open.
+      const nextSources = await control.listSources({ includeWindows: false })
+      setSources(nextSources)
 
       const preferred =
         clipSettings.sourceId?.startsWith('display:') ||
-        clipSettings.sourceId?.startsWith('window:')
+        clipSettings.sourceId?.startsWith('window:') ||
+        clipSettings.sourceId?.startsWith('app:')
           ? clipSettings.sourceId
-          : screens[0]?.id
-      applySourceSelection(merged, preferred)
+          : nextSources[0]?.id
+      applySourceSelection(nextSources, preferred)
       if (preferred?.startsWith('display:') && preferred !== clipSettings.sourceId) {
         await control.setSettings({ sourceId: preferred })
       }
@@ -268,7 +264,7 @@ export function useClipRecorder() {
     }
   }, [applySourceSelection])
 
-  /** Opt-in window/game scan — can take a couple seconds; timed out if Windows hangs. */
+  /** Refresh games/apps list; optional capturer window pass for titles capturer knows. */
   const loadWindowSources = useCallback(async () => {
     const control = clipControlRef.current
     if (!control) {
@@ -281,10 +277,17 @@ export function useClipRecorder() {
       setSources(all)
       setError(undefined)
     } catch (loadError) {
+      // Still try the non-capturer game list so the dropdown isn't empty.
+      try {
+        const fallback = await control.listSources({ includeWindows: false })
+        setSources(fallback)
+      } catch {
+        // ignore
+      }
       setError(
         loadError instanceof Error
           ? loadError.message
-          : 'Window scan timed out. Use a Desktop source instead.',
+          : 'Extra window scan timed out. Games from the app list are still available.',
       )
     } finally {
       setIsBusy(false)

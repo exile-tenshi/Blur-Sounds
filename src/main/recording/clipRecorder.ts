@@ -12,10 +12,13 @@ import type {
   SaveClipPayload,
   SaveClipResult,
 } from '../../shared/clipApi.js'
+import type { AudioApplication } from '../../shared/audioTypes.js'
+import { listActiveApplications } from '../audio/windowsAudioService.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
 const MAX_WINDOW_SOURCES = 40
+const MAX_APP_SOURCES = 60
 const CAPTURER_TIMEOUT_MS = 3000
 const WINDOW_SCAN_TIMEOUT_MS = 2500
 
@@ -75,6 +78,58 @@ function mapWindowSources(sources: Electron.DesktopCapturerSource[]): ClipSource
     )
     .sort((left, right) => left.name.localeCompare(right.name))
     .slice(0, MAX_WINDOW_SOURCES)
+}
+
+export function toAppSourceId(processId: number): string {
+  return `app:${processId}`
+}
+
+export function parseAppSourceId(sourceId: string | undefined): number | undefined {
+  if (!sourceId?.startsWith('app:')) {
+    return undefined
+  }
+  const value = Number(sourceId.slice('app:'.length))
+  return Number.isFinite(value) ? value : undefined
+}
+
+function mapApplicationSources(applications: AudioApplication[]): ClipSource[] {
+  return applications
+    .filter((application) => application.displayName.trim().length > 0)
+    .filter((application) => !/blur sounds/i.test(application.displayName))
+    .filter((application) => !/blur sounds/i.test(application.processName))
+    // Prefer titles/windows; still keep named processes (games often report title).
+    .sort((left, right) => {
+      if (left.hasVisibleWindow !== right.hasVisibleWindow) {
+        return left.hasVisibleWindow ? -1 : 1
+      }
+      return left.displayName.localeCompare(right.displayName)
+    })
+    .slice(0, MAX_APP_SOURCES)
+    .map(
+      (application) =>
+        ({
+          id: toAppSourceId(application.processId),
+          name: application.displayName,
+          kind: 'window' as const,
+          processName: application.processName,
+          processId: application.processId,
+        }) satisfies ClipSource,
+    )
+}
+
+function mergeGameSources(appSources: ClipSource[], windowSources: ClipSource[]): ClipSource[] {
+  const merged = new Map<string, ClipSource>()
+
+  for (const source of appSources) {
+    merged.set(source.name.trim().toLowerCase(), source)
+  }
+
+  // Prefer real capturer window ids when we have a matching title.
+  for (const source of windowSources) {
+    merged.set(source.name.trim().toLowerCase(), source)
+  }
+
+  return [...merged.values()].sort((left, right) => left.name.localeCompare(right.name))
 }
 
 async function getSourcesWithTimeout(
@@ -172,17 +227,25 @@ export class ClipRecorderService {
   }
 
   /**
-   * Screens are instant (Electron screen API).
-   * Windows are opt-in only — desktopCapturer window scans can freeze Windows.
+   * Screens (instant) + live games/apps from the process list (same source as Mixer).
+   * Optional includeWindows also runs a timed desktopCapturer window scan.
    */
   async listSources(options?: { includeWindows?: boolean }): Promise<ClipSource[]> {
     const screens = this.listDisplaySources()
-    if (!options?.includeWindows) {
-      return screens
+    const applications = await listActiveApplications().catch(() => [] as AudioApplication[])
+    const appSources = mapApplicationSources(applications)
+
+    let capturerWindows: ClipSource[] = []
+    if (options?.includeWindows) {
+      try {
+        capturerWindows = await this.scanWindowSources()
+      } catch {
+        // Keep process-list games even if the capturer scan times out.
+      }
     }
 
-    const windows = await this.scanWindowSources()
-    return [...screens, ...windows]
+    const games = mergeGameSources(appSources, capturerWindows)
+    return [...screens, ...games]
   }
 
   async scanWindowSources(): Promise<ClipSource[]> {
@@ -233,20 +296,52 @@ export class ClipRecorderService {
   async resolveCaptureSource(
     preferredSourceId?: string,
   ): Promise<Electron.DesktopCapturerSource | undefined> {
-    if (preferredSourceId?.startsWith('window:')) {
-      const windows = await getSourcesWithTimeout(
-        {
-          types: ['window'],
-          thumbnailSize: { width: 1, height: 1 },
-          fetchWindowIcons: false,
-        },
-        WINDOW_SCAN_TIMEOUT_MS,
+    const appProcessId = parseAppSourceId(preferredSourceId)
+    let preferredName = (this.sourceName ?? '').trim().toLowerCase()
+
+    if (appProcessId !== undefined) {
+      const applications = await listActiveApplications().catch(() => [] as AudioApplication[])
+      const match = applications.find((application) => application.processId === appProcessId)
+      preferredName = (
+        match?.displayName ||
+        match?.processName ||
+        this.sourceName ||
+        ''
       )
-      const exact = windows.find((source) => source.id === preferredSourceId)
-      if (exact) {
-        return exact
+        .trim()
+        .toLowerCase()
+    }
+
+    if (preferredSourceId?.startsWith('window:') || appProcessId !== undefined) {
+      try {
+        const windows = await getSourcesWithTimeout(
+          {
+            types: ['window'],
+            thumbnailSize: { width: 1, height: 1 },
+            fetchWindowIcons: false,
+          },
+          WINDOW_SCAN_TIMEOUT_MS,
+        )
+
+        if (preferredSourceId?.startsWith('window:')) {
+          const exact = windows.find((source) => source.id === preferredSourceId)
+          if (exact) {
+            return exact
+          }
+        }
+
+        if (preferredName) {
+          const byName =
+            windows.find((source) => source.name.trim().toLowerCase() === preferredName) ??
+            windows.find((source) => source.name.trim().toLowerCase().includes(preferredName)) ??
+            windows.find((source) => preferredName.includes(source.name.trim().toLowerCase()))
+          if (byName) {
+            return byName
+          }
+        }
+      } catch {
+        // Fall through to screen — fullscreen games are usually on the primary display.
       }
-      // Fall through to screen if the window disappeared.
     }
 
     const displayId = parseDisplaySourceId(preferredSourceId)
