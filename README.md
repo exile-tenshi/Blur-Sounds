@@ -8,8 +8,9 @@ Mix your microphone and application audio through **VB-Audio Hi-Fi Cable** — b
 
 ## What’s new
 
-- **Clip recordings** — capture your desktop or a game/window to an `.mp4` (falls back to `.webm` if MP4 codecs aren’t available). Files land in `Desktop\Blur Sounds Clips`.
-- **Microphone noise suppression** — toggle per mic in Mix levels to cut steady background noise.
+- **Discord-style sidebar** — Mixer, Noise, Clips, and Setup sections.
+- **Instant replay clips** — background buffer remembers your chosen lookback (e.g. 2 minutes). **Clip it** saves that prior window plus 25% forward. Multiple global keybinds supported. Files land in `Desktop\Blur Sounds Clips`.
+- **Noise suppression editor** — SteelSeries-style controls for strength, voice threshold, high-pass, attack, and release.
 - **Portable Desktop folder** — `npm run portable` builds the app and copies it to `Desktop\Blur Sounds`.
 
 ---
