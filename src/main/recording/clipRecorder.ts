@@ -15,6 +15,7 @@ import type {
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
+const MAX_WINDOW_SOURCES = 40
 
 function sanitizeFilePart(value: string): string {
   return (
@@ -45,6 +46,26 @@ function extensionForMime(mimeType: string): string {
   return 'mp4'
 }
 
+function mapSources(
+  sources: Electron.DesktopCapturerSource[],
+  kindFilter?: ClipSource['kind'],
+): ClipSource[] {
+  return sources
+    .filter((source) => source.name.trim().length > 0)
+    .map((source) => {
+      const isScreen = source.id.startsWith('screen:')
+      return {
+        id: source.id,
+        name: source.name,
+        kind: isScreen ? ('screen' as const) : ('window' as const),
+        displayId: source.display_id || undefined,
+      } satisfies ClipSource
+    })
+    .filter((source) => (kindFilter ? source.kind === kindFilter : true))
+    .filter((source) => !/blur sounds/i.test(source.name))
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
+
 export class ClipRecorderService {
   private recording = false
   private buffering = false
@@ -55,6 +76,7 @@ export class ClipRecorderService {
   private bufferedSeconds = 0
   private lastClipPath?: string
   private error?: string
+  private listSourcesInFlight = new Map<string, Promise<ClipSource[]>>()
 
   constructor(private readonly settings: SettingsStore) {}
 
@@ -89,36 +111,79 @@ export class ClipRecorderService {
     }
   }
 
-  async listSources(options?: { includeThumbnails?: boolean }): Promise<ClipSource[]> {
-    const includeThumbnails = options?.includeThumbnails === true
-    const sources = await desktopCapturer.getSources({
-      types: ['screen', 'window'],
-      // Thumbnails are expensive on busy desktops — only generate when the Clips UI asks.
-      thumbnailSize: includeThumbnails ? { width: 160, height: 90 } : { width: 0, height: 0 },
+  /**
+   * Names-only source list. Never generates thumbnails — batch toDataURL freezes Electron.
+   * Screens first (fast), then a capped window list.
+   */
+  async listSources(options?: {
+    includeThumbnails?: boolean
+    includeWindows?: boolean
+  }): Promise<ClipSource[]> {
+    const includeWindows = options?.includeWindows !== false
+    const cacheKey = includeWindows ? 'all' : 'screens'
+    const existing = this.listSourcesInFlight.get(cacheKey)
+    if (existing) {
+      return existing
+    }
+
+    const pending = this.listSourcesInternal({ includeWindows }).finally(() => {
+      this.listSourcesInFlight.delete(cacheKey)
+    })
+    this.listSourcesInFlight.set(cacheKey, pending)
+    return pending
+  }
+
+  private async listSourcesInternal(options?: {
+    includeWindows?: boolean
+  }): Promise<ClipSource[]> {
+    const includeWindows = options?.includeWindows !== false
+
+    // Screens-only is cheap. Window enumeration is what freezes busy desktops.
+    const screenSources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 0, height: 0 },
       fetchWindowIcons: false,
     })
+    const screens = mapSources(screenSources, 'screen')
 
-    return sources
-      .filter((source) => source.name.trim().length > 0)
-      .map((source) => {
-        const isScreen = source.id.startsWith('screen:')
-        return {
-          id: source.id,
-          name: source.name,
-          kind: isScreen ? 'screen' : 'window',
-          displayId: source.display_id || undefined,
-          thumbnailDataUrl:
-            includeThumbnails && !source.thumbnail.isEmpty()
-              ? source.thumbnail.toDataURL()
-              : undefined,
-        } satisfies ClipSource
-      })
-      .sort((left, right) => {
-        if (left.kind !== right.kind) {
-          return left.kind === 'screen' ? -1 : 1
-        }
-        return left.name.localeCompare(right.name)
-      })
+    if (!includeWindows) {
+      return screens
+    }
+
+    const windowSources = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 0, height: 0 },
+      fetchWindowIcons: false,
+    })
+    const windows = mapSources(windowSources, 'window').slice(0, MAX_WINDOW_SOURCES)
+    return [...screens, ...windows]
+  }
+
+  /** One small JPEG preview for the selected source — never for the whole list. */
+  async getSourcePreview(sourceId: string): Promise<string | undefined> {
+    if (!sourceId) {
+      return undefined
+    }
+
+    const types: Array<'screen' | 'window'> = sourceId.startsWith('screen:')
+      ? ['screen']
+      : ['window']
+
+    const sources = await desktopCapturer.getSources({
+      types,
+      thumbnailSize: { width: 240, height: 135 },
+      fetchWindowIcons: false,
+    })
+    const match = sources.find((source) => source.id === sourceId)
+    if (!match || match.thumbnail.isEmpty()) {
+      return undefined
+    }
+
+    try {
+      return `data:image/jpeg;base64,${match.thumbnail.toJPEG(62).toString('base64')}`
+    } catch {
+      return undefined
+    }
   }
 
   setRecordingState(payload: {

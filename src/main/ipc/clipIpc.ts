@@ -65,7 +65,10 @@ export function registerClipIpc(
 
   ipcMain.handle(
     clipChannels.listSources,
-    (_event, options?: { includeThumbnails?: boolean }) => recorder.listSources(options),
+    (_event, options?: { includeWindows?: boolean }) => recorder.listSources(options),
+  )
+  ipcMain.handle(clipChannels.getSourcePreview, (_event, sourceId: string) =>
+    recorder.getSourcePreview(sourceId),
   )
   ipcMain.handle(clipChannels.getStatus, () => recorder.getStatus())
   ipcMain.handle(clipChannels.ensureOutputFolder, () => recorder.ensureOutputFolder())
