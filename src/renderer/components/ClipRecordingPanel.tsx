@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import type { ClipLookbackSeconds } from '../../shared/appSettings'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 
@@ -24,50 +24,23 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
     isBusy,
     lastSavedPath,
     refreshSources,
-    getSourcePreview,
+    loadWindowSources,
     clipIt,
     openOutputFolder,
   } = useClipRecorderContext()
-
-  const [previewDataUrl, setPreviewDataUrl] = useState<string | undefined>()
-  const [previewLoading, setPreviewLoading] = useState(false)
 
   const desktopSources = sources.filter((source) => source.kind === 'screen')
   const windowSources = sources.filter((source) => source.kind === 'window')
   const selectedSource = sources.find((source) => source.id === selectedSourceId)
   const clipping = status.bufferState === 'clipping'
 
-  // Names-only list when Clips opens — no batch thumbnails.
+  // Screens only when Clips opens — never auto-scan windows or thumbnails.
   useEffect(() => {
     if (!isActive) {
       return
     }
     void refreshSources()
   }, [isActive, refreshSources])
-
-  // One lazy JPEG preview for the current selection only.
-  useEffect(() => {
-    if (!isActive || !selectedSourceId) {
-      setPreviewDataUrl(undefined)
-      return
-    }
-
-    let cancelled = false
-    setPreviewLoading(true)
-    const timer = window.setTimeout(() => {
-      void getSourcePreview(selectedSourceId).then((dataUrl) => {
-        if (!cancelled) {
-          setPreviewDataUrl(dataUrl)
-          setPreviewLoading(false)
-        }
-      })
-    }, 120)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [getSourcePreview, isActive, selectedSourceId])
 
   return (
     <section className="panel clip-panel">
@@ -92,19 +65,19 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
 
       <div className="clip-layout">
         <div className="clip-preview">
-          {previewDataUrl ? (
-            <img src={previewDataUrl} alt="" />
-          ) : (
-            <div className="clip-preview-empty">
-              <p className="muted">
-                {previewLoading
-                  ? 'Loading preview…'
-                  : selectedSource
-                    ? selectedSource.name
-                    : 'Pick a desktop or game window to buffer.'}
-              </p>
-            </div>
-          )}
+          <div className="clip-preview-empty">
+            <p>
+              {selectedSource
+                ? selectedSource.kind === 'screen'
+                  ? `Desktop · ${selectedSource.name}`
+                  : `Window · ${selectedSource.name}`
+                : 'Pick a desktop source to buffer.'}
+            </p>
+            <p className="muted">
+              Previews are disabled so Clips stays responsive. Capture still works when the buffer
+              is on.
+            </p>
+          </div>
         </div>
 
         <div className="clip-controls">
@@ -118,7 +91,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             onChange={(event) => void selectSource(event.target.value)}
           >
             {desktopSources.length === 0 && windowSources.length === 0 ? (
-              <option value="">{isBusy ? 'Loading sources…' : 'No capture sources found'}</option>
+              <option value="">{isBusy ? 'Loading screens…' : 'No capture sources found'}</option>
             ) : null}
             {desktopSources.length > 0 ? (
               <optgroup label="Desktop">
@@ -139,6 +112,10 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               </optgroup>
             ) : null}
           </select>
+          <p className="muted">
+            Desktop sources load instantly. Game/window scanning is optional because it can freeze
+            Windows for several seconds.
+          </p>
 
           <div className="clip-duration-block">
             <p className="field-label">Remember prior</p>
@@ -191,7 +168,15 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               disabled={isBusy || clipping}
               onClick={() => void refreshSources()}
             >
-              {isBusy ? 'Refreshing…' : 'Refresh sources'}
+              {isBusy ? 'Working…' : 'Refresh desktops'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={isBusy || clipping}
+              onClick={() => void loadWindowSources()}
+            >
+              Load game windows
             </button>
             <button
               type="button"

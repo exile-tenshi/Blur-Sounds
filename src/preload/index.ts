@@ -43,7 +43,6 @@ const audioControlApi: AudioControlApi = {
 
 const clipControlApi: ClipControlApi = {
   listSources: (options) => ipcRenderer.invoke(clipChannels.listSources, options),
-  getSourcePreview: (sourceId) => ipcRenderer.invoke(clipChannels.getSourcePreview, sourceId),
   getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
   ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
   saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
