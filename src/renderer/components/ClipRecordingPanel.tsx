@@ -32,6 +32,11 @@ export function ClipRecordingPanel() {
   const selectedSource = sources.find((source) => source.id === selectedSourceId)
   const clipping = status.bufferState === 'clipping'
 
+  // Load capture sources only while the Clips section is visible.
+  useEffect(() => {
+    void refreshSources({ includeThumbnails: true })
+  }, [refreshSources])
+
   return (
     <section className="panel clip-panel">
       <div className="panel-header">

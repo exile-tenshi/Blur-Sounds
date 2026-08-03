@@ -35,21 +35,19 @@ export function registerClipIpc(
 
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     try {
-      const sources = await recorder.listSources()
-      const preferred =
-        sources.find((source) => source.kind === 'screen') ?? sources[0]
-
-      if (!preferred) {
-        callback({})
-        return
-      }
-
+      const preferredId = settings.get().clip.sourceId
       const { desktopCapturer } = await import('electron')
       const capturerSources = await desktopCapturer.getSources({
         types: ['screen', 'window'],
-        thumbnailSize: { width: 1, height: 1 },
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false,
       })
-      const match = capturerSources.find((source) => source.id === preferred.id)
+      const match =
+        (preferredId
+          ? capturerSources.find((source) => source.id === preferredId)
+          : undefined) ??
+        capturerSources.find((source) => source.id.startsWith('screen:')) ??
+        capturerSources[0]
 
       if (!match) {
         callback({})
@@ -65,7 +63,10 @@ export function registerClipIpc(
     }
   })
 
-  ipcMain.handle(clipChannels.listSources, () => recorder.listSources())
+  ipcMain.handle(
+    clipChannels.listSources,
+    (_event, options?: { includeThumbnails?: boolean }) => recorder.listSources(options),
+  )
   ipcMain.handle(clipChannels.getStatus, () => recorder.getStatus())
   ipcMain.handle(clipChannels.ensureOutputFolder, () => recorder.ensureOutputFolder())
   ipcMain.handle(clipChannels.openOutputFolder, () => recorder.openOutputFolder())

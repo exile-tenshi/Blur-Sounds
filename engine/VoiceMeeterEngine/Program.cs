@@ -27,7 +27,7 @@ internal static class Program
         }
 
         using var engine = new AudioEngine();
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(150));
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
 
         var telemetryTask = Task.Run(async () =>
         {
@@ -35,7 +35,8 @@ internal static class Program
             while (await timer.WaitForNextTickAsync())
             {
                 recoveryCounter += 1;
-                if (recoveryCounter % 8 == 0)
+                // Recover stuck loopbacks about every 5 seconds.
+                if (recoveryCounter % 10 == 0)
                 {
                     await engine.RecoverLoopbackSourcesAsync();
                 }

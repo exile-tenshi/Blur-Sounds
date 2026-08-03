@@ -243,6 +243,30 @@ export async function listAudioDevices(): Promise<AudioDevice[]> {
   }))
 }
 
+let cachedApplications: AudioApplication[] | undefined
+let cachedApplicationsAt = 0
+let cachedApplicationsInFlight: Promise<AudioApplication[]> | undefined
+const APPLICATION_CACHE_TTL_MS = 3000
+
 export async function listActiveApplications(): Promise<AudioApplication[]> {
-  return runPowerShellJson<AudioApplication>(applicationScript)
+  const now = Date.now()
+  if (cachedApplications && now - cachedApplicationsAt < APPLICATION_CACHE_TTL_MS) {
+    return cachedApplications
+  }
+
+  if (cachedApplicationsInFlight) {
+    return cachedApplicationsInFlight
+  }
+
+  cachedApplicationsInFlight = runPowerShellJson<AudioApplication>(applicationScript)
+    .then((applications) => {
+      cachedApplications = applications
+      cachedApplicationsAt = Date.now()
+      return applications
+    })
+    .finally(() => {
+      cachedApplicationsInFlight = undefined
+    })
+
+  return cachedApplicationsInFlight
 }
