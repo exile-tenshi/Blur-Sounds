@@ -27,7 +27,6 @@ function resolveClipControl(): ClipControlApi | undefined {
 
   return {
     listSources: (options) => ipcRenderer.invoke(clipChannels.listSources, options),
-    getSourcePreview: (sourceId) => ipcRenderer.invoke(clipChannels.getSourcePreview, sourceId),
     getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
     ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
     saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
@@ -219,10 +218,7 @@ export function useClipRecorder() {
     [],
   )
 
-  /**
-   * Progressive load: screens first (instant), then windows without thumbnails.
-   * Batch thumbnails were freezing the Clips section on busy desktops.
-   */
+  /** Screens only — never auto-enumerate windows (that freezes Electron on Windows). */
   const refreshSources = useCallback(async () => {
     if (!clipControl) {
       setError('Clip bridge did not load. Relaunch the Electron app.')
@@ -241,10 +237,6 @@ export function useClipRecorder() {
       setSources(screens)
       applySourceSelection(screens, clipSettings.sourceId)
 
-      const allSources = await clipControl.listSources({ includeWindows: true })
-      setSources(allSources)
-      applySourceSelection(allSources, clipSettings.sourceId)
-
       const nextStatus = await clipControl.getStatus()
       setStatus(nextStatus)
       setError(undefined)
@@ -255,19 +247,30 @@ export function useClipRecorder() {
     }
   }, [applySourceSelection, clipControl])
 
-  const getSourcePreview = useCallback(
-    async (sourceId: string) => {
-      if (!clipControl || !sourceId) {
-        return undefined
-      }
-      try {
-        return await clipControl.getSourcePreview(sourceId)
-      } catch {
-        return undefined
-      }
-    },
-    [clipControl],
-  )
+  /** Optional, user-triggered — window enumeration can hang on busy desktops. */
+  const loadWindowSources = useCallback(async () => {
+    if (!clipControl) {
+      return
+    }
+
+    setIsBusy(true)
+    try {
+      const windows = await clipControl.listSources({ includeWindows: true })
+      setSources((current) => {
+        const screens = current.filter((source) => source.kind === 'screen')
+        return [...screens, ...windows]
+      })
+      setError(undefined)
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Window list timed out. Use a Desktop source instead.',
+      )
+    } finally {
+      setIsBusy(false)
+    }
+  }, [clipControl])
 
   const stopBuffering = useCallback(async () => {
     if (forwardTimerRef.current) {
@@ -663,7 +666,7 @@ export function useClipRecorder() {
     isBusy,
     lastSavedPath,
     refreshSources,
-    getSourcePreview,
+    loadWindowSources,
     startBuffering,
     stopBuffering,
     clipIt,

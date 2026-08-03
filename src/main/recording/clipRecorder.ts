@@ -15,7 +15,8 @@ import type {
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
-const MAX_WINDOW_SOURCES = 40
+const MAX_WINDOW_SOURCES = 30
+const CAPTURER_TIMEOUT_MS = 2500
 
 function sanitizeFilePart(value: string): string {
   return (
@@ -66,6 +67,27 @@ function mapSources(
     .sort((left, right) => left.name.localeCompare(right.name))
 }
 
+async function getSourcesWithTimeout(
+  options: Electron.SourcesOptions,
+  timeoutMs = CAPTURER_TIMEOUT_MS,
+): Promise<Electron.DesktopCapturerSource[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      desktopCapturer.getSources(options),
+      new Promise<Electron.DesktopCapturerSource[]>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('Timed out while listing capture sources.'))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
+}
+
 export class ClipRecorderService {
   private recording = false
   private buffering = false
@@ -112,78 +134,43 @@ export class ClipRecorderService {
   }
 
   /**
-   * Names-only source list. Never generates thumbnails — batch toDataURL freezes Electron.
-   * Screens first (fast), then a capped window list.
+   * Names-only source list. Default is screens only — window enumeration freezes
+   * many Windows desktops inside desktopCapturer.getSources.
    */
-  async listSources(options?: {
-    includeThumbnails?: boolean
-    includeWindows?: boolean
-  }): Promise<ClipSource[]> {
-    const includeWindows = options?.includeWindows !== false
-    const cacheKey = includeWindows ? 'all' : 'screens'
+  async listSources(options?: { includeWindows?: boolean }): Promise<ClipSource[]> {
+    const includeWindows = options?.includeWindows === true
+    const cacheKey = includeWindows ? 'windows' : 'screens'
     const existing = this.listSourcesInFlight.get(cacheKey)
     if (existing) {
       return existing
     }
 
-    const pending = this.listSourcesInternal({ includeWindows }).finally(() => {
+    const pending = this.listSourcesInternal(includeWindows).finally(() => {
       this.listSourcesInFlight.delete(cacheKey)
     })
     this.listSourcesInFlight.set(cacheKey, pending)
     return pending
   }
 
-  private async listSourcesInternal(options?: {
-    includeWindows?: boolean
-  }): Promise<ClipSource[]> {
-    const includeWindows = options?.includeWindows !== false
-
-    // Screens-only is cheap. Window enumeration is what freezes busy desktops.
-    const screenSources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: 0, height: 0 },
-      fetchWindowIcons: false,
-    })
-    const screens = mapSources(screenSources, 'screen')
-
+  private async listSourcesInternal(includeWindows: boolean): Promise<ClipSource[]> {
     if (!includeWindows) {
-      return screens
+      const screenSources = await getSourcesWithTimeout({
+        types: ['screen'],
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false,
+      })
+      return mapSources(screenSources, 'screen')
     }
 
-    const windowSources = await desktopCapturer.getSources({
-      types: ['window'],
-      thumbnailSize: { width: 0, height: 0 },
-      fetchWindowIcons: false,
-    })
-    const windows = mapSources(windowSources, 'window').slice(0, MAX_WINDOW_SOURCES)
-    return [...screens, ...windows]
-  }
-
-  /** One small JPEG preview for the selected source — never for the whole list. */
-  async getSourcePreview(sourceId: string): Promise<string | undefined> {
-    if (!sourceId) {
-      return undefined
-    }
-
-    const types: Array<'screen' | 'window'> = sourceId.startsWith('screen:')
-      ? ['screen']
-      : ['window']
-
-    const sources = await desktopCapturer.getSources({
-      types,
-      thumbnailSize: { width: 240, height: 135 },
-      fetchWindowIcons: false,
-    })
-    const match = sources.find((source) => source.id === sourceId)
-    if (!match || match.thumbnail.isEmpty()) {
-      return undefined
-    }
-
-    try {
-      return `data:image/jpeg;base64,${match.thumbnail.toJPEG(62).toString('base64')}`
-    } catch {
-      return undefined
-    }
+    const windowSources = await getSourcesWithTimeout(
+      {
+        types: ['window'],
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false,
+      },
+      2000,
+    )
+    return mapSources(windowSources, 'window').slice(0, MAX_WINDOW_SOURCES)
   }
 
   setRecordingState(payload: {

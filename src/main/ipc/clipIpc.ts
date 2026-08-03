@@ -37,17 +37,28 @@ export function registerClipIpc(
     try {
       const preferredId = settings.get().clip.sourceId
       const { desktopCapturer } = await import('electron')
-      const capturerSources = await desktopCapturer.getSources({
-        types: ['screen', 'window'],
+      const preferWindow = Boolean(preferredId?.startsWith('window:'))
+      const primaryTypes: Array<'screen' | 'window'> = preferWindow ? ['window'] : ['screen']
+
+      // Avoid enumerating every window when capturing a screen — that freezes Clips.
+      let capturerSources = await desktopCapturer.getSources({
+        types: primaryTypes,
         thumbnailSize: { width: 0, height: 0 },
         fetchWindowIcons: false,
       })
-      const match =
-        (preferredId
-          ? capturerSources.find((source) => source.id === preferredId)
-          : undefined) ??
-        capturerSources.find((source) => source.id.startsWith('screen:')) ??
-        capturerSources[0]
+      let match = preferredId
+        ? capturerSources.find((source) => source.id === preferredId)
+        : capturerSources.find((source) => source.id.startsWith('screen:')) ?? capturerSources[0]
+
+      if (!match && preferredId) {
+        const fallbackTypes: Array<'screen' | 'window'> = preferWindow ? ['screen'] : ['window']
+        capturerSources = await desktopCapturer.getSources({
+          types: fallbackTypes,
+          thumbnailSize: { width: 0, height: 0 },
+          fetchWindowIcons: false,
+        })
+        match = capturerSources.find((source) => source.id === preferredId)
+      }
 
       if (!match) {
         callback({})
@@ -66,9 +77,6 @@ export function registerClipIpc(
   ipcMain.handle(
     clipChannels.listSources,
     (_event, options?: { includeWindows?: boolean }) => recorder.listSources(options),
-  )
-  ipcMain.handle(clipChannels.getSourcePreview, (_event, sourceId: string) =>
-    recorder.getSourcePreview(sourceId),
   )
   ipcMain.handle(clipChannels.getStatus, () => recorder.getStatus())
   ipcMain.handle(clipChannels.ensureOutputFolder, () => recorder.ensureOutputFolder())
