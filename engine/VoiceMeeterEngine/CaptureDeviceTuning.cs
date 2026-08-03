@@ -2,6 +2,7 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Buffer and format tuning for microphones that deliver bursty or native-rate audio.
+/// Kept intentionally tight so mic/music stay near-instant through Hi-Fi Cable.
 /// </summary>
 internal static class CaptureDeviceTuning
 {
@@ -85,12 +86,12 @@ internal static class CaptureDeviceTuning
         isHiFiOutput = AudioTuningPolicy.UseHiFiBuffers(isHiFiOutput);
         if (IsComfortCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 80 : 72;
+            return isHiFiOutput ? 48 : 40;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 64 : 56;
+            return isHiFiOutput ? 40 : 36;
         }
 
         return LatencyTuning.GetMicCaptureBufferMilliseconds(isHiFiOutput);
@@ -101,12 +102,12 @@ internal static class CaptureDeviceTuning
         isHiFiOutput = AudioTuningPolicy.UseHiFiBuffers(isHiFiOutput);
         if (IsComfortCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 500 : 450;
+            return isHiFiOutput ? 140 : 120;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 380 : 340;
+            return isHiFiOutput ? 120 : 100;
         }
 
         return LatencyTuning.GetMicCaptureMaxMilliseconds(isHiFiOutput);
@@ -116,12 +117,12 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return 600;
+            return 200;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return 480;
+            return 160;
         }
 
         return LatencyTuning.MicCaptureRingMilliseconds;
@@ -131,7 +132,7 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName) || IsExtendedCaptureDevice(deviceName))
         {
-            return 200;
+            return 30;
         }
 
         return LatencyTuning.CaptureWarmupMilliseconds;
@@ -141,27 +142,27 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return 600;
+            return 120;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return 400;
+            return 90;
         }
 
-        return 200;
+        return 60;
     }
 
     public static int GetJitterBufferMilliseconds(string? deviceName)
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return 140;
+            return 12;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return 80;
+            return 8;
         }
 
         return 0;

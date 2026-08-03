@@ -1,17 +1,19 @@
+import { memo } from 'react'
 import './App.css'
 import logoUrl from './assets/logo.svg?url'
 import { normalizeMicrophoneSlots, hasActiveMicrophoneSlot } from '../shared/microphoneSlots'
 import type { AudioSnapshot } from '../shared/audioTypes'
-import {
-  formatHifiCableDisabledMessage,
-  getHifiCableSelectionDefaults,
-  getHifiCableSetupSteps,
-  HIFI_CABLE_QUALITY,
-} from '../shared/hifiCable'
+import { HIFI_CABLE_QUALITY } from '../shared/hifiCable'
 import { AppLibraryPanel } from './components/AppLibraryPanel'
 import { AudioRoutingPanel } from './components/AudioRoutingPanel'
+import { ClipRecordingPanel } from './components/ClipRecordingPanel'
+import { HifiSetupPanel } from './components/HifiSetupPanel'
 import { InputVolumeList } from './components/InputVolumeList'
+import { NoiseSuppressionSection } from './components/NoiseSuppressionSection'
+import { ClipRecorderProvider, useClipRecorderContext } from './context/ClipRecorderContext'
+import { useAppSettings } from './hooks/useAppSettings'
 import { useAudioControlState } from './hooks/useAudioControlState'
+import { SidebarNav } from './layout/SidebarNav'
 
 function shouldShowEngineNotice(engine: AudioSnapshot['engine']): boolean {
   if (!engine.message) {
@@ -29,7 +31,58 @@ function getEngineStatusLabel(engine: AudioSnapshot['engine']): string {
   return engine.state
 }
 
-function App() {
+function FeatureStatusStrip({
+  isEngineActive,
+  nsEnabledCount,
+}: {
+  isEngineActive: boolean
+  nsEnabledCount: number
+}) {
+  const { status, clipIt, bufferingEnabled } = useClipRecorderContext()
+  const clipping = status.bufferState === 'clipping'
+
+  return (
+    <div className="feature-status-strip panel">
+      <div className="feature-status-item">
+        <span className={`status-dot${isEngineActive ? '' : ' idle'}`} />
+        <span>{isEngineActive ? 'Stream live' : 'Stream idle'}</span>
+      </div>
+      <div className="feature-status-item">
+        <span className={`status-dot${nsEnabledCount > 0 ? '' : ' idle'}`} />
+        <span>
+          {nsEnabledCount > 0
+            ? `Noise on · ${nsEnabledCount} mic${nsEnabledCount === 1 ? '' : 's'}`
+            : 'Noise idle'}
+        </span>
+      </div>
+      <div className="feature-status-item">
+        <span
+          className={`status-dot${status.buffering || clipping ? '' : ' idle'}${clipping ? ' hot' : ''}`}
+        />
+        <span>
+          {clipping
+            ? 'Clipping…'
+            : status.buffering
+              ? `Clip buffer · ${Math.round(status.bufferedSeconds)}s`
+              : bufferingEnabled
+                ? 'Clip buffer arming'
+                : 'Clip buffer off'}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="primary-button clip-it-button compact"
+        disabled={!status.buffering || clipping}
+        onClick={() => void clipIt()}
+      >
+        {clipping ? 'Clipping…' : 'Clip it'}
+      </button>
+    </div>
+  )
+}
+
+const AppShell = memo(function AppShell() {
+  const { activeSection, setActiveSection } = useAppSettings()
   const {
     snapshot,
     isLoading,
@@ -39,6 +92,7 @@ function App() {
     playbackDevices,
     updateSelection,
     selectMicrophoneSlot,
+    ensureMicrophoneDevice,
     addMicrophoneSlotToSelection,
     removeMicrophoneSlotFromSelection,
     openHifiCablePlaybackSettings,
@@ -50,6 +104,7 @@ function App() {
     setRouteMuted,
     setMicrophoneMuted,
     setMicrophoneVolume,
+    setMicrophoneNoiseSuppression,
     refreshSnapshot,
     startEngine,
     stopEngine,
@@ -68,6 +123,10 @@ function App() {
     hasActiveMicrophoneSlot(microphoneSlots) ||
     snapshot.routedInputs.some((route) => route.target === 'hifi-cable')
 
+  const nsEnabledCount = microphoneSlots.filter(
+    (slot) => slot.deviceId && (slot.noiseSuppressionSettings?.enabled ?? slot.noiseSuppression),
+  ).length
+
   const microphoneSources = microphoneSlots
     .filter((slot) => slot.deviceId)
     .map((slot) => ({
@@ -79,183 +138,195 @@ function App() {
       ready: snapshot.engine.selectedMicrophoneReady,
       muted: slot.muted,
       volume: slot.volume,
+      noiseSuppression: slot.noiseSuppressionSettings?.enabled ?? slot.noiseSuppression ?? false,
       onSetMuted: (muted: boolean) => setMicrophoneMuted(slot.id, muted),
       onSetVolume: (volume: number) => setMicrophoneVolume(slot.id, volume),
     }))
 
-  const cableDefaults = getHifiCableSelectionDefaults(snapshot.devices)
-  const setupSteps = getHifiCableSetupSteps()
-
   return (
-    <main className="shell">
-      <header className="hero-header panel">
-        <div>
-          <div className="brand-lockup">
-            <img className="brand-logo" src={logoUrl} alt="" />
-            <div>
-              <p className="eyebrow">Blur Sounds</p>
-              <h1>Studio-quality audio through Hi-Fi Cable.</h1>
-            </div>
-          </div>
-          <p className="hero-copy">
-            Capture your microphone, mix in app audio, and send everything through VB-Audio Hi-Fi Cable
-            at {HIFI_CABLE_QUALITY.label}.
-          </p>
-        </div>
-
-        <div className="header-actions">
-          <div className="status-card">
-            <span className="status-dot" />
-            <div>
-              <strong>Audio Engine</strong>
-              <p className="muted">
-                {snapshot.engine.helperConnected ? 'Connected' : 'Offline'} ·{' '}
-                {getEngineStatusLabel(snapshot.engine)} · output{' '}
-                {Math.round(snapshot.engine.outputLevel * 100)}%
-              </p>
-            </div>
-          </div>
-          <div className="button-row">
-            <button type="button" className="secondary-button" onClick={() => void stopEngine()} disabled={isEngineBusy}>
-              Stop
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => void startEngine()}
-              disabled={isEngineBusy || !snapshot.hifiCable.playbackReady}
-            >
-              {isEngineBusy ? 'Starting...' : 'Start stream'}
-            </button>
-            <button type="button" className="secondary-button" onClick={() => void refreshSnapshot()} disabled={isEngineBusy}>
-              Refresh
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {error ? <p className="notice error">{error}</p> : null}
-      {!isInitialLoading && !snapshot.hifiCable.installed ? (
-        <div className="notice dependency-notice">
-          <strong>VB-Audio Hi-Fi Cable required</strong>
-          <p>
-            Blur Sounds requires{' '}
-            <a href={snapshot.hifiCable.productUrl} target="_blank" rel="noreferrer">
-              VB-Audio Hi-Fi Cable
-            </a>
-            . Download and install it, reboot if prompted, then click Refresh. Expected devices: Input →{' '}
-            <strong>{cableDefaults.inputDeviceName}</strong> · Recording →{' '}
-            <strong>{cableDefaults.recordingDeviceName}</strong>.
-          </p>
-          <div className="button-row hifi-settings-buttons">
-            <a className="secondary-button dependency-download" href={snapshot.hifiCable.downloadUrl} target="_blank" rel="noreferrer">
-              Download Hi-Fi Cable
-            </a>
-            <button type="button" className="primary-button" onClick={() => void applyHifiCableStudioSettings()}>
-              Apply clean audio settings
-            </button>
-            <button type="button" className="secondary-button" onClick={() => void openHifiCablePlaybackSettings()}>
-              Open Playback settings
-            </button>
-            <button type="button" className="secondary-button" onClick={() => void openHifiCableRecordingSettings()}>
-              Open Recording settings
-            </button>
-          </div>
-          <ol className="hifi-setup-steps-compact">
-            {setupSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
-      {!isInitialLoading && snapshot.hifiCable.installed && !snapshot.hifiCable.playbackReady ? (
-        <div className="notice dependency-notice">
-          <strong>Hi-Fi Cable is disabled</strong>
-          <p>{formatHifiCableDisabledMessage()}</p>
-          {snapshot.hifiCable.playbackDevices.length > 0 ? (
-            <p>
-              Detected:{' '}
-              <strong>{snapshot.hifiCable.playbackDevices.join(', ')}</strong>
-            </p>
-          ) : null}
-          <div className="button-row hifi-settings-buttons">
-            <button type="button" className="primary-button" onClick={() => void refreshSnapshot()}>
-              Refresh
-            </button>
-            <button type="button" className="secondary-button" onClick={() => void openHifiCablePlaybackSettings()}>
-              Open Playback settings
-            </button>
-            <button type="button" className="secondary-button" onClick={() => void openHifiCableRecordingSettings()}>
-              Open Recording settings
-            </button>
-          </div>
-        </div>
-      ) : null}
-      {!isInitialLoading && snapshot.hifiCable.playbackReady && !snapshot.hifiCable.recordingReady ? (
-        <p className="notice">
-          Hi-Fi Cable Input is ready, but Hi-Fi Cable Output was not detected. Install the recording side,
-          then click Refresh.
-        </p>
-      ) : null}
-      {!isInitialLoading && hasMixSources && !isEngineActive ? (
-        <p className="notice">
-          Stream is stopped. Click <strong>Start stream</strong> to send audio to Hi-Fi Cable Input.
-        </p>
-      ) : null}
-      {isInitialLoading ? (
-        <section className="loading-shell panel">
-          <div className="loading-copy">
-            <p className="eyebrow">Loading</p>
-            <h2>Scanning audio devices and apps</h2>
-          </div>
-        </section>
-      ) : null}
-      {shouldShowEngineNotice(snapshot.engine) ? (
-        <p className={`notice${snapshot.engine.state === 'error' ? ' error' : ''}`}>
-          {snapshot.engine.message}
-        </p>
-      ) : null}
-
-      <AudioRoutingPanel
-        selection={snapshot.selection}
-        microphoneDevices={microphoneDevices}
-        playbackDevices={playbackDevices}
-        recordingDevices={recordingDevices}
-        engine={snapshot.engine}
-        engineActive={isEngineActive}
-        hifiCable={snapshot.hifiCable}
-        onApplyStudioSettings={() => void applyHifiCableStudioSettings()}
-        onOpenPlaybackSettings={() => void openHifiCablePlaybackSettings()}
-        onOpenRecordingSettings={() => void openHifiCableRecordingSettings()}
-        onSelectMicrophoneSlot={selectMicrophoneSlot}
-        onAddMicrophoneSlot={addMicrophoneSlotToSelection}
-        onRemoveMicrophoneSlot={removeMicrophoneSlotFromSelection}
-        onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
-        onSelectRecording={(deviceId) => updateSelection('recordingDeviceId', deviceId)}
+    <div className="app-frame">
+      <SidebarNav
+        activeSection={activeSection}
+        onSelect={(section) => void setActiveSection(section)}
+        brandLogoUrl={logoUrl}
       />
 
-      <section className="content-grid two-up">
-        <AppLibraryPanel
-          applications={snapshot.applications}
-          routedInputs={snapshot.routedInputs}
-          sessionLevels={snapshot.engine.sessionLevels}
-          engineActive={isEngineActive}
-          onToggleRoute={toggleRoute}
-          onToggleRouteMuted={setRouteMuted}
-        />
+      <main className="shell">
+        <header className="hero-header panel">
+          <div>
+            <div className="brand-lockup">
+              <img className="brand-logo" src={logoUrl} alt="" />
+              <div>
+                <p className="eyebrow">Blur Sounds</p>
+                <h1>Studio-quality audio through Hi-Fi Cable.</h1>
+              </div>
+            </div>
+            <p className="hero-copy">
+              Mixer, noise suppression, and clips all stay active together — switch sections to edit
+              them. Clean path: {HIFI_CABLE_QUALITY.label}.
+            </p>
+          </div>
 
-        <InputVolumeList
-          routes={snapshot.routedInputs}
-          applications={snapshot.applications}
-          microphoneSources={microphoneSources}
-          engineActive={isEngineActive}
-          onSetRouteVolume={setRouteVolume}
-          onSetRouteEqualizer={setRouteEqualizer}
-          onSetRouteMuted={setRouteMuted}
-          onRemoveRoute={(appId) => toggleRoute(appId, false)}
-        />
-      </section>
-    </main>
+          <div className="header-actions">
+            <div className="status-card">
+              <span className="status-dot" />
+              <div>
+                <strong>Audio Engine</strong>
+                <p className="muted">
+                  {snapshot.engine.helperConnected ? 'Connected' : 'Offline'} ·{' '}
+                  {getEngineStatusLabel(snapshot.engine)} · output{' '}
+                  {Math.round(snapshot.engine.outputLevel * 100)}%
+                </p>
+              </div>
+            </div>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void stopEngine()}
+                disabled={isEngineBusy}
+              >
+                Stop
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void startEngine()}
+                disabled={isEngineBusy || !snapshot.hifiCable.playbackReady}
+                title={
+                  !snapshot.hifiCable.playbackReady
+                    ? 'Install or enable Hi-Fi Cable Input in Setup first'
+                    : 'Start the mix — meters and noise cleanup only move while streaming'
+                }
+              >
+                {isEngineBusy ? 'Starting...' : 'Start stream'}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void refreshSnapshot()}
+                disabled={isEngineBusy}
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <FeatureStatusStrip isEngineActive={isEngineActive} nsEnabledCount={nsEnabledCount} />
+
+        {error ? <p className="notice error">{error}</p> : null}
+        {isInitialLoading ? (
+          <section className="loading-shell panel">
+            <div className="loading-copy">
+              <p className="eyebrow">Loading</p>
+              <h2>Scanning audio devices and apps</h2>
+            </div>
+          </section>
+        ) : null}
+        {shouldShowEngineNotice(snapshot.engine) ? (
+          <p className={`notice${snapshot.engine.state === 'error' ? ' error' : ''}`}>
+            {snapshot.engine.message}
+          </p>
+        ) : null}
+        {!isInitialLoading && hasMixSources && !isEngineActive ? (
+          <p className="notice">
+            {!snapshot.hifiCable.playbackReady ? (
+              <>
+                Hi-Fi Cable Input is missing or disabled — open <strong>Setup</strong>, install/enable
+                it, then click Refresh. Mic level meters stay at idle until the stream can start.
+              </>
+            ) : (
+              <>
+                Stream is stopped — click <strong>Start stream</strong> so mic levels move when you
+                speak. Noise and clip settings can still be edited now.
+              </>
+            )}
+          </p>
+        ) : null}
+
+        {activeSection === 'mixer' ? (
+          <>
+            <AudioRoutingPanel
+              selection={snapshot.selection}
+              microphoneDevices={microphoneDevices}
+              playbackDevices={playbackDevices}
+              recordingDevices={recordingDevices}
+              engine={snapshot.engine}
+              engineActive={isEngineActive}
+              onSelectMicrophoneSlot={selectMicrophoneSlot}
+              onAddMicrophoneSlot={addMicrophoneSlotToSelection}
+              onRemoveMicrophoneSlot={removeMicrophoneSlotFromSelection}
+              onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
+              onSelectRecording={(deviceId) => updateSelection('recordingDeviceId', deviceId)}
+              onOpenSetup={() => void setActiveSection('setup')}
+            />
+
+            <section className="content-grid two-up">
+              <AppLibraryPanel
+                applications={snapshot.applications}
+                routedInputs={snapshot.routedInputs}
+                sessionLevels={snapshot.engine.sessionLevels}
+                engineActive={isEngineActive}
+                onToggleRoute={toggleRoute}
+                onToggleRouteMuted={setRouteMuted}
+              />
+
+              <InputVolumeList
+                routes={snapshot.routedInputs}
+                applications={snapshot.applications}
+                microphoneSources={microphoneSources}
+                engineActive={isEngineActive}
+                onSetRouteVolume={setRouteVolume}
+                onSetRouteEqualizer={setRouteEqualizer}
+                onSetRouteMuted={setRouteMuted}
+                onRemoveRoute={(appId) => toggleRoute(appId, false)}
+              />
+            </section>
+          </>
+        ) : null}
+
+        {activeSection === 'noise' ? (
+          <NoiseSuppressionSection
+            selectionMicrophones={snapshot.selection.microphones}
+            microphoneDevices={microphoneDevices}
+            microphoneLevel={snapshot.engine.microphoneLevel}
+            engineActive={isEngineActive}
+            onEnsureDevice={ensureMicrophoneDevice}
+            onChange={(slotId, settings) => setMicrophoneNoiseSuppression(slotId, settings)}
+            onSelectDeviceForSlot={selectMicrophoneSlot}
+            onRemoveSlot={removeMicrophoneSlotFromSelection}
+          />
+        ) : null}
+
+        {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}
+        <div className={activeSection === 'clips' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'clips'}>
+          <ClipRecordingPanel isActive={activeSection === 'clips'} />
+        </div>
+
+        {activeSection === 'setup' ? (
+          <HifiSetupPanel
+            selection={snapshot.selection}
+            playbackDevices={playbackDevices}
+            recordingDevices={recordingDevices}
+            hifiCable={snapshot.hifiCable}
+            onApplyStudioSettings={() => void applyHifiCableStudioSettings()}
+            onOpenPlaybackSettings={() => void openHifiCablePlaybackSettings()}
+            onOpenRecordingSettings={() => void openHifiCableRecordingSettings()}
+            onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
+            onSelectRecording={(deviceId) => updateSelection('recordingDeviceId', deviceId)}
+          />
+        ) : null}
+      </main>
+    </div>
+  )
+})
+
+function App() {
+  return (
+    <ClipRecorderProvider>
+      <AppShell />
+    </ClipRecorderProvider>
   )
 }
 

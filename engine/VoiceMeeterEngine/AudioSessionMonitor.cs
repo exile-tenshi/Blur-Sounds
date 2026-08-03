@@ -4,6 +4,11 @@ namespace VoiceMeeterEngine;
 
 internal static class AudioSessionMonitor
 {
+    private static readonly object CacheGate = new();
+    private static List<SessionPeakInfo> cachedPeaks = [];
+    private static long cachedPeaksAtMs;
+    private const int CacheTtlMilliseconds = 2000;
+
     public static List<SessionPeakInfo> GetActiveSessionPeaks(MMDeviceEnumerator enumerator)
     {
         return GetActiveSessionPeaksAllDevices(enumerator);
@@ -11,11 +16,56 @@ internal static class AudioSessionMonitor
 
     public static List<SessionPeakInfo> GetActiveSessionPeaksAllDevices(MMDeviceEnumerator enumerator)
     {
+        var now = Environment.TickCount64;
+        lock (CacheGate)
+        {
+            if (cachedPeaks.Count > 0 && now - cachedPeaksAtMs < CacheTtlMilliseconds)
+            {
+                return cachedPeaks;
+            }
+        }
+
+        var peaks = ScanActiveSessionPeaks(enumerator);
+        lock (CacheGate)
+        {
+            cachedPeaks = peaks;
+            cachedPeaksAtMs = now;
+        }
+
+        return peaks;
+    }
+
+    /// <summary>
+    /// Returns the last scanned peaks without touching COM when still fresh.
+    /// Used by telemetry so idle/stream ticks don't re-enumerate every render endpoint.
+    /// </summary>
+    public static List<SessionPeakInfo> GetCachedOrScan(MMDeviceEnumerator enumerator, bool forceScan = false)
+    {
+        if (!forceScan)
+        {
+            var now = Environment.TickCount64;
+            lock (CacheGate)
+            {
+                if (now - cachedPeaksAtMs < CacheTtlMilliseconds)
+                {
+                    return cachedPeaks;
+                }
+            }
+        }
+
+        return GetActiveSessionPeaksAllDevices(enumerator);
+    }
+
+    private static List<SessionPeakInfo> ScanActiveSessionPeaks(MMDeviceEnumerator enumerator)
+    {
         var peaksByProcess = new Dictionary<uint, float>();
 
         foreach (var device in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
         {
-            MergeSessionPeaks(device, peaksByProcess);
+            using (device)
+            {
+                MergeSessionPeaks(device, peaksByProcess);
+            }
         }
 
         if (peaksByProcess.Count == 0)
