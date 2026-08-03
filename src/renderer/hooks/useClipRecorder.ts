@@ -49,18 +49,18 @@ function resolveClipControl(): ClipControlApi | undefined {
 
 function pickRecorderMimeType(): string {
   const candidates = [
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-    'video/mp4;codecs=avc1,mp4a.40.2',
-    'video/mp4',
-    'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9,opus',
     'video/webm',
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4',
   ]
 
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
 }
 
 async function captureDesktopStream(sourceId: string): Promise<MediaStream> {
+  // Keep the replay buffer light: 720p30 is enough for clips and much cheaper.
   const constraints = {
     audio: {
       mandatory: {
@@ -71,11 +71,11 @@ async function captureDesktopStream(sourceId: string): Promise<MediaStream> {
       mandatory: {
         chromeMediaSource: 'desktop',
         chromeMediaSourceId: sourceId,
-        minWidth: 1280,
-        maxWidth: 1920,
-        minHeight: 720,
-        maxHeight: 1080,
-        maxFrameRate: 60,
+        minWidth: 854,
+        maxWidth: 1280,
+        minHeight: 480,
+        maxHeight: 720,
+        maxFrameRate: 30,
       },
     },
   }
@@ -89,11 +89,11 @@ async function captureDesktopStream(sourceId: string): Promise<MediaStream> {
         mandatory: {
           chromeMediaSource: 'desktop',
           chromeMediaSourceId: sourceId,
-          minWidth: 1280,
-          maxWidth: 1920,
-          minHeight: 720,
-          maxHeight: 1080,
-          maxFrameRate: 60,
+          minWidth: 854,
+          maxWidth: 1280,
+          minHeight: 480,
+          maxHeight: 720,
+          maxFrameRate: 30,
         },
       },
     }
@@ -117,17 +117,17 @@ export function useClipRecorder() {
   const clipControl = resolveClipControl()
   const [sources, setSources] = useState<ClipSource[]>([])
   const [selectedSourceId, setSelectedSourceId] = useState('')
-  const [lookbackSeconds, setLookbackSecondsState] = useState<ClipLookbackSeconds>(120)
+  const [lookbackSeconds, setLookbackSecondsState] = useState<ClipLookbackSeconds>(60)
   const [keybinds, setKeybinds] = useState<string[]>(['F8'])
-  const [bufferingEnabled, setBufferingEnabledState] = useState(true)
+  const [bufferingEnabled, setBufferingEnabledState] = useState(false)
   const [status, setStatus] = useState<ClipRecordingStatus>({
     recording: false,
     buffering: false,
     bufferState: 'idle',
     elapsedMs: 0,
     bufferedSeconds: 0,
-    lookbackSeconds: 120,
-    forwardSeconds: 30,
+    lookbackSeconds: 60,
+    forwardSeconds: 15,
     outputFolder: '',
     keybinds: ['F8'],
   })
@@ -139,10 +139,12 @@ export function useClipRecorder() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<TimedChunk[]>([])
-  const lookbackRef = useRef<ClipLookbackSeconds>(120)
+  const lookbackRef = useRef<ClipLookbackSeconds>(60)
   const clippingRef = useRef(false)
   const forwardTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const clipItRef = useRef<() => Promise<void>>(async () => {})
+  const lastUiStatusAtRef = useRef(0)
+  const startingRef = useRef(false)
 
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -150,14 +152,53 @@ export function useClipRecorder() {
   }, [])
 
   const syncStatus = useCallback(
-    async (patch?: Parameters<ClipControlApi['notifyRecordingState']>[0]) => {
-      if (!clipControl) {
+    async (
+      patch?: Parameters<ClipControlApi['notifyRecordingState']>[0],
+      options?: { forceUi?: boolean; skipIpc?: boolean },
+    ) => {
+      const bufferedSeconds =
+        patch?.bufferedSeconds ?? estimateBufferedSeconds(chunksRef.current)
+      const nextLocal: Partial<ClipRecordingStatus> = {
+        recording: patch?.recording,
+        buffering: patch?.buffering,
+        bufferState: patch?.bufferState,
+        sourceId: patch?.sourceId,
+        sourceName: patch?.sourceName,
+        bufferedSeconds,
+        error: patch?.error,
+      }
+
+      const now = Date.now()
+      const shouldUpdateUi =
+        options?.forceUi ||
+        patch?.bufferState === 'clipping' ||
+        patch?.bufferState === 'error' ||
+        patch?.bufferState === 'idle' ||
+        now - lastUiStatusAtRef.current >= 2000
+
+      if (shouldUpdateUi) {
+        lastUiStatusAtRef.current = now
+        setStatus((current) => ({
+          ...current,
+          ...Object.fromEntries(
+            Object.entries(nextLocal).filter(([, value]) => value !== undefined),
+          ),
+        }))
+      }
+
+      if (!clipControl || options?.skipIpc) {
         return
       }
-      const next = patch
-        ? await clipControl.notifyRecordingState(patch)
-        : await clipControl.getStatus()
-      setStatus(next)
+
+      // Avoid IPC spam for routine buffer ticks; keep main process updated less often.
+      if (!options?.forceUi && now - lastUiStatusAtRef.current < 2000 && patch?.bufferState === 'buffering') {
+        return
+      }
+
+      const next = await clipControl.notifyRecordingState(patch ?? {})
+      if (shouldUpdateUi) {
+        setStatus(next)
+      }
     },
     [clipControl],
   )
@@ -188,12 +229,13 @@ export function useClipRecorder() {
         }
         return nextSources[0]?.id ?? ''
       })
-      await syncStatus()
+      const nextStatus = await clipControl.getStatus()
+      setStatus(nextStatus)
       setError(undefined)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to list clip sources.')
     }
-  }, [clipControl, syncStatus])
+  }, [clipControl])
 
   const stopBuffering = useCallback(async () => {
     if (forwardTimerRef.current) {
@@ -201,6 +243,7 @@ export function useClipRecorder() {
       forwardTimerRef.current = undefined
     }
     clippingRef.current = false
+    startingRef.current = false
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.onstop = null
       mediaRecorderRef.current.stop()
@@ -208,17 +251,24 @@ export function useClipRecorder() {
     mediaRecorderRef.current = null
     stopTracks()
     chunksRef.current = []
-    await syncStatus({
-      recording: false,
-      buffering: false,
-      bufferState: 'idle',
-      bufferedSeconds: 0,
-    })
+    await syncStatus(
+      {
+        recording: false,
+        buffering: false,
+        bufferState: 'idle',
+        bufferedSeconds: 0,
+      },
+      { forceUi: true },
+    )
   }, [stopTracks, syncStatus])
 
   const startBuffering = useCallback(
     async (sourceId = selectedSourceId) => {
-      if (!clipControl || !sourceId || !bufferingEnabled) {
+      if (!clipControl || !sourceId || !bufferingEnabled || startingRef.current) {
+        return
+      }
+
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         return
       }
 
@@ -233,7 +283,7 @@ export function useClipRecorder() {
         return
       }
 
-      await stopBuffering()
+      startingRef.current = true
       setIsBusy(true)
       setError(undefined)
 
@@ -246,7 +296,8 @@ export function useClipRecorder() {
 
         const recorder = new MediaRecorder(stream, {
           mimeType,
-          videoBitsPerSecond: 8_000_000,
+          videoBitsPerSecond: 2_500_000,
+          audioBitsPerSecond: 96_000,
         })
         mediaRecorderRef.current = recorder
 
@@ -256,13 +307,16 @@ export function useClipRecorder() {
           }
           chunksRef.current.push({ blob: event.data, at: Date.now() })
           chunksRef.current = pruneChunks(chunksRef.current, lookbackRef.current)
-          void syncStatus({
-            buffering: true,
-            bufferState: clippingRef.current ? 'clipping' : 'buffering',
-            sourceId: source.id,
-            sourceName: source.name,
-            bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
-          })
+          void syncStatus(
+            {
+              buffering: true,
+              bufferState: clippingRef.current ? 'clipping' : 'buffering',
+              sourceId: source.id,
+              sourceName: source.name,
+              bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
+            },
+            { skipIpc: !clippingRef.current },
+          )
         }
 
         recorder.onerror = () => {
@@ -270,14 +324,17 @@ export function useClipRecorder() {
           void stopBuffering()
         }
 
-        recorder.start(1000)
-        await syncStatus({
-          buffering: true,
-          bufferState: 'buffering',
-          sourceId: source.id,
-          sourceName: source.name,
-          bufferedSeconds: 0,
-        })
+        recorder.start(2000)
+        await syncStatus(
+          {
+            buffering: true,
+            bufferState: 'buffering',
+            sourceId: source.id,
+            sourceName: source.name,
+            bufferedSeconds: 0,
+          },
+          { forceUi: true },
+        )
       } catch (startError) {
         stopTracks()
         setError(
@@ -285,12 +342,16 @@ export function useClipRecorder() {
             ? startError.message
             : 'Unable to start background clip buffer.',
         )
-        await syncStatus({
-          buffering: false,
-          bufferState: 'error',
-          error: 'Unable to start background clip buffer.',
-        })
+        await syncStatus(
+          {
+            buffering: false,
+            bufferState: 'error',
+            error: 'Unable to start background clip buffer.',
+          },
+          { forceUi: true },
+        )
       } finally {
+        startingRef.current = false
         setIsBusy(false)
       }
     },
@@ -310,7 +371,7 @@ export function useClipRecorder() {
       return
     }
 
-    const mimeType = pickRecorderMimeType() || 'video/mp4'
+    const mimeType = pickRecorderMimeType() || 'video/webm'
     const sourceName =
       sources.find((source) => source.id === selectedSourceId)?.name ?? status.sourceName
     const blob = new Blob(
@@ -328,18 +389,24 @@ export function useClipRecorder() {
         sourceName,
       })
       setLastSavedPath(saved.path)
-      await syncStatus({
-        buffering: Boolean(mediaRecorderRef.current),
-        bufferState: mediaRecorderRef.current ? 'buffering' : 'idle',
-        bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
-      })
+      await syncStatus(
+        {
+          buffering: Boolean(mediaRecorderRef.current),
+          bufferState: mediaRecorderRef.current ? 'buffering' : 'idle',
+          bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
+        },
+        { forceUi: true },
+      )
       setError(undefined)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save clip.')
-      await syncStatus({
-        bufferState: 'error',
-        error: 'Unable to save clip.',
-      })
+      await syncStatus(
+        {
+          bufferState: 'error',
+          error: 'Unable to save clip.',
+        },
+        { forceUi: true },
+      )
     } finally {
       setIsBusy(false)
     }
@@ -351,18 +418,21 @@ export function useClipRecorder() {
     }
 
     if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
-      setError('Start background buffering before clipping.')
+      setError('Turn on background buffering in Clips before using Clip it.')
       return
     }
 
     clippingRef.current = true
     setIsBusy(true)
     setError(undefined)
-    await syncStatus({
-      recording: true,
-      buffering: true,
-      bufferState: 'clipping',
-    })
+    await syncStatus(
+      {
+        recording: true,
+        buffering: true,
+        bufferState: 'clipping',
+      },
+      { forceUi: true },
+    )
 
     const forwardMs = forwardRollSeconds(lookbackRef.current) * 1000
     if (forwardTimerRef.current) {
@@ -382,9 +452,12 @@ export function useClipRecorder() {
       chunksRef.current = pruneChunks(chunksRef.current, seconds)
       if (clipControl) {
         await clipControl.setSettings({ lookbackSeconds: seconds })
-        await syncStatus({
-          bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
-        })
+        await syncStatus(
+          {
+            bufferedSeconds: estimateBufferedSeconds(chunksRef.current),
+          },
+          { forceUi: true },
+        )
       }
     },
     [clipControl, syncStatus],
@@ -412,10 +485,11 @@ export function useClipRecorder() {
         await clipControl.setSettings({ sourceId })
       }
       if (bufferingEnabled) {
+        await stopBuffering()
         await startBuffering(sourceId)
       }
     },
-    [bufferingEnabled, clipControl, startBuffering],
+    [bufferingEnabled, clipControl, startBuffering, stopBuffering],
   )
 
   const addKeybindFromCapture = useCallback(async () => {
@@ -429,7 +503,7 @@ export function useClipRecorder() {
       }
       const next = await clipControl.removeKeybind(accelerator)
       setKeybinds(next.keybinds)
-      await syncStatus()
+      await syncStatus(undefined, { forceUi: true })
     },
     [clipControl, syncStatus],
   )
@@ -498,7 +572,6 @@ export function useClipRecorder() {
         }
         const next = await clipControl.addKeybind(accelerator)
         setKeybinds(next.keybinds)
-        await syncStatus()
       })()
     }
 
@@ -506,13 +579,19 @@ export function useClipRecorder() {
     return () => {
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [clipControl, listeningForKeybind, syncStatus])
+  }, [clipControl, listeningForKeybind])
 
+  // Only auto-start when the user has buffering enabled; never thrash on callback identity changes.
   useEffect(() => {
-    if (bufferingEnabled && selectedSourceId && !mediaRecorderRef.current) {
-      void startBuffering(selectedSourceId)
+    if (!bufferingEnabled || !selectedSourceId) {
+      return
     }
-  }, [bufferingEnabled, selectedSourceId, startBuffering])
+    if (mediaRecorderRef.current || startingRef.current) {
+      return
+    }
+    void startBuffering(selectedSourceId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally stable start conditions only
+  }, [bufferingEnabled, selectedSourceId])
 
   return {
     sources,

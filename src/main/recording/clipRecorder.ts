@@ -92,7 +92,7 @@ export class ClipRecorderService {
   async listSources(): Promise<ClipSource[]> {
     const sources = await desktopCapturer.getSources({
       types: ['screen', 'window'],
-      thumbnailSize: { width: 320, height: 180 },
+      thumbnailSize: { width: 160, height: 90 },
       fetchWindowIcons: false,
     })
 
