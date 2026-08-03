@@ -36,11 +36,11 @@ Thank you for testing Blur Sounds when it was still breaking. This release exist
 ## Requirements
 
 - Windows 10/11
-- [VB-Audio Hi-Fi Cable](https://vb-audio.com/Cable/index.htm)
+- [VB-Audio Hi-Fi Cable & ASIO Bridge](http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip) ([product page](https://vb-audio.com/Cable/index.htm))
 
 ## Quick start
 
-1. Install Hi-Fi Cable
+1. Install [Hi-Fi Cable & ASIO Bridge](http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip)
 2. Install [Blur Sounds](https://github.com/exile-tenshi/Blur-Sounds/releases/latest) — or run `npm run portable` to place a folder on your Desktop
 3. Open the app → **Apply clean audio settings**
 4. Pick your mic + apps, then **Start stream**
