@@ -27,6 +27,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 
   return {
     listSources: (options) => ipcRenderer.invoke(clipChannels.listSources, options),
+    getSourcePreview: (sourceId) => ipcRenderer.invoke(clipChannels.getSourcePreview, sourceId),
     getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
     ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
     saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
@@ -203,39 +204,70 @@ export function useClipRecorder() {
     [clipControl],
   )
 
-  const refreshSources = useCallback(async (options?: { includeThumbnails?: boolean }) => {
+  const applySourceSelection = useCallback(
+    (nextSources: ClipSource[], preferredSourceId?: string) => {
+      setSelectedSourceId((current) => {
+        if (current && nextSources.some((source) => source.id === current)) {
+          return current
+        }
+        if (preferredSourceId && nextSources.some((source) => source.id === preferredSourceId)) {
+          return preferredSourceId
+        }
+        return nextSources[0]?.id ?? ''
+      })
+    },
+    [],
+  )
+
+  /**
+   * Progressive load: screens first (instant), then windows without thumbnails.
+   * Batch thumbnails were freezing the Clips section on busy desktops.
+   */
+  const refreshSources = useCallback(async () => {
     if (!clipControl) {
       setError('Clip bridge did not load. Relaunch the Electron app.')
       return
     }
 
+    setIsBusy(true)
     try {
-      const [nextSources, clipSettings] = await Promise.all([
-        clipControl.listSources({ includeThumbnails: options?.includeThumbnails === true }),
-        clipControl.getSettings(),
-      ])
-      setSources(nextSources)
+      const clipSettings = await clipControl.getSettings()
       setLookbackSecondsState(clipSettings.lookbackSeconds)
       lookbackRef.current = clipSettings.lookbackSeconds
       setKeybinds(clipSettings.keybinds)
       setBufferingEnabledState(clipSettings.bufferingEnabled)
 
-      setSelectedSourceId((current) => {
-        if (current && nextSources.some((source) => source.id === current)) {
-          return current
-        }
-        if (clipSettings.sourceId && nextSources.some((source) => source.id === clipSettings.sourceId)) {
-          return clipSettings.sourceId
-        }
-        return nextSources[0]?.id ?? ''
-      })
+      const screens = await clipControl.listSources({ includeWindows: false })
+      setSources(screens)
+      applySourceSelection(screens, clipSettings.sourceId)
+
+      const allSources = await clipControl.listSources({ includeWindows: true })
+      setSources(allSources)
+      applySourceSelection(allSources, clipSettings.sourceId)
+
       const nextStatus = await clipControl.getStatus()
       setStatus(nextStatus)
       setError(undefined)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to list clip sources.')
+    } finally {
+      setIsBusy(false)
     }
-  }, [clipControl])
+  }, [applySourceSelection, clipControl])
+
+  const getSourcePreview = useCallback(
+    async (sourceId: string) => {
+      if (!clipControl || !sourceId) {
+        return undefined
+      }
+      try {
+        return await clipControl.getSourcePreview(sourceId)
+      } catch {
+        return undefined
+      }
+    },
+    [clipControl],
+  )
 
   const stopBuffering = useCallback(async () => {
     if (forwardTimerRef.current) {
@@ -631,6 +663,7 @@ export function useClipRecorder() {
     isBusy,
     lastSavedPath,
     refreshSources,
+    getSourcePreview,
     startBuffering,
     stopBuffering,
     clipIt,

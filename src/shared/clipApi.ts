@@ -43,6 +43,7 @@ export interface SaveClipResult {
 
 export const clipChannels = {
   listSources: 'clip:listSources',
+  getSourcePreview: 'clip:getSourcePreview',
   getStatus: 'clip:getStatus',
   ensureOutputFolder: 'clip:ensureOutputFolder',
   saveClip: 'clip:saveClip',
@@ -57,7 +58,8 @@ export const clipChannels = {
 } as const
 
 export interface ClipControlApi {
-  listSources: (options?: { includeThumbnails?: boolean }) => Promise<ClipSource[]>
+  listSources: (options?: { includeWindows?: boolean }) => Promise<ClipSource[]>
+  getSourcePreview: (sourceId: string) => Promise<string | undefined>
   getStatus: () => Promise<ClipRecordingStatus>
   ensureOutputFolder: () => Promise<string>
   saveClip: (payload: SaveClipPayload) => Promise<SaveClipResult>

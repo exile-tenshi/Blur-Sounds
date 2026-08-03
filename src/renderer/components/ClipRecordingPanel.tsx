@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ClipLookbackSeconds } from '../../shared/appSettings'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 
@@ -24,22 +24,50 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
     isBusy,
     lastSavedPath,
     refreshSources,
+    getSourcePreview,
     clipIt,
     openOutputFolder,
   } = useClipRecorderContext()
+
+  const [previewDataUrl, setPreviewDataUrl] = useState<string | undefined>()
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const desktopSources = sources.filter((source) => source.kind === 'screen')
   const windowSources = sources.filter((source) => source.kind === 'window')
   const selectedSource = sources.find((source) => source.id === selectedSourceId)
   const clipping = status.bufferState === 'clipping'
 
-  // Expensive desktopCapturer thumbnails only when the user opens Clips.
+  // Names-only list when Clips opens — no batch thumbnails.
   useEffect(() => {
     if (!isActive) {
       return
     }
-    void refreshSources({ includeThumbnails: true })
+    void refreshSources()
   }, [isActive, refreshSources])
+
+  // One lazy JPEG preview for the current selection only.
+  useEffect(() => {
+    if (!isActive || !selectedSourceId) {
+      setPreviewDataUrl(undefined)
+      return
+    }
+
+    let cancelled = false
+    setPreviewLoading(true)
+    const timer = window.setTimeout(() => {
+      void getSourcePreview(selectedSourceId).then((dataUrl) => {
+        if (!cancelled) {
+          setPreviewDataUrl(dataUrl)
+          setPreviewLoading(false)
+        }
+      })
+    }, 120)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [getSourcePreview, isActive, selectedSourceId])
 
   return (
     <section className="panel clip-panel">
@@ -64,11 +92,17 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
 
       <div className="clip-layout">
         <div className="clip-preview">
-          {selectedSource?.thumbnailDataUrl ? (
-            <img src={selectedSource.thumbnailDataUrl} alt="" />
+          {previewDataUrl ? (
+            <img src={previewDataUrl} alt="" />
           ) : (
             <div className="clip-preview-empty">
-              <p className="muted">Pick a desktop or game window to buffer.</p>
+              <p className="muted">
+                {previewLoading
+                  ? 'Loading preview…'
+                  : selectedSource
+                    ? selectedSource.name
+                    : 'Pick a desktop or game window to buffer.'}
+              </p>
             </div>
           )}
         </div>
@@ -84,7 +118,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             onChange={(event) => void selectSource(event.target.value)}
           >
             {desktopSources.length === 0 && windowSources.length === 0 ? (
-              <option value="">No capture sources found</option>
+              <option value="">{isBusy ? 'Loading sources…' : 'No capture sources found'}</option>
             ) : null}
             {desktopSources.length > 0 ? (
               <optgroup label="Desktop">
@@ -122,7 +156,8 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               ))}
             </div>
             <p className="muted">
-              Saves last {formatLookbackLabel(lookbackSeconds)} + rolls {formatLookbackLabel(forwardSeconds)} forward.
+              Saves last {formatLookbackLabel(lookbackSeconds)} + rolls{' '}
+              {formatLookbackLabel(forwardSeconds)} forward.
             </p>
           </div>
 
@@ -156,7 +191,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               disabled={isBusy || clipping}
               onClick={() => void refreshSources()}
             >
-              Refresh sources
+              {isBusy ? 'Refreshing…' : 'Refresh sources'}
             </button>
             <button
               type="button"
