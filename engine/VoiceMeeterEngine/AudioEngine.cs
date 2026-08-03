@@ -258,6 +258,11 @@ internal sealed class AudioEngine : IDisposable
         StartSources();
     }
 
+    public void RefreshSessionPeaksInBackground()
+    {
+        AudioSessionMonitor.RefreshInBackground(enumerator);
+    }
+
     public EngineTelemetry GetTelemetry()
     {
         var routeTelemetry = routeConfigs.Values
@@ -318,8 +323,8 @@ internal sealed class AudioEngine : IDisposable
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
             MicrophoneLevel = ComputeMicrophoneOutputLevel(),
-            // Cached ~2s — full COM endpoint scan every telemetry tick freezes the helper.
-            SessionLevels = AudioSessionMonitor.GetCachedOrScan(enumerator)
+            // Never COM-scan on the fast meter tick — App Library peaks refresh in background.
+            SessionLevels = AudioSessionMonitor.PeekCached()
                 .Select(session => new SessionLevelTelemetry
                 {
                     ProcessId = session.ProcessId,
@@ -1127,10 +1132,16 @@ internal sealed class AudioEngine : IDisposable
 
         EnsureMixerInputsAttached();
 
+        var hifiOutputWarning = string.Empty;
         if (UsesHifiCableInput())
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
             hifiOutputActivator.Start();
+            if (hifiOutputActivator.IsActive != true)
+            {
+                hifiOutputWarning =
+                    " Hi-Fi Cable Output could not be opened — other apps may hear silence until Recording → Hi-Fi Cable Output is enabled.";
+            }
         }
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
@@ -1166,7 +1177,7 @@ internal sealed class AudioEngine : IDisposable
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
             var hifiSuffix = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true
                 ? " Hi-Fi Cable Output is active."
-                : string.Empty;
+                : hifiOutputWarning;
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to input.{routeSuffix}{hifiSuffix}"
                 : $"Streaming mix to input.{routeSuffix}{hifiSuffix}";
