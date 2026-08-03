@@ -12,17 +12,23 @@ export interface ClipSettings {
 }
 
 export interface AppSettings {
+  /** Bumped when defaults must override older saved prefs for performance. */
+  settingsVersion?: number
   activeSection: AppSectionId
   clip: ClipSettings
 }
 
+export const APP_SETTINGS_VERSION = 2
+
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
-  lookbackSeconds: 120,
-  bufferingEnabled: true,
+  lookbackSeconds: 60,
+  /** Off by default — desktop capture is expensive; user opts in from Clips. */
+  bufferingEnabled: false,
   keybinds: ['F8'],
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  settingsVersion: APP_SETTINGS_VERSION,
   activeSection: 'mixer',
   clip: { ...DEFAULT_CLIP_SETTINGS },
 }

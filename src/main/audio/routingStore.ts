@@ -195,7 +195,7 @@ export class RoutingStore {
   private telemetryByAppId = new Map<string, EngineRouteTelemetry>()
   private telemetryEmitTimer?: ReturnType<typeof setTimeout>
   private lastTelemetryEmitAt = 0
-  private readonly telemetryEmitIntervalMs = 66
+  private readonly telemetryEmitIntervalMs = 200
   private lastRouteRemapAt = 0
   private readonly routeRemapIntervalMs = 2000
   private hifiCableFormatStatus?: HifiCableFormatResult

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioControlApi } from '../../shared/audioApi'
 import { audioChannels } from '../../shared/audioApi'
 import { DEFAULT_INPUT_GAIN, type RouteEqualizerSettings } from '../../shared/audioConstants'
@@ -100,6 +100,9 @@ export function useAudioControlState() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [isEngineBusy, setIsEngineBusy] = useState(false)
+  const lastTelemetryUiAtRef = useRef(0)
+  const pendingTelemetryRef = useRef<AudioSnapshot | undefined>(undefined)
+  const telemetryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     let isMounted = true
@@ -134,15 +137,39 @@ export function useAudioControlState() {
 
     void loadSnapshot()
 
+    const flushTelemetry = () => {
+      telemetryTimerRef.current = undefined
+      const pending = pendingTelemetryRef.current
+      pendingTelemetryRef.current = undefined
+      if (pending && isMounted) {
+        lastTelemetryUiAtRef.current = Date.now()
+        setSnapshot(pending)
+      }
+    }
+
     const unsubscribe = audioControl
       ? audioControl.subscribeSnapshot((nextSnapshot) => {
-          setSnapshot(nextSnapshot)
+          // Throttle high-frequency meter updates so React isn't painting ~15 times/sec.
+          const now = Date.now()
+          if (now - lastTelemetryUiAtRef.current >= 200) {
+            lastTelemetryUiAtRef.current = now
+            setSnapshot(nextSnapshot)
+            return
+          }
+
+          pendingTelemetryRef.current = nextSnapshot
+          if (!telemetryTimerRef.current) {
+            telemetryTimerRef.current = setTimeout(flushTelemetry, 200)
+          }
         })
       : () => {}
 
     return () => {
       isMounted = false
       unsubscribe()
+      if (telemetryTimerRef.current) {
+        clearTimeout(telemetryTimerRef.current)
+      }
     }
   }, [])
 

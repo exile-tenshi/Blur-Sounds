@@ -127,6 +127,10 @@ export function ClipRecordingPanel() {
             <span className="eq-toggle-track" />
             <span>Run buffer in background</span>
           </label>
+          <p className="muted">
+            Keep this off unless you need Clip it. Background capture uses GPU/CPU — leave it off
+            for normal chatting/mixing.
+          </p>
 
           <div className="button-row">
             <button

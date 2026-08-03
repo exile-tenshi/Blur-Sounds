@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import {
+  APP_SETTINGS_VERSION,
   DEFAULT_APP_SETTINGS,
   DEFAULT_CLIP_SETTINGS,
   normalizeClipLookback,
@@ -39,17 +40,27 @@ function normalizeSettings(raw: unknown): AppSettings {
       ? section
       : DEFAULT_APP_SETTINGS.activeSection
 
+  const savedVersion =
+    typeof input.settingsVersion === 'number' ? input.settingsVersion : 0
+  // v2 turns off always-on desktop capture that was freezing machines.
+  const forceBufferOff = savedVersion < 2
+
   const clip: ClipSettings = {
     lookbackSeconds: normalizeClipLookback(clipInput.lookbackSeconds),
     sourceId: typeof clipInput.sourceId === 'string' ? clipInput.sourceId : undefined,
-    bufferingEnabled:
-      typeof clipInput.bufferingEnabled === 'boolean'
+    bufferingEnabled: forceBufferOff
+      ? false
+      : typeof clipInput.bufferingEnabled === 'boolean'
         ? clipInput.bufferingEnabled
         : DEFAULT_CLIP_SETTINGS.bufferingEnabled,
     keybinds: sanitizeKeybinds(clipInput.keybinds),
   }
 
-  return { activeSection, clip }
+  return {
+    settingsVersion: APP_SETTINGS_VERSION,
+    activeSection,
+    clip,
+  }
 }
 
 export class SettingsStore {
@@ -57,7 +68,10 @@ export class SettingsStore {
   private readonly listeners = new Set<SettingsListener>()
 
   constructor() {
-    this.settings = this.load()
+    const loaded = this.load()
+    this.settings = loaded
+    // Persist migrated defaults (e.g. buffering forced off in v2).
+    this.persist()
   }
 
   get(): AppSettings {

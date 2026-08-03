@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import './App.css'
 import logoUrl from './assets/logo.svg?url'
 import { normalizeMicrophoneSlots, hasActiveMicrophoneSlot } from '../shared/microphoneSlots'
@@ -85,7 +86,7 @@ function FeatureStatusStrip({
   )
 }
 
-function AppShell() {
+const AppShell = memo(function AppShell() {
   const { activeSection, setActiveSection } = useAppSettings()
   const {
     snapshot,
@@ -370,7 +371,7 @@ function AppShell() {
       </main>
     </div>
   )
-}
+})
 
 function App() {
   return (
