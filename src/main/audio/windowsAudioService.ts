@@ -224,23 +224,48 @@ function dedupeDevices<T extends { id: string }>(devices: T[]): T[] {
   return [...unique.values()]
 }
 
+let cachedDevices: AudioDevice[] | undefined
+let cachedDevicesAt = 0
+let cachedDevicesInFlight: Promise<AudioDevice[]> | undefined
+const DEVICE_CACHE_TTL_MS = 5000
+
 export async function listAudioDevices(): Promise<AudioDevice[]> {
-  const devices = dedupeDevices(await runPowerShellJson<Omit<AudioDevice, 'kind'>>(deviceScript)).map((device) => ({
-    ...device,
-    kind: detectDeviceKind(device.name, device.id),
-  }))
+  const now = Date.now()
+  if (cachedDevices && now - cachedDevicesAt < DEVICE_CACHE_TTL_MS) {
+    return cachedDevices
+  }
 
-  const firstInput = devices.find((device) => device.kind === 'input')
-  const firstOutput = devices.find((device) => device.kind === 'output')
+  if (cachedDevicesInFlight) {
+    return cachedDevicesInFlight
+  }
 
-  return devices.map((device) => ({
-    ...device,
-    id: createBindableDeviceId(device.kind, device.name),
-    isDefault:
-      device.id === firstInput?.id && device.kind === 'input'
-        ? true
-        : device.id === firstOutput?.id && device.kind === 'output',
-  }))
+  cachedDevicesInFlight = (async () => {
+    const devices = dedupeDevices(
+      await runPowerShellJson<Omit<AudioDevice, 'kind'>>(deviceScript),
+    ).map((device) => ({
+      ...device,
+      kind: detectDeviceKind(device.name, device.id),
+    }))
+
+    const firstInput = devices.find((device) => device.kind === 'input')
+    const firstOutput = devices.find((device) => device.kind === 'output')
+
+    const next = devices.map((device) => ({
+      ...device,
+      id: createBindableDeviceId(device.kind, device.name),
+      isDefault:
+        device.id === firstInput?.id && device.kind === 'input'
+          ? true
+          : device.id === firstOutput?.id && device.kind === 'output',
+    }))
+    cachedDevices = next
+    cachedDevicesAt = Date.now()
+    return next
+  })().finally(() => {
+    cachedDevicesInFlight = undefined
+  })
+
+  return cachedDevicesInFlight
 }
 
 let cachedApplications: AudioApplication[] | undefined

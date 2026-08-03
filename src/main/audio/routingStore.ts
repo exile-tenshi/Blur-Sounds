@@ -195,7 +195,7 @@ export class RoutingStore {
   private telemetryByAppId = new Map<string, EngineRouteTelemetry>()
   private telemetryEmitTimer?: ReturnType<typeof setTimeout>
   private lastTelemetryEmitAt = 0
-  private readonly telemetryEmitIntervalMs = 500
+  private readonly telemetryEmitIntervalMs = 1000
   private lastRouteRemapAt = 0
   private readonly routeRemapIntervalMs = 2000
   private hifiCableFormatStatus?: HifiCableFormatResult
@@ -386,14 +386,8 @@ export class RoutingStore {
       this.engineStatus.sessionLevels,
     )
 
-    const hifiCable = detectHifiCableDependency(devices)
-    if (hifiCable.playbackReady) {
-      try {
-        this.hifiCableFormatStatus = await this.engine.configureHifiCable()
-      } catch {
-        // Format apply is best-effort during refresh; users can retry manually.
-      }
-    }
+    // Do not auto-apply Hi-Fi Cable PolicyConfig on every refresh — that COM/registry
+    // work can freeze the UI for seconds. Users apply via Setup / Start stream.
 
     if (this.isEngineActive()) {
       try {

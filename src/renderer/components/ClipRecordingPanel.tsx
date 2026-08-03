@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import type { ClipLookbackSeconds } from '../../shared/appSettings'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 
-export function ClipRecordingPanel() {
+export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean }) {
   const {
     sources,
     selectedSourceId,
@@ -33,10 +33,13 @@ export function ClipRecordingPanel() {
   const selectedSource = sources.find((source) => source.id === selectedSourceId)
   const clipping = status.bufferState === 'clipping'
 
-  // Load capture sources only while the Clips section is visible.
+  // Expensive desktopCapturer thumbnails only when the user opens Clips.
   useEffect(() => {
+    if (!isActive) {
+      return
+    }
     void refreshSources({ includeThumbnails: true })
-  }, [refreshSources])
+  }, [isActive, refreshSources])
 
   return (
     <section className="panel clip-panel">

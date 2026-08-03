@@ -299,7 +299,7 @@ const AppShell = memo(function AppShell() {
 
         {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}
         <div className={activeSection === 'clips' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'clips'}>
-          <ClipRecordingPanel />
+          <ClipRecordingPanel isActive={activeSection === 'clips'} />
         </div>
 
         {activeSection === 'setup' ? (
