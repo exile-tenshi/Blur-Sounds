@@ -195,7 +195,8 @@ export class RoutingStore {
   private telemetryByAppId = new Map<string, EngineRouteTelemetry>()
   private telemetryEmitTimer?: ReturnType<typeof setTimeout>
   private lastTelemetryEmitAt = 0
-  private readonly telemetryEmitIntervalMs = 1000
+  /** Keep level meters near real-time; remap/list work stays on slower timers. */
+  private readonly telemetryEmitIntervalMs = 100
   private lastRouteRemapAt = 0
   private readonly routeRemapIntervalMs = 2000
   private hifiCableFormatStatus?: HifiCableFormatResult
@@ -678,16 +679,19 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
+    // Prefer studio format, but do not block Start if PolicyConfig fails — the cable may
+    // already be usable and silence is worse than a format warning.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
     } catch (error) {
-      this.setEngineError(
-        error instanceof Error
-          ? error.message
-          : 'Unable to apply Hi-Fi Cable studio settings before starting.',
-      )
-      return this.emitCachedSnapshot()
+      this.engineStatus = {
+        ...this.engineStatus,
+        message:
+          error instanceof Error
+            ? `Hi-Fi Cable format warning: ${error.message}`
+            : 'Hi-Fi Cable format warning: unable to apply studio settings.',
+      }
     }
 
     if (!this.selection.inputDeviceId) {

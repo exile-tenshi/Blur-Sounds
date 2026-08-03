@@ -7,6 +7,10 @@ internal static class AudioSessionMonitor
     private static readonly object CacheGate = new();
     private static List<SessionPeakInfo> cachedPeaks = [];
     private static long cachedPeaksAtMs;
+    /// <summary>
+    /// COM session enumeration is expensive — never scan every meter tick.
+    /// Live mic/route levels come from capture peaks; this cache is for App Library only.
+    /// </summary>
     private const int CacheTtlMilliseconds = 2000;
 
     public static List<SessionPeakInfo> GetActiveSessionPeaks(MMDeviceEnumerator enumerator)
@@ -54,6 +58,31 @@ internal static class AudioSessionMonitor
         }
 
         return GetActiveSessionPeaksAllDevices(enumerator);
+    }
+
+    /// <summary>Never touches COM — safe on the fast meter telemetry path.</summary>
+    public static List<SessionPeakInfo> PeekCached()
+    {
+        lock (CacheGate)
+        {
+            return cachedPeaks;
+        }
+    }
+
+    /// <summary>Refresh session peaks off the hot meter path (about every 2s).</summary>
+    public static void RefreshInBackground(MMDeviceEnumerator enumerator)
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                GetActiveSessionPeaksAllDevices(enumerator);
+            }
+            catch
+            {
+                // Background session peak refresh is best-effort.
+            }
+        });
     }
 
     private static List<SessionPeakInfo> ScanActiveSessionPeaks(MMDeviceEnumerator enumerator)
