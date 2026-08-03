@@ -2,7 +2,7 @@ import type { AudioDevice, HifiCableEndpointStatus, HifiCableInfo } from './audi
 
 export const HIFI_CABLE_PRODUCT_URL = 'https://vb-audio.com/Cable/index.htm'
 export const HIFI_CABLE_DOWNLOAD_URL =
-  'https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip'
+  'http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip'
 
 export const HIFI_CABLE_QUALITY = {
   sampleRateHz: 48000,
@@ -210,7 +210,7 @@ export function mergeHifiCableFormatStatus(
 }
 
 export function formatHifiCableMissingMessage(): string {
-  return 'Hi-Fi Cable Input is required. Download Hi-Fi Cable from vb-audio.com, install it, then click Refresh.'
+  return `Hi-Fi Cable Input is required. Download Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL}, install it, then click Refresh.`
 }
 
 export function formatHifiCableDisabledMessage(): string {
@@ -227,7 +227,7 @@ export function formatHifiCableUnavailableMessage(info: HifiCableInfo): string {
 
 export function getHifiCableSetupSteps(): string[] {
   return [
-    'Download and install Hi-Fi Cable & ASIO Bridge from vb-audio.com (run setup as administrator, reboot if prompted).',
+    `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
     'Click Apply clean audio settings in Blur Sounds to reset Hi-Fi Cable Input and Output to 24 bit, 48000 Hz with exclusive mode enabled.',
     'If needed, open Windows Sound → Playback or Recording and confirm both Hi-Fi Cable devices show 48000 Hz on the Advanced tab.',
     'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect).',

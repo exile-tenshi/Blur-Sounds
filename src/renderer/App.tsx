@@ -154,7 +154,7 @@ function App() {
           </p>
           <div className="button-row hifi-settings-buttons">
             <a className="secondary-button dependency-download" href={snapshot.hifiCable.downloadUrl} target="_blank" rel="noreferrer">
-              Download Hi-Fi Cable
+              Download Hi-Fi Cable & ASIO Bridge
             </a>
             <button type="button" className="primary-button" onClick={() => void applyHifiCableStudioSettings()}>
               Apply clean audio settings
