@@ -281,7 +281,6 @@ const AppShell = memo(function AppShell() {
             onEnsureDevice={ensureMicrophoneDevice}
             onChange={(slotId, settings) => setMicrophoneNoiseSuppression(slotId, settings)}
             onSelectDeviceForSlot={selectMicrophoneSlot}
-            onAddSlot={addMicrophoneSlotToSelection}
             onRemoveSlot={removeMicrophoneSlotFromSelection}
           />
         ) : null}

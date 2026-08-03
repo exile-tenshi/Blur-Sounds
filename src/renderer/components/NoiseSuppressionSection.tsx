@@ -16,7 +16,6 @@ interface NoiseSuppressionSectionProps {
   onEnsureDevice: (deviceId: string) => Promise<string | undefined>
   onChange: (slotId: string, settings: Partial<NoiseSuppressionSettings>) => Promise<void>
   onSelectDeviceForSlot: (slotId: string, deviceId: string) => Promise<void>
-  onAddSlot: () => Promise<void>
   onRemoveSlot: (slotId: string) => Promise<void>
 }
 
@@ -300,7 +299,6 @@ export function NoiseSuppressionSection({
   onEnsureDevice,
   onChange,
   onSelectDeviceForSlot,
-  onAddSlot,
   onRemoveSlot,
 }: NoiseSuppressionSectionProps) {
   const slots = useMemo(
@@ -309,13 +307,9 @@ export function NoiseSuppressionSection({
   )
   const trackedSlots = slots.filter((slot) => slot.deviceId)
   const [expandedSlotId, setExpandedSlotId] = useState(trackedSlots[0]?.id ?? slots[0]?.id ?? '')
-  const [pickDeviceId, setPickDeviceId] = useState('')
   const [autoTrackedDefault, setAutoTrackedDefault] = useState(false)
 
-  const usedDeviceIds = new Set(trackedSlots.map((slot) => slot.deviceId).filter(Boolean))
-  const availableToAdd = microphoneDevices.filter((device) => !usedDeviceIds.has(device.id))
-
-  // Auto-track default / first mic so Noise never starts empty when hardware exists.
+  // Auto-track default / Mixer mic so Noise uses the card below — no separate Add row.
   useEffect(() => {
     if (autoTrackedDefault || trackedSlots.length > 0 || microphoneDevices.length === 0) {
       return
@@ -354,9 +348,8 @@ export function NoiseSuppressionSection({
           <p className="eyebrow">Noise suppression</p>
           <h2>Microphone cleanup</h2>
           <p className="section-help">
-            Pick any mic here — it does not need to be chosen in Mixer first. Multiple mics are
-            supported, and mics already in use are auto-tracked. Start the stream for live cleanup
-            and level meters.
+            Uses the microphone tracked below (same as Mixer). Choose the device on the card, turn
+            suppression on, then Start stream for live cleanup.
           </p>
         </div>
         <span className="badge">{trackedSlots.length} tracked</span>
@@ -364,65 +357,10 @@ export function NoiseSuppressionSection({
 
       {!engineActive ? (
         <p className="notice">
-          Stream is idle — select your mic and turn suppression on, then press <strong>Start stream</strong>
-          in Mixer so the app captures that microphone.
+          Stream is idle — pick your mic on the card below, turn suppression on, then press{' '}
+          <strong>Start stream</strong> in Mixer.
         </p>
       ) : null}
-
-      <div className="noise-add-row">
-        <label className="field-label" htmlFor="ns-add-device">
-          Add microphone
-        </label>
-        <div className="button-row">
-          <select
-            id="ns-add-device"
-            value={pickDeviceId}
-            onChange={(event) => setPickDeviceId(event.target.value)}
-          >
-            <option value="">Choose a microphone…</option>
-            {availableToAdd.map((device) => (
-              <option key={device.id} value={device.id} disabled={!device.isAvailable}>
-                {device.name}
-                {device.isDefault ? ' (default)' : ''}
-                {!device.isAvailable ? ' (offline)' : ''}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!pickDeviceId}
-            onClick={() => {
-              const deviceId = pickDeviceId
-              setPickDeviceId('')
-              void onEnsureDevice(deviceId).then(async (slotId) => {
-                if (slotId) {
-                  setExpandedSlotId(slotId)
-                  // Turn NS on when tracking so the mic is actively cleaned up.
-                  await onChange(slotId, { enabled: true })
-                }
-              })
-            }}
-          >
-            Track mic
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => {
-              void onAddSlot().then(() => {
-                const nextSlots = normalizeMicrophoneSlots({
-                  microphones: selectionMicrophones,
-                })
-                // expanded id updates via effect after snapshot refresh
-                setExpandedSlotId(nextSlots[nextSlots.length - 1]?.id ?? expandedSlotId)
-              })
-            }}
-          >
-            Add empty slot
-          </button>
-        </div>
-      </div>
 
       <div className="noise-mic-list">
         {slots.length === 0 ? (
