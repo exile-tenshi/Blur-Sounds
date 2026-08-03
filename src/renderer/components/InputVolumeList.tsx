@@ -137,8 +137,8 @@ const MicrophoneSourceCard = memo(function MicrophoneSourceCard({
               : engineActive
                 ? source.ready
                   ? 'live'
-                  : 'waiting'
-                : 'engine stopped'}
+                  : 'waiting for mic capture'
+                : 'stream idle — click Start stream'}
           </p>
         </div>
         <div className="volume-actions">
@@ -177,6 +177,9 @@ const MicrophoneSourceCard = memo(function MicrophoneSourceCard({
       <LevelMeter
         level={engineActive && !source.muted ? source.level : 0}
         label={`${source.name} level`}
+        idleLabel={
+          !engineActive ? 'Start stream' : source.muted ? 'Paused' : !source.ready ? 'Waiting' : undefined
+        }
       />
     </article>
   )

@@ -193,6 +193,11 @@ const AppShell = memo(function AppShell() {
                 className="primary-button"
                 onClick={() => void startEngine()}
                 disabled={isEngineBusy || !snapshot.hifiCable.playbackReady}
+                title={
+                  !snapshot.hifiCable.playbackReady
+                    ? 'Install or enable Hi-Fi Cable Input in Setup first'
+                    : 'Start the mix — meters and noise cleanup only move while streaming'
+                }
               >
                 {isEngineBusy ? 'Starting...' : 'Start stream'}
               </button>
@@ -226,8 +231,17 @@ const AppShell = memo(function AppShell() {
         ) : null}
         {!isInitialLoading && hasMixSources && !isEngineActive ? (
           <p className="notice">
-            Stream is stopped. Click <strong>Start stream</strong> to send audio to Hi-Fi Cable Input.
-            Noise and clip buffer can still be configured now.
+            {!snapshot.hifiCable.playbackReady ? (
+              <>
+                Hi-Fi Cable Input is missing or disabled — open <strong>Setup</strong>, install/enable
+                it, then click Refresh. Mic level meters stay at idle until the stream can start.
+              </>
+            ) : (
+              <>
+                Stream is stopped — click <strong>Start stream</strong> so mic levels move when you
+                speak. Noise and clip settings can still be edited now.
+              </>
+            )}
           </p>
         ) : null}
 

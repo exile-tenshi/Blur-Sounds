@@ -1103,6 +1103,16 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+.level-meter.is-idle .level-meter-value {
+  min-width: 88px;
+  color: #94a3b8;
+  font-variant-numeric: normal;
+}
+
+.level-meter.is-idle .level-meter-track {
+  opacity: 0.55;
+}
+
 progress {
   width: 120px;
   height: 10px;
