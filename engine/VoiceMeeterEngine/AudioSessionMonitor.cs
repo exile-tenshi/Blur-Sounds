@@ -70,12 +70,14 @@ internal static class AudioSessionMonitor
     }
 
     /// <summary>Refresh session peaks off the hot meter path (about every 2s).</summary>
-    public static void RefreshInBackground(MMDeviceEnumerator enumerator)
+    public static void RefreshInBackground(MMDeviceEnumerator _)
     {
         _ = Task.Run(() =>
         {
             try
             {
+                // Own enumerator — MMDeviceEnumerator is not safe to share across threads.
+                using var enumerator = new MMDeviceEnumerator();
                 GetActiveSessionPeaksAllDevices(enumerator);
             }
             catch
