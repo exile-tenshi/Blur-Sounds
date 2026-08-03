@@ -20,7 +20,7 @@ interface MicrophoneSourceControl {
   noiseSuppression: boolean
   onSetMuted: (muted: boolean) => Promise<void>
   onSetVolume: (volume: number) => Promise<void>
-  onSetNoiseSuppression: (enabled: boolean) => Promise<void>
+  onSetNoiseSuppression?: (enabled: boolean) => Promise<void>
 }
 
 interface InputVolumeListProps {
@@ -158,16 +158,22 @@ const MicrophoneSourceCard = memo(function MicrophoneSourceCard({
         onCommit={(volume) => void source.onSetVolume(volume)}
       />
       <p className="muted gain-hint">100% = original level · up to {MAX_INPUT_GAIN * 100}% boost</p>
-      <label className="eq-toggle noise-toggle">
-        <input
-          type="checkbox"
-          checked={source.noiseSuppression}
-          disabled={source.muted}
-          onChange={(event) => void source.onSetNoiseSuppression(event.target.checked)}
-        />
-        <span className="eq-toggle-track" />
-        <span>Noise suppression</span>
-      </label>
+      {source.onSetNoiseSuppression ? (
+        <label className="eq-toggle noise-toggle">
+          <input
+            type="checkbox"
+            checked={source.noiseSuppression}
+            disabled={source.muted}
+            onChange={(event) => void source.onSetNoiseSuppression?.(event.target.checked)}
+          />
+          <span className="eq-toggle-track" />
+          <span>Noise suppression</span>
+        </label>
+      ) : (
+        <p className="muted">
+          Noise suppression: {source.noiseSuppression ? 'on' : 'off'} — edit in Noise section
+        </p>
+      )}
       <LevelMeter
         level={engineActive && !source.muted ? source.level : 0}
         label={`${source.name} level`}

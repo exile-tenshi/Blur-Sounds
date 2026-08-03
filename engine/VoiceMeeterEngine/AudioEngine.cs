@@ -802,7 +802,7 @@ internal sealed class AudioEngine : IDisposable
                 var newMic = await CreateMicSourceWithRetryAsync(device, config.MicrophoneId!);
                 newMic.SetVolume(Math.Clamp(config.Volume, 0f, 4f));
                 newMic.SetMuted(config.Muted);
-                newMic.SetNoiseSuppression(config.NoiseSuppression);
+                ApplyNoiseSuppressionSettings(newMic, config);
                 microphoneSources[slotId] = newMic;
                 await AttachMicrophoneToMixerAsync(slotId, newMic);
                 message = $"Bound microphone: {device.FriendlyName}";
@@ -871,7 +871,8 @@ internal sealed class AudioEngine : IDisposable
                     MicrophoneId = slot.MicrophoneId,
                     Muted = slot.Muted,
                     Volume = Math.Clamp(slot.Volume, 0f, 4f),
-                    NoiseSuppression = slot.NoiseSuppression,
+                    NoiseSuppression = slot.NoiseSuppression || (slot.NoiseSuppressionSettings?.Enabled ?? false),
+                    NoiseSuppressionSettings = slot.NoiseSuppressionSettings,
                 })
                 .ToList();
         }
@@ -916,8 +917,26 @@ internal sealed class AudioEngine : IDisposable
 
             source.SetVolume(Math.Clamp(slot.Volume, 0f, 4f));
             source.SetMuted(slot.Muted);
-            source.SetNoiseSuppression(slot.NoiseSuppression);
+            ApplyNoiseSuppressionSettings(source, slot);
         }
+    }
+
+    private static void ApplyNoiseSuppressionSettings(MicSource source, MicrophoneSlotConfig slot)
+    {
+        var settings = slot.NoiseSuppressionSettings;
+        if (settings is null)
+        {
+            source.SetNoiseSuppression(slot.NoiseSuppression);
+            return;
+        }
+
+        source.SetNoiseSuppressionSettings(
+            settings.Enabled || slot.NoiseSuppression,
+            settings.Strength,
+            settings.Threshold,
+            settings.HighPassHz,
+            settings.Attack,
+            settings.Release);
     }
 
     private async Task SyncAppLoopbackSourcesAsync(IReadOnlyCollection<RouteConfig> routes)
@@ -1591,6 +1610,17 @@ internal sealed class MicSource : IDisposable
     public void SetNoiseSuppression(bool enabled)
     {
         noiseSuppressionProvider.SetEnabled(enabled);
+    }
+
+    public void SetNoiseSuppressionSettings(
+        bool enabled,
+        float strength,
+        float threshold,
+        float highPassHz,
+        float attack,
+        float release)
+    {
+        noiseSuppressionProvider.SetSettings(enabled, strength, threshold, highPassHz, attack, release);
     }
 
     private void ApplyVolume()

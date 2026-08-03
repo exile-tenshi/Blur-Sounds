@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { audioChannels, type AudioControlApi } from '../shared/audioApi.js'
 import { clipChannels, type ClipControlApi } from '../shared/clipApi.js'
+import { settingsChannels, type SettingsControlApi } from '../shared/settingsApi.js'
 
 const audioControlApi: AudioControlApi = {
   getSnapshot: () => ipcRenderer.invoke(audioChannels.getSnapshot),
@@ -47,7 +48,33 @@ const clipControlApi: ClipControlApi = {
   saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
   openOutputFolder: () => ipcRenderer.invoke(clipChannels.openOutputFolder),
   notifyRecordingState: (payload) => ipcRenderer.invoke(clipChannels.notifyRecordingState, payload),
+  getSettings: () => ipcRenderer.invoke(clipChannels.getSettings),
+  setSettings: (patch) => ipcRenderer.invoke(clipChannels.setSettings, patch),
+  addKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.addKeybind, accelerator),
+  removeKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.removeKeybind, accelerator),
+  onTriggerClip: (listener) => {
+    const wrapped = () => listener()
+    ipcRenderer.on(clipChannels.subscribeTrigger, wrapped)
+    return () => {
+      ipcRenderer.removeListener(clipChannels.subscribeTrigger, wrapped)
+    }
+  },
+}
+
+const settingsControlApi: SettingsControlApi = {
+  get: () => ipcRenderer.invoke(settingsChannels.get),
+  set: (patch) => ipcRenderer.invoke(settingsChannels.set, patch),
+  subscribe: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, settings: Parameters<typeof listener>[0]) => {
+      listener(settings)
+    }
+    ipcRenderer.on(settingsChannels.subscribe, wrapped)
+    return () => {
+      ipcRenderer.removeListener(settingsChannels.subscribe, wrapped)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('audioControl', audioControlApi)
 contextBridge.exposeInMainWorld('clipControl', clipControlApi)
+contextBridge.exposeInMainWorld('settingsControl', settingsControlApi)
