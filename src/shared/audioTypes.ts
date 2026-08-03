@@ -1,3 +1,7 @@
+import type { NoiseSuppressionSettings } from './noiseSuppression.js'
+
+export type { NoiseSuppressionSettings }
+
 export type AudioDeviceKind = 'input' | 'output'
 
 export type RouteTarget = 'hifi-cable'
@@ -55,7 +59,9 @@ export interface MicrophoneSlot {
   deviceId?: string
   muted: boolean
   volume: number
+  /** @deprecated use noiseSuppressionSettings.enabled */
   noiseSuppression?: boolean
+  noiseSuppressionSettings?: NoiseSuppressionSettings
 }
 
 export interface DeviceSelection {
@@ -163,7 +169,8 @@ export interface SetMicrophoneVolumePayload {
 
 export interface SetMicrophoneNoiseSuppressionPayload {
   slotId?: string
-  noiseSuppression: boolean
+  noiseSuppression?: boolean
+  settings?: Partial<NoiseSuppressionSettings>
 }
 
 export interface SetRouteVolumePayload {

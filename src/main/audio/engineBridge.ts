@@ -501,6 +501,8 @@ function toEngineMicrophones(slots: MicrophoneSlot[]): MicrophoneSlot[] {
     deviceId: slot.deviceId,
     muted: slot.muted ?? false,
     volume: slot.volume ?? 1,
+    noiseSuppression: slot.noiseSuppressionSettings?.enabled ?? slot.noiseSuppression ?? false,
+    noiseSuppressionSettings: slot.noiseSuppressionSettings,
   }))
 }
 

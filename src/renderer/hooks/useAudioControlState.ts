@@ -20,6 +20,7 @@ import {
   sortVoicemeeterDevices,
 } from '../../shared/audioLabels'
 import type { AudioSnapshot } from '../../shared/audioTypes'
+import type { NoiseSuppressionSettings } from '../../shared/noiseSuppression'
 import {
   HIFI_CABLE_DOWNLOAD_URL,
   HIFI_CABLE_PRODUCT_URL,
@@ -76,7 +77,8 @@ function resolveAudioControl(): AudioControlApi | undefined {
     setMicrophoneVolume: (payload) => ipcRenderer.invoke(audioChannels.setMicrophoneVolume, payload),
     setMicrophoneNoiseSuppression: (payload) =>
       ipcRenderer.invoke(audioChannels.setMicrophoneNoiseSuppression, payload),
-    openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
+    openHifiCablePlaybackSettings: () =>
+      ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
     openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
     applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
     subscribeSnapshot: (listener) => {
@@ -334,13 +336,32 @@ export function useAudioControlState() {
     setSnapshot(await audioControl.setMicrophoneVolume({ slotId, volume }))
   }, [])
 
-  const setMicrophoneNoiseSuppression = useCallback(async (slotId: string, noiseSuppression: boolean) => {
-    const audioControl = resolveAudioControl()
-    if (!audioControl) {
-      return
-    }
-    setSnapshot(await audioControl.setMicrophoneNoiseSuppression({ slotId, noiseSuppression }))
-  }, [])
+  const setMicrophoneNoiseSuppression = useCallback(
+    async (
+      slotId: string,
+      noiseSuppression: boolean | NoiseSuppressionSettings | Partial<NoiseSuppressionSettings>,
+    ) => {
+      const audioControl = resolveAudioControl()
+      if (!audioControl) {
+        return
+      }
+
+      if (typeof noiseSuppression === 'boolean') {
+        setSnapshot(
+          await audioControl.setMicrophoneNoiseSuppression({ slotId, noiseSuppression }),
+        )
+        return
+      }
+
+      setSnapshot(
+        await audioControl.setMicrophoneNoiseSuppression({
+          slotId,
+          settings: noiseSuppression,
+        }),
+      )
+    },
+    [],
+  )
 
   const refreshSnapshot = useCallback(async () => {
     const audioControl = resolveAudioControl()

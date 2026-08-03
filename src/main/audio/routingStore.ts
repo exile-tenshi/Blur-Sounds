@@ -492,10 +492,23 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
+    const current = slots.find((slot) => slot.id === slotId)
+    const nextSettings = {
+      ...(current?.noiseSuppressionSettings ?? {}),
+      ...(payload.settings ?? {}),
+      enabled:
+        payload.settings?.enabled ??
+        payload.noiseSuppression ??
+        current?.noiseSuppressionSettings?.enabled ??
+        current?.noiseSuppression ??
+        false,
+    }
+
     this.selection = {
       ...this.selection,
       microphones: updateMicrophoneSlot(slots, slotId, {
-        noiseSuppression: payload.noiseSuppression,
+        noiseSuppression: nextSettings.enabled,
+        noiseSuppressionSettings: nextSettings,
       }),
     }
 

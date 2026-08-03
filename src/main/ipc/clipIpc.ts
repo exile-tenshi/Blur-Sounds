@@ -2,10 +2,23 @@ import type { BrowserWindow } from 'electron'
 import { ipcMain, session } from 'electron'
 import { clipChannels } from '../../shared/clipApi.js'
 import type { SaveClipPayload } from '../../shared/clipApi.js'
+import type { ClipSettings } from '../../shared/appSettings.js'
 import { ClipRecorderService } from '../recording/clipRecorder.js'
+import { ClipKeybindService } from '../recording/clipKeybinds.js'
+import type { SettingsStore } from '../settings/settingsStore.js'
 
-export function registerClipIpc(_mainWindow: BrowserWindow): ClipRecorderService {
-  const recorder = new ClipRecorderService()
+export function registerClipIpc(
+  mainWindow: BrowserWindow,
+  settings: SettingsStore,
+  keybinds: ClipKeybindService,
+): ClipRecorderService {
+  const recorder = new ClipRecorderService(settings)
+  keybinds.setMainWindow(mainWindow)
+  keybinds.refresh()
+
+  settings.subscribe(() => {
+    keybinds.refresh()
+  })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     if (
@@ -59,18 +72,44 @@ export function registerClipIpc(_mainWindow: BrowserWindow): ClipRecorderService
   ipcMain.handle(clipChannels.saveClip, (_event, payload: SaveClipPayload) =>
     recorder.saveClip(payload),
   )
-  ipcMain.handle(
-    clipChannels.notifyRecordingState,
-    (
-      _event,
-      payload: {
-        recording: boolean
-        sourceId?: string
-        sourceName?: string
-        error?: string
-      },
-    ) => recorder.setRecordingState(payload),
+  ipcMain.handle(clipChannels.notifyRecordingState, (_event, payload) =>
+    recorder.setRecordingState(payload),
   )
+  ipcMain.handle(clipChannels.getSettings, () => settings.get().clip)
+  ipcMain.handle(clipChannels.setSettings, (_event, patch: Partial<ClipSettings>) => {
+    const next = settings.set({ clip: patch })
+    keybinds.refresh()
+    return next.clip
+  })
+  ipcMain.handle(clipChannels.addKeybind, (_event, accelerator: string) => {
+    const current = settings.get().clip.keybinds
+    if (!accelerator?.trim()) {
+      return settings.get().clip
+    }
+    if (current.includes(accelerator.trim())) {
+      return settings.get().clip
+    }
+    const next = settings.set({
+      clip: { keybinds: [...current, accelerator.trim()] },
+    })
+    keybinds.refresh()
+    return next.clip
+  })
+  ipcMain.handle(clipChannels.removeKeybind, (_event, accelerator: string) => {
+    const next = settings.set({
+      clip: {
+        keybinds: settings.get().clip.keybinds.filter((item) => item !== accelerator),
+      },
+    })
+    keybinds.refresh()
+    return next.clip
+  })
+  ipcMain.handle(clipChannels.triggerClip, () => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(clipChannels.subscribeTrigger)
+    }
+    return recorder.getStatus()
+  })
 
   return recorder
 }

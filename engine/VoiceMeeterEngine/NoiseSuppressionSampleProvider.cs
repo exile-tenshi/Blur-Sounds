@@ -4,19 +4,12 @@ using NAudio.Wave;
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Real-time microphone noise suppression: high-pass + adaptive soft noise gate.
-/// Estimates a noise floor during quiet speech gaps and attenuates steady background noise.
+/// Real-time microphone noise suppression with editable strength / threshold / high-pass / timing.
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
 {
-    private const float HighPassHz = 85f;
     private const float NoiseLearnRate = 0.015f;
     private const float SpeechLearnRate = 0.35f;
-    private const float GateOpenMarginDb = 8f;
-    private const float GateCloseMarginDb = 3.5f;
-    private const float MaxAttenuation = 0.06f;
-    private const float Attack = 0.45f;
-    private const float Release = 0.08f;
     private const float MinEnvelope = 1e-6f;
 
     private readonly ISampleProvider source;
@@ -26,6 +19,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
     private float noiseFloor = 0.002f;
     private float gateGain = 1f;
     private bool enabled;
+    private float highPassHz = 85f;
+    private float strength = 70f;
+    private float threshold = 55f;
+    private float attack = 55f;
+    private float release = 40f;
 
     public NoiseSuppressionSampleProvider(ISampleProvider source)
     {
@@ -34,9 +32,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
         channels = Math.Max(1, WaveFormat.Channels);
         channelEnvelope = new float[channels];
         highPassFilters = new BiQuadFilter[channels];
+        RebuildHighPass();
         for (var channel = 0; channel < channels; channel++)
         {
-            highPassFilters[channel] = BiQuadFilter.HighPassFilter(WaveFormat.SampleRate, HighPassHz, 0.707f);
             channelEnvelope[channel] = MinEnvelope;
         }
     }
@@ -46,6 +44,26 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
     public void SetEnabled(bool nextEnabled)
     {
         enabled = nextEnabled;
+        if (!enabled)
+        {
+            gateGain = 1f;
+        }
+    }
+
+    public void SetSettings(bool nextEnabled, float nextStrength, float nextThreshold, float nextHighPassHz, float nextAttack, float nextRelease)
+    {
+        enabled = nextEnabled;
+        strength = Math.Clamp(nextStrength, 0f, 100f);
+        threshold = Math.Clamp(nextThreshold, 0f, 100f);
+        attack = Math.Clamp(nextAttack, 0f, 100f);
+        release = Math.Clamp(nextRelease, 0f, 100f);
+        var clampedHighPass = Math.Clamp(nextHighPassHz, 40f, 220f);
+        if (Math.Abs(clampedHighPass - highPassHz) >= 0.5f)
+        {
+            highPassHz = clampedHighPass;
+            RebuildHighPass();
+        }
+
         if (!enabled)
         {
             gateGain = 1f;
@@ -83,19 +101,35 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
         return samplesRead;
     }
 
+    private void RebuildHighPass()
+    {
+        for (var channel = 0; channel < channels; channel++)
+        {
+            highPassFilters[channel] = BiQuadFilter.HighPassFilter(WaveFormat.SampleRate, highPassHz, 0.707f);
+        }
+    }
+
     private void UpdateGate(float envelope)
     {
+        // Higher strength → deeper attenuation when gated.
+        var maxAttenuation = Math.Clamp(0.35f - strength * 0.0032f, 0.02f, 0.35f);
+        // Higher threshold → easier to open (more voice kept).
+        var openMarginDb = Math.Clamp(14f - threshold * 0.1f, 3f, 14f);
+        var closeMarginDb = Math.Max(1.5f, openMarginDb * 0.45f);
+        var attackRate = Math.Clamp(0.15f + attack * 0.007f, 0.12f, 0.9f);
+        var releaseRate = Math.Clamp(0.03f + release * 0.0025f, 0.02f, 0.35f);
+
         var noiseDb = ToDb(noiseFloor);
         var envelopeDb = ToDb(envelope);
 
-        if (envelopeDb < noiseDb + GateCloseMarginDb)
+        if (envelopeDb < noiseDb + closeMarginDb)
         {
             noiseFloor += (envelope - noiseFloor) * NoiseLearnRate;
             noiseFloor = Math.Clamp(noiseFloor, MinEnvelope, 0.05f);
         }
 
-        var openThreshold = noiseDb + GateOpenMarginDb;
-        var closeThreshold = noiseDb + GateCloseMarginDb;
+        var openThreshold = noiseDb + openMarginDb;
+        var closeThreshold = noiseDb + closeMarginDb;
         float targetGain;
 
         if (envelopeDb >= openThreshold)
@@ -104,15 +138,15 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
         }
         else if (envelopeDb <= closeThreshold)
         {
-            targetGain = MaxAttenuation;
+            targetGain = maxAttenuation;
         }
         else
         {
             var t = (envelopeDb - closeThreshold) / (openThreshold - closeThreshold);
-            targetGain = MaxAttenuation + (1f - MaxAttenuation) * Smoothstep(t);
+            targetGain = maxAttenuation + (1f - maxAttenuation) * Smoothstep(t);
         }
 
-        var rate = targetGain > gateGain ? Attack : Release;
+        var rate = targetGain > gateGain ? attackRate : releaseRate;
         gateGain += (targetGain - gateGain) * rate;
     }
 
