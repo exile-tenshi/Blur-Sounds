@@ -826,6 +826,12 @@ input[type='range'] {
   margin-top: 4px;
 }
 
+.setup-device-flow {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0.85rem 0 1rem;
+}
+
 .hifi-setup-steps-compact {
   margin: 0;
   padding-left: 1.25rem;
