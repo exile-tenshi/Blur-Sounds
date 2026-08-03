@@ -59,46 +59,34 @@ function pickRecorderMimeType(): string {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
 }
 
-async function captureDesktopStream(sourceId: string): Promise<MediaStream> {
-  // Keep the replay buffer light: 720p30 is enough for clips and much cheaper.
-  const constraints = {
-    audio: {
-      mandatory: {
-        chromeMediaSource: 'desktop',
-      },
-    },
+async function captureDesktopStream(_sourceId: string): Promise<MediaStream> {
+  // getDisplayMedia goes through the main-process handler, which maps our display:*
+  // ids to a real capturer source only when buffering starts (not when opening Clips).
+  const stream = await navigator.mediaDevices.getDisplayMedia({
     video: {
-      mandatory: {
-        chromeMediaSource: 'desktop',
-        chromeMediaSourceId: sourceId,
-        minWidth: 854,
-        maxWidth: 1280,
-        minHeight: 480,
-        maxHeight: 720,
-        maxFrameRate: 30,
-      },
+      width: { ideal: 1280, max: 1280 },
+      height: { ideal: 720, max: 720 },
+      frameRate: { ideal: 30, max: 30 },
     },
+    audio: true,
+  })
+
+  for (const track of stream.getVideoTracks()) {
+    const capabilities = track.getCapabilities?.() as
+      | { width?: { max?: number }; height?: { max?: number }; frameRate?: { max?: number } }
+      | undefined
+    try {
+      await track.applyConstraints({
+        width: { ideal: 1280, max: Math.min(1280, capabilities?.width?.max ?? 1280) },
+        height: { ideal: 720, max: Math.min(720, capabilities?.height?.max ?? 720) },
+        frameRate: { ideal: 30, max: 30 },
+      })
+    } catch {
+      // Constraints are best-effort.
+    }
   }
 
-  try {
-    return await navigator.mediaDevices.getUserMedia(constraints as MediaStreamConstraints)
-  } catch {
-    const videoOnly = {
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          minWidth: 854,
-          maxWidth: 1280,
-          minHeight: 480,
-          maxHeight: 720,
-          maxFrameRate: 30,
-        },
-      },
-    }
-    return navigator.mediaDevices.getUserMedia(videoOnly as MediaStreamConstraints)
-  }
+  return stream
 }
 
 function pruneChunks(chunks: TimedChunk[], lookbackSeconds: number): TimedChunk[] {
@@ -218,14 +206,13 @@ export function useClipRecorder() {
     [],
   )
 
-  /** Screens only — never auto-enumerate windows (that freezes Electron on Windows). */
+  /** Instant display list — never touches desktopCapturer (that was hanging Clips open). */
   const refreshSources = useCallback(async () => {
     if (!clipControl) {
       setError('Clip bridge did not load. Relaunch the Electron app.')
       return
     }
 
-    setIsBusy(true)
     try {
       const clipSettings = await clipControl.getSettings()
       setLookbackSecondsState(clipSettings.lookbackSeconds)
@@ -235,42 +222,24 @@ export function useClipRecorder() {
 
       const screens = await clipControl.listSources({ includeWindows: false })
       setSources(screens)
-      applySourceSelection(screens, clipSettings.sourceId)
+
+      // Migrate old capturer ids (screen:/window:) to display:* ids.
+      const preferred =
+        clipSettings.sourceId?.startsWith('display:')
+          ? clipSettings.sourceId
+          : screens[0]?.id
+      applySourceSelection(screens, preferred)
+      if (preferred && preferred !== clipSettings.sourceId) {
+        await clipControl.setSettings({ sourceId: preferred })
+      }
 
       const nextStatus = await clipControl.getStatus()
       setStatus(nextStatus)
       setError(undefined)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to list clip sources.')
-    } finally {
-      setIsBusy(false)
     }
   }, [applySourceSelection, clipControl])
-
-  /** Optional, user-triggered — window enumeration can hang on busy desktops. */
-  const loadWindowSources = useCallback(async () => {
-    if (!clipControl) {
-      return
-    }
-
-    setIsBusy(true)
-    try {
-      const windows = await clipControl.listSources({ includeWindows: true })
-      setSources((current) => {
-        const screens = current.filter((source) => source.kind === 'screen')
-        return [...screens, ...windows]
-      })
-      setError(undefined)
-    } catch (loadError) {
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : 'Window list timed out. Use a Desktop source instead.',
-      )
-    } finally {
-      setIsBusy(false)
-    }
-  }, [clipControl])
 
   const stopBuffering = useCallback(async () => {
     if (forwardTimerRef.current) {
@@ -666,7 +635,6 @@ export function useClipRecorder() {
     isBusy,
     lastSavedPath,
     refreshSources,
-    loadWindowSources,
     startBuffering,
     stopBuffering,
     clipIt,
