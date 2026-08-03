@@ -180,6 +180,9 @@ export function useAudioControlState() {
           (device) => device.kind === 'input' && isSelectableMicrophoneDevice(device.name),
         )
         .sort((left, right) => {
+          if (left.isAvailable !== right.isAvailable) {
+            return left.isAvailable ? -1 : 1
+          }
           const priorityDifference = getMicrophonePriority(left.name) - getMicrophonePriority(right.name)
           return priorityDifference !== 0 ? priorityDifference : left.name.localeCompare(right.name)
         }),

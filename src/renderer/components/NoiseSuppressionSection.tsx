@@ -176,9 +176,10 @@ function MicEditorCard({
             >
               <option value="">Select a microphone…</option>
               {devices.map((device) => (
-                <option key={device.id} value={device.id}>
+                <option key={device.id} value={device.id} disabled={!device.isAvailable}>
                   {device.name}
                   {device.isDefault ? ' (default)' : ''}
+                  {!device.isAvailable ? ' (offline)' : ''}
                 </option>
               ))}
             </select>
@@ -330,12 +331,13 @@ export function NoiseSuppressionSection({
     }
 
     setAutoTrackedDefault(true)
-    void onEnsureDevice(preferred.id).then((slotId) => {
+    void onEnsureDevice(preferred.id).then(async (slotId) => {
       if (slotId) {
         setExpandedSlotId(slotId)
+        await onChange(slotId, { enabled: true })
       }
     })
-  }, [autoTrackedDefault, microphoneDevices, onEnsureDevice, trackedSlots.length])
+  }, [autoTrackedDefault, microphoneDevices, onChange, onEnsureDevice, trackedSlots.length])
 
   // Keep expanded card pointed at a real slot when mixer/noise adds or removes mics.
   useEffect(() => {
@@ -353,11 +355,19 @@ export function NoiseSuppressionSection({
           <h2>Microphone cleanup</h2>
           <p className="section-help">
             Pick any mic here — it does not need to be chosen in Mixer first. Multiple mics are
-            supported, and mics already in use are auto-tracked.
+            supported, and mics already in use are auto-tracked. Start the stream for live cleanup
+            and level meters.
           </p>
         </div>
         <span className="badge">{trackedSlots.length} tracked</span>
       </div>
+
+      {!engineActive ? (
+        <p className="notice">
+          Stream is idle — select your mic and turn suppression on, then press <strong>Start stream</strong>
+          in Mixer so the app captures that microphone.
+        </p>
+      ) : null}
 
       <div className="noise-add-row">
         <label className="field-label" htmlFor="ns-add-device">
@@ -371,9 +381,10 @@ export function NoiseSuppressionSection({
           >
             <option value="">Choose a microphone…</option>
             {availableToAdd.map((device) => (
-              <option key={device.id} value={device.id}>
+              <option key={device.id} value={device.id} disabled={!device.isAvailable}>
                 {device.name}
                 {device.isDefault ? ' (default)' : ''}
+                {!device.isAvailable ? ' (offline)' : ''}
               </option>
             ))}
           </select>
@@ -384,9 +395,11 @@ export function NoiseSuppressionSection({
             onClick={() => {
               const deviceId = pickDeviceId
               setPickDeviceId('')
-              void onEnsureDevice(deviceId).then((slotId) => {
+              void onEnsureDevice(deviceId).then(async (slotId) => {
                 if (slotId) {
                   setExpandedSlotId(slotId)
+                  // Turn NS on when tracking so the mic is actively cleaned up.
+                  await onChange(slotId, { enabled: true })
                 }
               })
             }}

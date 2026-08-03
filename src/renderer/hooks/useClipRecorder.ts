@@ -56,7 +56,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 4
+export const CLIPS_PICKER_BUILD = 5
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -220,7 +220,7 @@ export function useClipRecorder() {
     [],
   )
 
-  /** Instant display list — never touches desktopCapturer (that was hanging Clips open). */
+  /** Instant display list — never touches desktopCapturer on open. */
   const refreshSources = useCallback(async () => {
     const control = clipControlRef.current
     if (!control) {
@@ -240,14 +240,21 @@ export function useClipRecorder() {
       setBufferingEnabledState(clipSettings.bufferingEnabled)
 
       const screens = await control.listSources({ includeWindows: false })
-      setSources(screens)
+      // Keep any previously loaded windows in the picker.
+      let merged = screens
+      setSources((current) => {
+        const windows = current.filter((source) => source.kind === 'window')
+        merged = [...screens, ...windows]
+        return merged
+      })
 
-      // Migrate old capturer ids (screen:/window:) to display:* ids.
-      const preferred = clipSettings.sourceId?.startsWith('display:')
-        ? clipSettings.sourceId
-        : screens[0]?.id
-      applySourceSelection(screens, preferred)
-      if (preferred && preferred !== clipSettings.sourceId) {
+      const preferred =
+        clipSettings.sourceId?.startsWith('display:') ||
+        clipSettings.sourceId?.startsWith('window:')
+          ? clipSettings.sourceId
+          : screens[0]?.id
+      applySourceSelection(merged, preferred)
+      if (preferred?.startsWith('display:') && preferred !== clipSettings.sourceId) {
         await control.setSettings({ sourceId: preferred })
       }
 
@@ -260,6 +267,29 @@ export function useClipRecorder() {
       refreshInFlightRef.current = false
     }
   }, [applySourceSelection])
+
+  /** Opt-in window/game scan — can take a couple seconds; timed out if Windows hangs. */
+  const loadWindowSources = useCallback(async () => {
+    const control = clipControlRef.current
+    if (!control) {
+      return
+    }
+
+    setIsBusy(true)
+    try {
+      const all = await control.listSources({ includeWindows: true })
+      setSources(all)
+      setError(undefined)
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Window scan timed out. Use a Desktop source instead.',
+      )
+    } finally {
+      setIsBusy(false)
+    }
+  }, [])
 
   const stopBuffering = useCallback(async () => {
     if (forwardTimerRef.current) {
@@ -655,6 +685,7 @@ export function useClipRecorder() {
     isBusy,
     lastSavedPath,
     refreshSources,
+    loadWindowSources,
     startBuffering,
     stopBuffering,
     clipIt,

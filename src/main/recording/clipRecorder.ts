@@ -15,7 +15,9 @@ import type {
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
+const MAX_WINDOW_SOURCES = 40
 const CAPTURER_TIMEOUT_MS = 3000
+const WINDOW_SCAN_TIMEOUT_MS = 2500
 
 function sanitizeFilePart(value: string): string {
   return (
@@ -57,6 +59,24 @@ export function parseDisplaySourceId(sourceId: string | undefined): string | und
   return sourceId.slice('display:'.length)
 }
 
+function mapWindowSources(sources: Electron.DesktopCapturerSource[]): ClipSource[] {
+  return sources
+    .filter((source) => source.id.startsWith('window:'))
+    .filter((source) => source.name.trim().length > 0)
+    .filter((source) => !/blur sounds/i.test(source.name))
+    .map(
+      (source) =>
+        ({
+          id: source.id,
+          name: source.name,
+          kind: 'window' as const,
+          displayId: source.display_id || undefined,
+        }) satisfies ClipSource,
+    )
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .slice(0, MAX_WINDOW_SOURCES)
+}
+
 async function getSourcesWithTimeout(
   options: Electron.SourcesOptions,
   timeoutMs = CAPTURER_TIMEOUT_MS,
@@ -67,7 +87,6 @@ async function getSourcesWithTimeout(
       desktopCapturer.getSources(options),
       new Promise<Electron.DesktopCapturerSource[]>((_, reject) => {
         timer = setTimeout(() => {
-          // Only used when starting the buffer — never from clip:listSources.
           reject(new Error('Timed out while starting desktop capture.'))
         }, timeoutMs)
       }),
@@ -89,6 +108,9 @@ export class ClipRecorderService {
   private bufferedSeconds = 0
   private lastClipPath?: string
   private error?: string
+  private cachedWindows: ClipSource[] = []
+  private cachedWindowsAt = 0
+  private windowsScanInFlight?: Promise<ClipSource[]>
 
   constructor(private readonly settings: SettingsStore) {}
 
@@ -123,17 +145,7 @@ export class ClipRecorderService {
     }
   }
 
-  /**
-   * Instant desktop list via Electron's screen API — never calls desktopCapturer.
-   * Window listing is intentionally unsupported in the picker (freezes many PCs).
-   */
-  async listSources(options?: { includeWindows?: boolean }): Promise<ClipSource[]> {
-    if (options?.includeWindows) {
-      throw new Error(
-        'Game/window scanning is disabled because it freezes this PC. Use a Desktop source.',
-      )
-    }
-
+  listDisplaySources(): ClipSource[] {
     const displays = screen.getAllDisplays()
     const primaryId = screen.getPrimaryDisplay().id
 
@@ -160,14 +172,84 @@ export class ClipRecorderService {
   }
 
   /**
+   * Screens are instant (Electron screen API).
+   * Windows are opt-in only — desktopCapturer window scans can freeze Windows.
+   */
+  async listSources(options?: { includeWindows?: boolean }): Promise<ClipSource[]> {
+    const screens = this.listDisplaySources()
+    if (!options?.includeWindows) {
+      return screens
+    }
+
+    const windows = await this.scanWindowSources()
+    return [...screens, ...windows]
+  }
+
+  async scanWindowSources(): Promise<ClipSource[]> {
+    const now = Date.now()
+    if (this.cachedWindows.length > 0 && now - this.cachedWindowsAt < 30_000) {
+      return this.cachedWindows
+    }
+    if (this.windowsScanInFlight) {
+      return this.windowsScanInFlight
+    }
+
+    this.windowsScanInFlight = (async () => {
+      // Tiny thumbs only — large thumbnails were a major freeze source.
+      const raw = await getSourcesWithTimeout(
+        {
+          types: ['window'],
+          thumbnailSize: { width: 1, height: 1 },
+          fetchWindowIcons: false,
+        },
+        WINDOW_SCAN_TIMEOUT_MS,
+      )
+      const windows = mapWindowSources(raw)
+      this.cachedWindows = windows
+      this.cachedWindowsAt = Date.now()
+      return windows
+    })()
+      .catch((error) => {
+        throw new Error(
+          error instanceof Error
+            ? error.message.replace(
+                'starting desktop capture',
+                'scanning game/window sources',
+              )
+            : 'Window scan timed out. Use a Desktop source, or try again.',
+        )
+      })
+      .finally(() => {
+        this.windowsScanInFlight = undefined
+      })
+
+    return this.windowsScanInFlight
+  }
+
+  /**
    * Resolve a real DesktopCapturerSource for getDisplayMedia.
    * Only called when the user starts the buffer — not when opening Clips.
    */
   async resolveCaptureSource(
     preferredSourceId?: string,
   ): Promise<Electron.DesktopCapturerSource | undefined> {
+    if (preferredSourceId?.startsWith('window:')) {
+      const windows = await getSourcesWithTimeout(
+        {
+          types: ['window'],
+          thumbnailSize: { width: 1, height: 1 },
+          fetchWindowIcons: false,
+        },
+        WINDOW_SCAN_TIMEOUT_MS,
+      )
+      const exact = windows.find((source) => source.id === preferredSourceId)
+      if (exact) {
+        return exact
+      }
+      // Fall through to screen if the window disappeared.
+    }
+
     const displayId = parseDisplaySourceId(preferredSourceId)
-    // 1x1 thumbs — some Electron builds hang on 0x0.
     const sources = await getSourcesWithTimeout({
       types: ['screen'],
       thumbnailSize: { width: 1, height: 1 },
