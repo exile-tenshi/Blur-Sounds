@@ -8,6 +8,9 @@ export interface ClipSource {
   kind: ClipSourceKind
   displayId?: string
   thumbnailDataUrl?: string
+  /** Present for app:/game sources from the live process list. */
+  processName?: string
+  processId?: number
 }
 
 export type ClipBufferState = 'idle' | 'buffering' | 'clipping' | 'error'

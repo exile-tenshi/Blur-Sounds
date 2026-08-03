@@ -87,9 +87,12 @@ $excludedProcessNames = @(
 
 $knownAudioProcessNames = @(
   'Spotify', 'Discord', 'chrome', 'msedge', 'firefox', 'opera', 'brave', 'vivaldi', 'arc',
-  'Slack', 'Teams', 'Zoom', 'vlc', 'Steam', 'obs64', 'obs32', 'Cursor', 'Code',
+  'Slack', 'Teams', 'Zoom', 'vlc', 'Steam', 'steamwebhelper', 'obs64', 'obs32', 'Cursor', 'Code',
   'AppleMusic', 'iTunes', 'foobar2000', 'AIMP', 'MusicBee', 'deemix', 'TIDAL', 'Plex',
-  'Overwolf', 'Battle.net', 'EpicGamesLauncher', 'EADesktop', 'GalaxyClient'
+  'Overwolf', 'Battle.net', 'EpicGamesLauncher', 'EADesktop', 'GalaxyClient', 'RiotClientServices',
+  'LeagueClient', 'javaw', 'Minecraft.Windows', 'FortniteClient-Win64-Shipping', 'cs2', 'dota2',
+  'GTA5', 'PlayGTAV', 'VALORANT-Win64-Shipping', 'RainbowSix', 'r5apex', 'cod', 'ModernWarfare',
+  'Witcher3', 'Cyberpunk2077', 'eldenring', 'RocketLeague', 'Destiny2', 'Wow', 'WowClassic'
 )
 
 $processes = Get-Process -ErrorAction SilentlyContinue |
@@ -99,6 +102,7 @@ $processes = Get-Process -ErrorAction SilentlyContinue |
     $excludedProcessNames -notcontains $_.ProcessName -and
     (
       $_.MainWindowTitle -or
+      ($_.MainWindowHandle -ne 0) -or
       ($knownAudioProcessNames -contains $_.ProcessName)
     )
   } |

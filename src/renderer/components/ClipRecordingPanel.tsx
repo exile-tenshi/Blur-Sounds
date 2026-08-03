@@ -76,8 +76,8 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
                 : 'Pick a desktop or app source.'}
             </p>
             <p className="muted">
-              Desktops load instantly. Use <strong>Load game windows</strong> to scan apps (may take
-              a moment).
+              Desktops and running games/apps load together. Fullscreen games can also use a Desktop
+              source.
             </p>
           </div>
         </div>
@@ -108,15 +108,15 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               <optgroup label="Games & apps">
                 {windowSources.map((source) => (
                   <option key={source.id} value={source.id}>
-                    [App] {source.name}
+                    [Game / app] {source.name}
                   </option>
                 ))}
               </optgroup>
             ) : null}
           </select>
           <p className="muted">
-            Prefer Desktop if window scanning freezes. App scan is optional and times out if Windows
-            stalls.
+            Games come from apps currently running on your PC. Click <strong>Refresh games</strong>{' '}
+            after launching a new title.
           </p>
 
           <div className="clip-duration-block">
@@ -170,7 +170,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               disabled={isBusy || clipping}
               onClick={() => void refreshSources()}
             >
-              Refresh desktops
+              Refresh games
             </button>
             <button
               type="button"
@@ -178,7 +178,7 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               disabled={isBusy || clipping}
               onClick={() => void loadWindowSources()}
             >
-              {isBusy ? 'Scanning apps…' : 'Load game windows'}
+              {isBusy ? 'Scanning…' : 'Deep window scan'}
             </button>
             <button
               type="button"
