@@ -427,19 +427,21 @@ export class RoutingStore {
       nextRecordingId = resolveRecordingDeviceId(inputDevice, recordingDevices)
     }
 
+    // Preserve noise-suppression fields — stripping them made Noise look like the mic
+    // was never picked up after Track mic / device changes.
     let nextMicrophones = payload.microphones
-      ? payload.microphones.map((slot) => ({
-          id: slot.id,
-          deviceId: slot.deviceId,
-          muted: slot.muted ?? false,
-          volume: clampVolume(slot.volume ?? DEFAULT_INPUT_GAIN),
-        }))
+      ? normalizeMicrophoneSlots({ microphones: payload.microphones })
       : normalizeMicrophoneSlots(this.selection)
 
     if (payload.microphoneId !== undefined) {
       const firstSlot = nextMicrophones[0] ?? createDefaultMicrophoneSlots()[0]
       nextMicrophones = [
-        { ...firstSlot, deviceId: payload.microphoneId || undefined },
+        {
+          ...firstSlot,
+          deviceId: payload.microphoneId || undefined,
+          noiseSuppression: firstSlot.noiseSuppression,
+          noiseSuppressionSettings: firstSlot.noiseSuppressionSettings,
+        },
         ...nextMicrophones.slice(1),
       ]
     }
@@ -537,7 +539,20 @@ export class RoutingStore {
       }),
     }
 
-    this.scheduleMixSync()
+    // Re-bind mics when the engine is live so NS applies to a real capture source,
+    // not only volume state on an unbound slot.
+    if (this.isEngineActive()) {
+      try {
+        await this.ensureEngineRunning()
+      } catch (error) {
+        this.setEngineError(
+          error instanceof Error ? error.message : 'Unable to apply noise suppression.',
+        )
+      }
+    } else {
+      this.scheduleMixSync()
+    }
+
     return this.emitCachedSnapshot()
   }
 
