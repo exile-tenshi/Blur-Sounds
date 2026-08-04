@@ -13,23 +13,36 @@ internal sealed class HifiCableOutputActivator : IDisposable
 
     public bool IsActive => capture is not null;
 
+    public string? LastError { get; private set; }
+
     public void Start()
     {
         Stop();
+        LastError = null;
 
-        using var enumerator = new MMDeviceEnumerator();
-        var recording = FindRecordingEndpoint(enumerator);
-        if (recording is null)
+        try
         {
-            return;
-        }
+            using var enumerator = new MMDeviceEnumerator();
+            var recording = FindRecordingEndpoint(enumerator);
+            if (recording is null)
+            {
+                LastError = "Hi-Fi Cable Output recording endpoint was not found.";
+                return;
+            }
 
-        capture = MicWasapiCapture.Create(
-            recording,
-            LatencyTuning.HiFiMicCaptureBufferMilliseconds,
-            HifiStreamingPolicy.EngineMixSampleRate);
-        capture.DataAvailable += OnDataAvailable;
-        capture.StartRecording();
+            capture = MicWasapiCapture.Create(
+                recording,
+                LatencyTuning.HiFiMicCaptureBufferMilliseconds,
+                HifiStreamingPolicy.EngineMixSampleRate);
+            capture.DataAvailable += OnDataAvailable;
+            capture.StartRecording();
+            LastError = null;
+        }
+        catch (Exception ex)
+        {
+            Stop();
+            LastError = ex.Message;
+        }
     }
 
     public void Stop()
