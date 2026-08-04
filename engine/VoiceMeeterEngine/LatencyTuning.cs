@@ -37,11 +37,11 @@ internal static class LatencyTuning
     /// <summary>Fade duration when a capture source leaves the mix.</summary>
     public const int CaptureFadeOutMilliseconds = 16;
 
-    /// <summary>WASAPI playback buffer — keep tight for near-instant monitoring.</summary>
-    public const int OutputLatencyMilliseconds = 40;
+    /// <summary>WASAPI playback buffer — stable enough to avoid silent underruns.</summary>
+    public const int OutputLatencyMilliseconds = 128;
 
-    /// <summary>Hi-Fi Cable WASAPI playback buffer (shared-mode period).</summary>
-    public const int HiFiOutputLatencyMilliseconds = 48;
+    /// <summary>Hi-Fi Cable WASAPI playback buffer (restored toward main's working 512ms path).</summary>
+    public const int HiFiOutputLatencyMilliseconds = 256;
 
     /// <summary>Shared-mode WASAPI capture period at Hi-Fi Cable studio rate.</summary>
     public const int HiFiCaptureBufferMilliseconds = CaptureBufferMilliseconds;
@@ -80,7 +80,7 @@ internal static class LatencyTuning
     public const int MaxTrimPassMilliseconds = 12;
 
     /// <summary>Extra mix→WASAPI staging ring when sample rates already match.</summary>
-    public const int OutputStageBufferMilliseconds = 24;
+    public const int OutputStageBufferMilliseconds = 48;
 
     public static int GetOutputLatencyMilliseconds(bool isHiFiCable) =>
         AudioTuningPolicy.UseHiFiBuffers(isHiFiCable)
