@@ -8,7 +8,7 @@ export function createDefaultEngineStatus(): EngineStatus {
     underrunCount: 0,
     selectedMicrophoneReady: false,
     selectedInputReady: false,
-    hifiOutputActive: true,
+    hifiOutputActive: undefined,
     outputLevel: 0,
     outputPullLevel: 0,
     mixPullLevel: 0,
