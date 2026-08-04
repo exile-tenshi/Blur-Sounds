@@ -2,7 +2,7 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Buffer and format tuning for microphones that deliver bursty or native-rate audio.
-/// Kept intentionally tight so mic/music stay near-instant through Hi-Fi Cable.
+/// Sized to stay ahead of the Hi-Fi Cable output buffer so capture FIFOs do not underrun.
 /// </summary>
 internal static class CaptureDeviceTuning
 {
@@ -102,12 +102,12 @@ internal static class CaptureDeviceTuning
         isHiFiOutput = AudioTuningPolicy.UseHiFiBuffers(isHiFiOutput);
         if (IsComfortCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 140 : 120;
+            return isHiFiOutput ? 180 : 160;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 120 : 100;
+            return isHiFiOutput ? 160 : 140;
         }
 
         return LatencyTuning.GetMicCaptureMaxMilliseconds(isHiFiOutput);
@@ -117,12 +117,12 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return 200;
+            return 280;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return 160;
+            return 240;
         }
 
         return LatencyTuning.MicCaptureRingMilliseconds;
@@ -157,15 +157,15 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return 12;
+            return Math.Max(40, LatencyTuning.MicCaptureJitterBufferMilliseconds);
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return 8;
+            return Math.Max(32, LatencyTuning.MicCaptureJitterBufferMilliseconds);
         }
 
-        return 0;
+        return LatencyTuning.MicCaptureJitterBufferMilliseconds;
     }
 
     public static bool UseEventSyncCapture(string? deviceName) =>

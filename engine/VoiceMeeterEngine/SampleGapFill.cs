@@ -1,7 +1,7 @@
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Zero-fills short reads so downstream always receives full blocks.
+/// Fills short reads by holding the last good frame (not silence) to avoid bitrattling clicks.
 /// </summary>
 internal sealed class SampleGapFill
 {
@@ -45,6 +45,9 @@ internal sealed class SampleGapFill
         }
 
         underrunCount++;
-        Array.Clear(buffer, offset, count);
+        for (var index = 0; index < count; index++)
+        {
+            buffer[offset + index] = lastFrame[index % channels];
+        }
     }
 }
