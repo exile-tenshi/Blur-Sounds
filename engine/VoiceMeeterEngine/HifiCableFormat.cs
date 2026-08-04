@@ -162,9 +162,25 @@ internal static partial class HifiCableFormat
 
         }
 
+        // Shared-mode MixFormat is often 32-bit float while Windows Advanced still shows
+        // "24 bit, 48000 Hz". Report the clean-audio label users expect, not container bits.
+        if (IsEngineCleanFormat(format))
 
+        {
 
-        return $"{format.BitsPerSample} bit, {format.SampleRate} Hz";
+            return $"{HiFiEngineBitsPerSample} bit, {EngineCleanSampleRate} Hz (Clean audio)";
+
+        }
+
+        if (WaveFormatUtility.IsFloatFormat(format))
+
+        {
+
+            return $"{format.SampleRate} Hz float MixFormat";
+
+        }
+
+        return $"{WaveFormatUtility.GetEffectiveBitsPerSample(format)} bit, {format.SampleRate} Hz";
 
     }
 
