@@ -266,7 +266,7 @@ internal static partial class HifiCableFormatConfigurator
         if (IsEngineMatchedQuality(endpoint))
         {
             _ = TryApplyRegistryStudioFormat(endpoint.ID, registryKind);
-            TryEnableExclusiveMode(endpoint.ID, registryKind);
+            TryDisableExclusiveMode(policyConfig, endpoint.ID, registryKind);
             return;
         }
 
@@ -289,7 +289,7 @@ internal static partial class HifiCableFormatConfigurator
                 var result = policyConfig.SetDeviceFormat(endpoint.ID, formatPointer, formatPointer);
                 if (result >= 0 && IsEngineMatchedQuality(endpoint))
                 {
-                    TryEnableExclusiveMode(endpoint.ID, registryKind);
+                    TryDisableExclusiveMode(policyConfig, endpoint.ID, registryKind);
                     return;
                 }
 
@@ -311,7 +311,7 @@ internal static partial class HifiCableFormatConfigurator
         // Re-read after registry + PolicyConfig — MixFormat is the only truth.
         if (IsEngineMatchedQuality(endpoint))
         {
-            TryEnableExclusiveMode(endpoint.ID, registryKind);
+            TryDisableExclusiveMode(policyConfig, endpoint.ID, registryKind);
             return;
         }
 
@@ -418,12 +418,72 @@ internal static partial class HifiCableFormatConfigurator
         }
     }
 
-    private static void TryEnableExclusiveMode(string endpointId, string registryKind)
+    /// <summary>
+    /// Force shared mode for Hi-Fi Cable. Discord/OBS and our Output keep-alive need shared
+    /// capture; exclusive-allowed flags in Windows Sound often leave the cable silent.
+    /// </summary>
+    private static void TryDisableExclusiveMode(IPolicyConfig policyConfig, string endpointId, string registryKind)
     {
-        // Leave exclusive mode off. Shared-mode Pass-Through is what Discord/OBS need on
-        // Hi-Fi Cable Output; forcing exclusive flags caused silent listeners.
-        _ = endpointId;
-        _ = registryKind;
+        // PolicyConfig share mode: 0 = shared.
+        try
+        {
+            var shared = 0;
+            _ = policyConfig.SetShareMode(endpointId, ref shared);
+        }
+        catch
+        {
+            // Older PolicyConfig hosts may reject SetShareMode.
+        }
+
+        TrySetExclusiveProperty(policyConfig, endpointId, propertyId: 5, value: 0);
+        TrySetExclusiveProperty(policyConfig, endpointId, propertyId: 6, value: 0);
+
+        var guid = ExtractEndpointGuid(endpointId);
+        if (guid is null)
+        {
+            return;
+        }
+
+        var propertiesPath =
+            $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\{registryKind}\{{{guid}}}\Properties";
+
+        try
+        {
+            using var propertiesKey = Registry.LocalMachine.OpenSubKey(propertiesPath, writable: true);
+            if (propertiesKey is null)
+            {
+                return;
+            }
+
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 0, RegistryValueKind.DWord);
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 0, RegistryValueKind.DWord);
+        }
+        catch
+        {
+            // Registry writes can require elevation — PolicyConfig path above still helps.
+        }
+    }
+
+    private static void TrySetExclusiveProperty(IPolicyConfig policyConfig, string endpointId, int propertyId, uint value)
+    {
+        try
+        {
+            var key = new PolicyPropertyKey
+            {
+                FormatId = new Guid("1da5d803-d492-4edd-8c48-e04b1dcbe66a"),
+                PropertyId = propertyId,
+            };
+            var prop = new PolicyPropVariant
+            {
+                VariantType = 19, // VT_UI4
+                UIntValue = value,
+            };
+            _ = policyConfig.SetPropertyValue(endpointId, false, ref key, ref prop);
+        }
+        catch
+        {
+            // Property writes are best-effort.
+        }
     }
 
     private static string? ExtractEndpointGuid(string endpointId)
