@@ -14,6 +14,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
     private MMDevice? recordingDevice;
     private MicWasapiCapture? capture;
     private string? lastError;
+    private string? listenThroughWarning;
 
     public bool IsActive
     {
@@ -38,6 +39,17 @@ internal sealed class HifiCableOutputActivator : IDisposable
         }
     }
 
+    public string? ListenThroughWarning
+    {
+        get
+        {
+            lock (gate)
+            {
+                return listenThroughWarning;
+            }
+        }
+    }
+
     public void Start()
     {
         Stop();
@@ -50,6 +62,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
             {
                 lastError =
                     "Hi-Fi Cable Output was not found or is disabled. Enable it under Windows Sound → Recording.";
+                listenThroughWarning = null;
             }
 
             return;
@@ -63,7 +76,8 @@ internal sealed class HifiCableOutputActivator : IDisposable
         {
             // Keep-alive capture can use a slightly larger period than live mics;
             // stability matters more than latency for the VB-Audio loop gate.
-            HifiCableEndpointVolume.EnsureAudible(recording);
+            HifiCableListenThrough.Disable(recording);
+            HifiCableEndpointVolume.EnsureCaptureUnmuted(recording);
 
             var candidate = MicWasapiCapture.Create(
                 recording,
@@ -91,6 +105,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
                         $"Hi-Fi Cable Output keep-alive capture failed to start (state {state}). " +
                         "Check Windows Sound → Recording → Hi-Fi Cable Output is Enabled and not Exclusive-only. " +
                         "If ASIO Bridge is open in Direct Mode, switch it back to Pass-Through.";
+                    listenThroughWarning = null;
                 }
 
                 return;
@@ -102,6 +117,10 @@ internal sealed class HifiCableOutputActivator : IDisposable
                 recordingDevice = recording;
                 capture = candidate;
                 lastError = null;
+                listenThroughWarning = HifiCableListenThrough.IsListenEnabled(recording)
+                    ? "Windows Listen to this device is still ON for Hi-Fi Cable Output — " +
+                      "uncheck Recording → Hi-Fi Cable Output → Listen, or your speakers will hear the full mix."
+                    : null;
             }
         }
         catch (Exception ex)
@@ -115,6 +134,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
                     $"Unable to open Hi-Fi Cable Output: {ex.Message}. " +
                     "Enable the recording endpoint and set it to the same format as Hi-Fi Cable Input (48 kHz · 24-bit). " +
                     "Close ASIO Bridge or set Pass-Through if Direct Mode is stealing the cable.";
+                listenThroughWarning = null;
             }
         }
     }
@@ -129,6 +149,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
             device = recordingDevice;
             capture = null;
             recordingDevice = null;
+            listenThroughWarning = null;
         }
 
         if (previous is not null)
