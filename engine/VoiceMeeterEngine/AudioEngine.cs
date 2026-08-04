@@ -996,7 +996,9 @@ internal sealed class AudioEngine : IDisposable
             settings.Threshold,
             settings.HighPassHz,
             settings.Attack,
-            settings.Release);
+            settings.Release,
+            settings.NoiseGateEnabled,
+            settings.NoiseGateThreshold);
     }
 
     private async Task SyncAppLoopbackSourcesAsync(IReadOnlyCollection<RouteConfig> routes)
@@ -1708,9 +1710,19 @@ internal sealed class MicSource : IDisposable
         float threshold,
         float highPassHz,
         float attack,
-        float release)
+        float release,
+        bool noiseGateEnabled = false,
+        float noiseGateThreshold = 35f)
     {
-        noiseSuppressionProvider.SetSettings(enabled, strength, threshold, highPassHz, attack, release);
+        noiseSuppressionProvider.SetSettings(
+            enabled,
+            strength,
+            threshold,
+            highPassHz,
+            attack,
+            release,
+            noiseGateEnabled,
+            noiseGateThreshold);
     }
 
     private void ApplyVolume()
