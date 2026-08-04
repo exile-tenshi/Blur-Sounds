@@ -102,12 +102,12 @@ internal static class CaptureDeviceTuning
         isHiFiOutput = AudioTuningPolicy.UseHiFiBuffers(isHiFiOutput);
         if (IsComfortCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 180 : 160;
+            return isHiFiOutput ? 280 : 220;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return isHiFiOutput ? 160 : 140;
+            return isHiFiOutput ? 240 : 200;
         }
 
         return LatencyTuning.GetMicCaptureMaxMilliseconds(isHiFiOutput);
@@ -117,12 +117,12 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return 280;
+            return 420;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return 240;
+            return 360;
         }
 
         return LatencyTuning.MicCaptureRingMilliseconds;
@@ -157,12 +157,12 @@ internal static class CaptureDeviceTuning
     {
         if (IsComfortCaptureDevice(deviceName))
         {
-            return Math.Max(40, LatencyTuning.MicCaptureJitterBufferMilliseconds);
+            return 16;
         }
 
         if (IsExtendedCaptureDevice(deviceName))
         {
-            return Math.Max(32, LatencyTuning.MicCaptureJitterBufferMilliseconds);
+            return 8;
         }
 
         return LatencyTuning.MicCaptureJitterBufferMilliseconds;
