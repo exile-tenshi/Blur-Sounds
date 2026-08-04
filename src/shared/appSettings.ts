@@ -1,6 +1,15 @@
 export type AppSectionId = 'mixer' | 'noise' | 'clips' | 'setup'
 
-export const CLIP_LOOKBACK_OPTIONS_SECONDS = [15, 30, 60, 120, 180, 300] as const
+export const CLIP_LOOKBACK_OPTIONS_SECONDS = [
+  15,
+  30,
+  60,
+  120,
+  180,
+  300,
+  600,
+  1200,
+] as const
 
 export type ClipLookbackSeconds = (typeof CLIP_LOOKBACK_OPTIONS_SECONDS)[number]
 
@@ -42,7 +51,8 @@ export function normalizeClipLookback(value: unknown): ClipLookbackSeconds {
 }
 
 export function forwardRollSeconds(lookbackSeconds: number): number {
-  return Math.max(1, Math.round(lookbackSeconds * 0.25))
+  // Cap forward roll so 10m/20m lookbacks don't wait minutes after Clip it.
+  return Math.min(30, Math.max(1, Math.round(lookbackSeconds * 0.25)))
 }
 
 export function totalClipSeconds(lookbackSeconds: number): number {
