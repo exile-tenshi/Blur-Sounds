@@ -229,48 +229,55 @@ export function formatHifiCableRecordingUnavailableMessage(): string {
   return 'Hi-Fi Cable Output (recording) is missing or disabled. Enable it under Windows Sound → Recording, then Refresh. Other apps listen on Output — without it the mix never leaves the cable.'
 }
 
-/** Warn when Start continues despite incomplete / mismatched cable formats. */
-export function describeHifiFormatStartWarning(result: {
+/**
+ * Returns a hard-fail message when Hi-Fi Cable formats cannot carry audio.
+ * MixFormat rates must match (bit-perfect). Prefer both at 48 kHz · 24-bit.
+ */
+export function describeHifiFormatStartBlocker(result: {
   playbackConfigured: boolean
   recordingConfigured: boolean
   playbackStatus?: HifiCableEndpointStatus
   recordingStatus?: HifiCableEndpointStatus
   message?: string
 }): string | undefined {
-  const playbackOk =
-    result.playbackStatus?.atStudioQuality === true || result.playbackConfigured
-  const recordingOk =
-    result.recordingStatus?.atStudioQuality === true || result.recordingConfigured
+  const playbackRate = result.playbackStatus?.sampleRate ?? 0
+  const recordingRate = result.recordingStatus?.sampleRate ?? 0
+  const playbackOk = result.playbackStatus?.atStudioQuality === true
+  const recordingOk = result.recordingStatus?.atStudioQuality === true
 
+  // Ideal: both sides report clean 48 kHz MixFormat.
   if (playbackOk && recordingOk) {
-    const playbackRate = result.playbackStatus?.sampleRate
-    const recordingRate = result.recordingStatus?.sampleRate
-    if (
-      playbackRate &&
-      recordingRate &&
-      playbackRate !== recordingRate
-    ) {
-      return (
-        `Hi-Fi Cable Input is ${playbackRate} Hz but Output is ${recordingRate} Hz. ` +
-        'The cable is bit-perfect — both sides must match or listeners hear silence. ' +
-        'Click Apply clean audio settings (48 kHz · 24-bit) on both endpoints.'
-      )
-    }
-
     return undefined
   }
 
-  if (!result.playbackConfigured && !result.recordingConfigured) {
+  // Also OK: both MixFormats match at any common rate (incl. legacy 384 kHz).
+  if (playbackRate > 0 && recordingRate > 0 && playbackRate === recordingRate) {
+    return undefined
+  }
+
+  if (playbackRate > 0 && recordingRate > 0 && playbackRate !== recordingRate) {
     return (
-      result.message ||
-      'Hi-Fi Cable format was not applied. Set Input and Output to 48 kHz · 24-bit in Windows Sound, then Start again.'
+      `Hi-Fi Cable Input is ${playbackRate} Hz but Output is ${recordingRate} Hz. ` +
+      'The cable is bit-perfect — mismatched rates are silent. ' +
+      'In Setup click Apply clean audio settings, or set both Advanced formats to the same rate (48 kHz · 24-bit).'
     )
   }
 
+  const inputLabel = result.playbackStatus?.formatLabel ?? 'unknown'
+  const outputLabel = result.recordingStatus?.formatLabel ?? 'unknown'
   return (
     result.message ||
-    'Hi-Fi Cable format was only applied partially. Confirm Input and Output both show 48 kHz · 24-bit.'
+    `Hi-Fi Cable formats could not be verified (Input: ${inputLabel} · Output: ${outputLabel}). ` +
+      'Open Setup → Apply clean audio settings, confirm both Windows Sound Advanced tabs match ' +
+      '(48 kHz · 24-bit), then Start again.'
   )
+}
+
+/** @deprecated Use describeHifiFormatStartBlocker — Start must not soft-continue on format failure. */
+export function describeHifiFormatStartWarning(
+  result: Parameters<typeof describeHifiFormatStartBlocker>[0],
+): string | undefined {
+  return describeHifiFormatStartBlocker(result)
 }
 
 export function getHifiCableSetupSteps(): string[] {
