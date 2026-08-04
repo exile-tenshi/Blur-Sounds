@@ -1197,6 +1197,17 @@ internal sealed class AudioEngine : IDisposable
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
             hifiOutputActivator.Start();
+            if (hifiOutputActivator.IsActive != true)
+            {
+                lock (gate)
+                {
+                    state = "error";
+                    message = hifiOutputActivator.LastError ??
+                              "Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output, uncheck Exclusive Mode on both cable endpoints, leave ASIO Bridge on Pass-Through, then Start again.";
+                }
+
+                return;
+            }
         }
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
@@ -1230,11 +1241,7 @@ internal sealed class AudioEngine : IDisposable
         {
             state = "running";
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
-            var hifiSuffix = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true
-                ? " Hi-Fi Cable Output is active."
-                : UsesHifiCableInput()
-                    ? " Hi-Fi Cable Output keep-alive did not start — enable Recording → Hi-Fi Cable Output."
-                    : string.Empty;
+            var hifiSuffix = UsesHifiCableInput() ? " Hi-Fi Cable Output is active." : string.Empty;
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to input.{routeSuffix}{hifiSuffix}"
                 : $"Streaming mix to input.{routeSuffix}{hifiSuffix}";
