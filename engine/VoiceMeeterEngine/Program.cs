@@ -43,6 +43,12 @@ internal static class Program
                     engine.RefreshSessionPeaksInBackground();
                 }
 
+                // Keep VB-Audio Input→Output loop open (~every 1s) if the keep-alive dies.
+                if (recoveryCounter % 10 == 0)
+                {
+                    engine.EnsureHifiOutputKeepAlive();
+                }
+
                 // Recover stuck loopbacks about every 15 seconds, and only for hard failures.
                 if (recoveryCounter % 150 == 0)
                 {

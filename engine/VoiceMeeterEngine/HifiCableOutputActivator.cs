@@ -11,6 +11,7 @@ namespace VoiceMeeterEngine;
 internal sealed class HifiCableOutputActivator : IDisposable
 {
     private readonly object gate = new();
+    private MMDevice? recordingDevice;
     private MicWasapiCapture? capture;
     private string? lastError;
 
@@ -81,11 +82,13 @@ internal sealed class HifiCableOutputActivator : IDisposable
             {
                 var state = candidate.CaptureState;
                 TearDownCandidate(candidate);
+                recording.Dispose();
                 lock (gate)
                 {
                     lastError =
                         $"Hi-Fi Cable Output keep-alive capture failed to start (state {state}). " +
-                        "Check Windows Sound → Recording → Hi-Fi Cable Output is Enabled and not Exclusive-only.";
+                        "Check Windows Sound → Recording → Hi-Fi Cable Output is Enabled and not Exclusive-only. " +
+                        "If ASIO Bridge is open in Direct Mode, switch it back to Pass-Through.";
                 }
 
                 return;
@@ -93,18 +96,23 @@ internal sealed class HifiCableOutputActivator : IDisposable
 
             lock (gate)
             {
+                // Keep the MMDevice alive for the lifetime of the capture client.
+                recordingDevice = recording;
                 capture = candidate;
                 lastError = null;
             }
         }
         catch (Exception ex)
         {
+            recording.Dispose();
             lock (gate)
             {
+                recordingDevice = null;
                 capture = null;
                 lastError =
                     $"Unable to open Hi-Fi Cable Output: {ex.Message}. " +
-                    "Enable the recording endpoint and set it to the same format as Hi-Fi Cable Input (48 kHz · 24-bit).";
+                    "Enable the recording endpoint and set it to the same format as Hi-Fi Cable Input (48 kHz · 24-bit). " +
+                    "Close ASIO Bridge or set Pass-Through if Direct Mode is stealing the cable.";
             }
         }
     }
@@ -112,18 +120,21 @@ internal sealed class HifiCableOutputActivator : IDisposable
     public void Stop()
     {
         MicWasapiCapture? previous;
+        MMDevice? device;
         lock (gate)
         {
             previous = capture;
+            device = recordingDevice;
             capture = null;
+            recordingDevice = null;
         }
 
-        if (previous is null)
+        if (previous is not null)
         {
-            return;
+            TearDownCandidate(previous);
         }
 
-        TearDownCandidate(previous);
+        device?.Dispose();
     }
 
     public void Dispose()
@@ -192,13 +203,10 @@ internal sealed class HifiCableOutputActivator : IDisposable
     {
         foreach (var endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
         {
-            if (!HifiCableFormat.IsHifiCableDevice(endpoint.FriendlyName))
+            if (!HifiCableFormat.IsHifiCableDevice(endpoint.FriendlyName) ||
+                !endpoint.FriendlyName.Contains("Output", StringComparison.OrdinalIgnoreCase))
             {
-                continue;
-            }
-
-            if (!endpoint.FriendlyName.Contains("Output", StringComparison.OrdinalIgnoreCase))
-            {
+                endpoint.Dispose();
                 continue;
             }
 
