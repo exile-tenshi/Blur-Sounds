@@ -47,7 +47,6 @@ internal static class HifiCableOutputProbe
         };
 
         Exception? lastError = null;
-        using var enumerator = new MMDeviceEnumerator();
         foreach (var attempt in attempts)
         {
             WasapiOutBroadcast? render = null;
