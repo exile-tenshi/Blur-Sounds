@@ -138,7 +138,7 @@ export interface EngineStatus {
   underrunCount: number
   selectedMicrophoneReady: boolean
   selectedInputReady: boolean
-  /** Always true for Hi-Fi Pass-Through (no Output keep-alive required). */
+  /** True when Hi-Fi Cable Output keep-alive capture is open (Input→Output loop). */
   hifiOutputActive?: boolean
   hifiOutputError?: string
   outputLevel: number
