@@ -26,42 +26,22 @@ internal static class HifiCableOutputBindPlanner
             return attempts;
         }
 
-        var mixRate = 0;
-        try
-        {
-            mixRate = device.AudioClient.MixFormat.SampleRate;
-        }
-        catch
-        {
-            // MixFormat unavailable — fall through to 48 kHz attempts.
-        }
+        // Engine-native 48 kHz float — no upsampling or Windows SRC when the cable matches.
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmPacked, true, false);
 
-        // When MixFormat is already 48 kHz, only bind at 48 kHz. Opening Input at 48 kHz
-        // while Output stays at 384 kHz (or the reverse) is silent on bit-perfect Hi-Fi Cable.
-        if (mixRate == HifiStreamingPolicy.EngineMixSampleRate || mixRate == 0)
-        {
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmPacked, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, true);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, true);
-            return attempts;
-        }
+        // Fallback if the cable is still at 384 kHz studio rate.
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, true, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, true, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, false, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmPacked, true, false);
 
-        // Legacy 384 kHz MixFormat — bind at that rate so Input matches Output.
-        if (mixRate == HifiStreamingPolicy.DeviceSampleRate)
-        {
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmPacked, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, true, true);
-        }
-
-        // Last resort: 48 kHz with Windows SRC (still needs Output at the same rate).
+        // Last resort: 48 kHz float with Windows SRC to whatever the device requires.
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, true);
-        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, true);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
 
         return attempts;
     }

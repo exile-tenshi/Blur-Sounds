@@ -686,23 +686,26 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
-    // Hi-Fi Cable is bit-perfect — refuse Start when Input/Output MixFormats diverge
-    // or are not clean 48 kHz. Soft-continuing here was the main "no audio through Hi-Fi" bug.
+    // Same Start path as main: apply clean settings, then start. Warn on format issues
+    // but do not hard-block streaming — the Output keep-alive + bind planner handle the cable.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
-      const formatBlocker = describeHifiFormatStartBlocker(result)
-      if (formatBlocker) {
-        this.setEngineError(formatBlocker)
-        return this.emitCachedSnapshot()
+      const formatWarning = describeHifiFormatStartBlocker(result)
+      if (formatWarning) {
+        this.engineStatus = {
+          ...this.engineStatus,
+          message: formatWarning,
+        }
       }
     } catch (error) {
-      this.setEngineError(
-        error instanceof Error
-          ? error.message
-          : 'Unable to apply Hi-Fi Cable clean audio settings. Set both endpoints to 48 kHz · 24-bit in Windows Sound.',
-      )
-      return this.emitCachedSnapshot()
+      this.engineStatus = {
+        ...this.engineStatus,
+        message:
+          error instanceof Error
+            ? `Hi-Fi Cable format warning: ${error.message}`
+            : 'Hi-Fi Cable format warning: unable to apply studio settings.',
+      }
     }
 
     if (!this.selection.inputDeviceId) {

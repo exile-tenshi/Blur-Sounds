@@ -28,6 +28,10 @@ function getEngineStatusLabel(engine: AudioSnapshot['engine']): string {
     return 'idle — click Start stream'
   }
 
+  if (engine.state === 'running' && engine.hifiOutputActive === false) {
+    return 'running — Output inactive'
+  }
+
   if (engine.state === 'running') {
     const pull = Math.round((engine.outputPullLevel ?? 0) * 100)
     return pull > 0 ? `running · cable ${pull}%` : 'running · cable idle'
