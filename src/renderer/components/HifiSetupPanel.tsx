@@ -133,9 +133,9 @@ export function HifiSetupPanel({
       <div className="routing-checklist hifi-setup-checklist">
         <strong>Hi-Fi Cable setup</strong>
         <p className="muted">
-          Click <strong>Apply clean audio settings</strong> to reset Hi-Fi Cable Input and Output to{' '}
-          <strong>{HIFI_CABLE_QUALITY.label}</strong> with exclusive mode enabled. Use the buttons
-          above to verify in Windows Sound if needed.
+          Click <strong>Apply clean audio settings</strong> so Input and Output both use{' '}
+          <strong>{HIFI_CABLE_QUALITY.label}</strong> in shared mode. Hi-Fi Cable is Pass-Through by
+          default — Discord/OBS must select <strong>Hi-Fi Cable Output</strong> as their mic.
         </p>
         <ol>
           {setupSteps.map((step) => (

@@ -197,13 +197,7 @@ internal sealed class AudioEngine : IDisposable
         previous?.Stop();
         previous?.Dispose();
         nextBroadcast.Play();
-
-        // Format rebind can invalidate the VB-Audio Output keep-alive client.
-        if (UsesHifiCableInput())
-        {
-            hifiOutputActivator ??= new HifiCableOutputActivator();
-            hifiOutputActivator.Start();
-        }
+        StopHifiOutputActivator();
 
         foreach (var source in microphoneSources.Values)
         {
@@ -272,50 +266,18 @@ internal sealed class AudioEngine : IDisposable
     }
 
     /// <summary>
-    /// VB-Audio only loops Input→Output while Output capture is open. If the keep-alive
-    /// client dies mid-stream, restart it so Discord/OBS do not stay silent.
+    /// Legacy no-op. Hi-Fi Cable is Pass-Through without any Output capture client
+    /// (VB-Audio manual). Keeping an Output keep-alive was based on a wrong assumption.
     /// </summary>
     public void EnsureHifiOutputKeepAlive()
     {
-        if (!UsesHifiCableInput())
-        {
-            return;
-        }
+        StopHifiOutputActivator();
+    }
 
-        lock (gate)
-        {
-            if (!string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(state, "starting", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-        }
-
-        if (hifiOutputActivator?.IsActive == true)
-        {
-            return;
-        }
-
-        try
-        {
-            hifiOutputActivator ??= new HifiCableOutputActivator();
-            hifiOutputActivator.Start();
-            if (hifiOutputActivator.IsActive)
-            {
-                lock (gate)
-                {
-                    message = "Streaming mix to input. Hi-Fi Cable Output is active.";
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            lock (gate)
-            {
-                message =
-                    $"Hi-Fi Cable Output keep-alive failed ({ex.Message}) — listeners hear silence.";
-            }
-        }
+    private void StopHifiOutputActivator()
+    {
+        hifiOutputActivator?.Dispose();
+        hifiOutputActivator = null;
     }
 
     public EngineTelemetry GetTelemetry()
@@ -374,8 +336,9 @@ internal sealed class AudioEngine : IDisposable
             SelectedInputReady = outputBroadcast is not null &&
                 !string.IsNullOrWhiteSpace(selection.InputDeviceId) &&
                 string.Equals(boundInputSelectionId, selection.InputDeviceId, StringComparison.Ordinal),
-            HifiOutputActive = !UsesHifiCableInput() || hifiOutputActivator?.IsActive == true,
-            HifiOutputError = UsesHifiCableInput() ? hifiOutputActivator?.LastError : null,
+            // Pass-Through does not require an Output keep-alive client.
+            HifiOutputActive = true,
+            HifiOutputError = null,
             OutputLevel = ComputeMixedOutputLevel(),
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
@@ -1190,29 +1153,7 @@ internal sealed class AudioEngine : IDisposable
         }
 
         EnsureMixerInputsAttached();
-
-        var hifiOutputWarning = string.Empty;
-        if (UsesHifiCableInput())
-        {
-            hifiOutputActivator ??= new HifiCableOutputActivator();
-            try
-            {
-                hifiOutputActivator.Start();
-            }
-            catch (Exception ex)
-            {
-                hifiOutputWarning =
-                    $" Hi-Fi Cable Output keep-alive failed ({ex.Message}) — listeners on Hi-Fi Cable Output will hear silence.";
-            }
-
-            if (hifiOutputActivator.IsActive != true)
-            {
-                var detail = hifiOutputActivator.LastError;
-                hifiOutputWarning = string.IsNullOrWhiteSpace(detail)
-                    ? " Hi-Fi Cable Output could not be opened — other apps will hear silence until Recording → Hi-Fi Cable Output is Enabled and matching Input format (48 kHz · 24-bit)."
-                    : $" {detail}";
-            }
-        }
+        StopHifiOutputActivator();
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
         if (boundDevice is not null)
@@ -1245,25 +1186,14 @@ internal sealed class AudioEngine : IDisposable
         lock (gate)
         {
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
-            var hifiActive = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true;
-            var hifiSuffix = hifiActive
-                ? " Hi-Fi Cable Output is active."
-                : hifiOutputWarning;
+            var hifiSuffix = UsesHifiCableInput()
+                ? " Hi-Fi Cable Pass-Through — point Discord/OBS at Hi-Fi Cable Output."
+                : string.Empty;
 
-            // Still mark running so Input playback continues, but surface Output failure loudly.
             state = "running";
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to input.{routeSuffix}{hifiSuffix}"
                 : $"Streaming mix to input.{routeSuffix}{hifiSuffix}";
-
-            if (UsesHifiCableInput() && !hifiActive)
-            {
-                // Keep state running (Input may still be useful) but prefer the Output error text.
-                message = string.IsNullOrWhiteSpace(hifiOutputActivator?.LastError)
-                    ? message
-                    : hifiOutputActivator!.LastError +
-                      " Mix is playing to Hi-Fi Cable Input, but Output listeners will hear silence.";
-            }
         }
     }
 
