@@ -101,6 +101,7 @@ export function useAudioControlState() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [isEngineBusy, setIsEngineBusy] = useState(false)
+  const engineBusyRef = useRef(false)
   const lastTelemetryUiAtRef = useRef(0)
   const pendingTelemetryRef = useRef<AudioSnapshot | undefined>(undefined)
   const telemetryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -452,10 +453,11 @@ export function useAudioControlState() {
 
   const startEngine = useCallback(async () => {
     const audioControl = resolveAudioControl()
-    if (!audioControl || isEngineBusy) {
+    if (!audioControl || engineBusyRef.current) {
       return
     }
 
+    engineBusyRef.current = true
     setIsEngineBusy(true)
     try {
       setSnapshot(await audioControl.startEngine())
@@ -463,16 +465,18 @@ export function useAudioControlState() {
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : 'Unable to start the audio engine.')
     } finally {
+      engineBusyRef.current = false
       setIsEngineBusy(false)
     }
-  }, [isEngineBusy])
+  }, [])
 
   const stopEngine = useCallback(async () => {
     const audioControl = resolveAudioControl()
-    if (!audioControl || isEngineBusy) {
+    if (!audioControl || engineBusyRef.current) {
       return
     }
 
+    engineBusyRef.current = true
     setIsEngineBusy(true)
     try {
       setSnapshot(await audioControl.stopEngine())
@@ -480,9 +484,10 @@ export function useAudioControlState() {
     } catch (stopError) {
       setError(stopError instanceof Error ? stopError.message : 'Unable to stop the audio engine.')
     } finally {
+      engineBusyRef.current = false
       setIsEngineBusy(false)
     }
-  }, [isEngineBusy])
+  }, [])
 
   return {
     snapshot,
