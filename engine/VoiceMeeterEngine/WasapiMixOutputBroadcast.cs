@@ -31,6 +31,11 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
         var delegatingSource = new DelegateSampleProvider(sourceFormat, sourceFactory);
         var deviceName = device.FriendlyName;
         var isHiFiTarget = HifiCableFormat.IsHifiCableDevice(deviceName);
+        if (isHiFiTarget)
+        {
+            HifiCableEndpointVolume.EnsureAudible(device);
+        }
+
         var qualityHint = HifiCableOutputFormat.GetSetupQualityHint(deviceName);
         var attempts = HifiCableOutputBindPlanner.GetAttempts(device, deviceName);
 
