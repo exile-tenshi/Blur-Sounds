@@ -1496,6 +1496,11 @@ progress {
   gap: 8px;
 }
 
+.sonar-preset-hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .sonar-advanced-toggle {
   justify-self: start;
 }
