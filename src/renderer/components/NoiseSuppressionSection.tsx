@@ -127,7 +127,12 @@ function MicNoiseCard({
             disabled={!slot.deviceId}
             onChange={(event) => {
               setActivePresetId(null)
-              void onChange({ enabled: event.target.checked })
+              if (event.target.checked) {
+                void onChange({ enabled: true })
+              } else {
+                // Full bypass — gate must also turn off or audio still ducks in/out.
+                void onChange({ enabled: false, noiseGateEnabled: false })
+              }
             }}
           />
           <span className="eq-toggle-track" />
