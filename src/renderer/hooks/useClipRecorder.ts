@@ -56,7 +56,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 6
+export const CLIPS_PICKER_BUILD = 7
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -71,16 +71,27 @@ function pickRecorderMimeType(): string {
 }
 
 async function captureDesktopStream(_sourceId: string): Promise<MediaStream> {
-  // getDisplayMedia goes through the main-process handler, which maps our display:*
-  // ids to a real capturer source only when buffering starts (not when opening Clips).
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: {
-      width: { ideal: 1280, max: 1280 },
-      height: { ideal: 720, max: 720 },
-      frameRate: { ideal: 30, max: 30 },
-    },
-    audio: true,
-  })
+  // Keep getDisplayMedia constraints minimal — detailed width/height/frameRate objects
+  // are rejected as "Invalid capture constraints" on some Electron/Chromium builds.
+  // The main-process setDisplayMediaRequestHandler maps display:*/app:* to a real source.
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/invalid capture constraints/i.test(message)) {
+      // Retry without audio — loopback can fail while video still works.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      })
+    } else {
+      throw error
+    }
+  }
 
   for (const track of stream.getVideoTracks()) {
     const capabilities = track.getCapabilities?.() as
@@ -93,7 +104,7 @@ async function captureDesktopStream(_sourceId: string): Promise<MediaStream> {
         frameRate: { ideal: 30, max: 30 },
       })
     } catch {
-      // Constraints are best-effort.
+      // Constraints are best-effort after the stream exists.
     }
   }
 
@@ -393,16 +404,19 @@ export function useClipRecorder() {
         )
       } catch (startError) {
         stopTracks()
-        setError(
+        const raw =
           startError instanceof Error
             ? startError.message
-            : 'Unable to start background clip buffer.',
-        )
+            : 'Unable to start background clip buffer.'
+        const message = /invalid capture constraints/i.test(raw)
+          ? 'Unable to start clip buffer (capture rejected). Pick a Desktop source, or Refresh games and try again.'
+          : raw
+        setError(message)
         await syncStatus(
           {
             buffering: false,
             bufferState: 'error',
-            error: 'Unable to start background clip buffer.',
+            error: message,
           },
           { forceUi: true },
         )
