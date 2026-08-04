@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { BrowserWindow, DesktopCapturerSource } from 'electron'
 import { ipcMain, session } from 'electron'
 import { clipChannels } from '../../shared/clipApi.js'
 import type { SaveClipPayload } from '../../shared/clipApi.js'
@@ -34,7 +34,7 @@ export function registerClipIpc(
   })
 
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
-    const grant = (source: Electron.DesktopCapturerSource) => {
+    const grant = (source: DesktopCapturerSource) => {
       const isScreen = source.id.startsWith('screen:')
       // System loopback is reliable with screen capture; window + loopback is
       // rejected as "Invalid capture constraints" on some Electron builds.
