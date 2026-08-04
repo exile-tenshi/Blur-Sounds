@@ -128,12 +128,17 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
 
     private static ISampleProvider CreateOutputSource(ISampleProvider source, WaveFormat outputFormat)
     {
-        if (outputFormat.SampleRate == source.WaveFormat.SampleRate)
+        // Always stage first so capture FIFOs are not pulled directly by WASAPI / resampler.
+        var staged = new OutputStageSampleProvider(
+            source,
+            bufferMilliseconds: LatencyTuning.OutputStageBufferMilliseconds);
+
+        if (outputFormat.SampleRate == staged.WaveFormat.SampleRate)
         {
-            return new OutputStageSampleProvider(source, bufferMilliseconds: LatencyTuning.OutputStageBufferMilliseconds);
+            return staged;
         }
 
-        return new StudioRateOutputSampleProvider(source, outputFormat.SampleRate);
+        return new StudioRateOutputSampleProvider(staged, outputFormat.SampleRate);
     }
 
     private static InvalidOperationException CreateBindException(

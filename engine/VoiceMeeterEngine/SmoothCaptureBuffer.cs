@@ -367,7 +367,15 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
             var buffered = ring.BufferedSamples;
             if (minPlayoutSamples > 0 && buffered < minPlayoutSamples)
             {
-                EmitStandby(samples, offset, count);
+                if (hasWrittenAudio())
+                {
+                    gapFill.FillGap(samples, offset, count);
+                }
+                else
+                {
+                    Array.Clear(samples, offset, count);
+                }
+
                 return count;
             }
 
@@ -380,7 +388,7 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
                     CaptureDiagnostics.NoteCaptureUnderrun();
                 }
 
-                Array.Clear(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
+                gapFill.FillGap(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
                 return count;
             }
 
@@ -392,10 +400,5 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
 
             return count;
         }
-    }
-
-    private void EmitStandby(float[] buffer, int offset, int count)
-    {
-        Array.Clear(buffer, offset, count);
     }
 }
