@@ -63,6 +63,8 @@ internal sealed class HifiCableOutputActivator : IDisposable
         {
             // Keep-alive capture can use a slightly larger period than live mics;
             // stability matters more than latency for the VB-Audio loop gate.
+            HifiCableEndpointVolume.EnsureAudible(recording);
+
             var candidate = MicWasapiCapture.Create(
                 recording,
                 Math.Max(40, LatencyTuning.HiFiMicCaptureBufferMilliseconds),

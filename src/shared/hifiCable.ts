@@ -286,9 +286,9 @@ export function getHifiCableSetupSteps(): string[] {
     `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
     'Click Apply clean audio settings so Hi-Fi Cable Input and Output both use 24 bit, 48000 Hz (shared mode).',
     'On both Advanced tabs, uncheck Allow exclusive control and Give exclusive mode applications priority.',
-    'Confirm both endpoints show the same rate. Mismatched rates = silence.',
-    'Leave ASIO Bridge closed or on Pass-Through (Direct Mode steals the cable).',
-    'Start stream — status should say Hi-Fi Cable Output is active, and Cable Input write level should move when you speak/play.',
+    'Playback → Hi-Fi Cable Input: Levels tab not muted / not at 0%. Recording → Hi-Fi Cable Output: same.',
+    'ASIO Bridge: if it is not running, you are already in Pass-Through — do nothing. If a gold “ASIO Bridge” window is open, set it to PASS THRU (not ASIO / Direct), or close that window from the taskbar.',
+    'Start stream in Blur Sounds — status should show cable % moving when you speak or play music.',
     `In Discord/OBS, set the input device to ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
   ]
 }
