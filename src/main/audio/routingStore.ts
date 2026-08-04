@@ -174,9 +174,7 @@ function resolveInputDeviceId(
 
   return (
     preferredInput?.id ??
-    outputDevices.find((device) => isHifiCablePlaybackDevice(device.name))?.id ??
-    outputDevices.find((device) => device.isDefault)?.id ??
-    outputDevices[0]?.id
+    outputDevices.find((device) => isHifiCablePlaybackDevice(device.name))?.id
   )
 }
 
