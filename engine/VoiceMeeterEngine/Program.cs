@@ -43,6 +43,12 @@ internal static class Program
                     engine.RefreshSessionPeaksInBackground();
                 }
 
+                // Keep Hi-Fi Cable Output open (~every 1s) — required for Input→Output loop.
+                if (recoveryCounter % 10 == 0)
+                {
+                    engine.EnsureHifiOutputKeepAlive();
+                }
+
                 // Recover stuck loopbacks about every 15 seconds, and only for hard failures.
                 if (recoveryCounter % 150 == 0)
                 {
