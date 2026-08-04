@@ -1453,6 +1453,58 @@ progress {
   align-items: center;
 }
 
+.sonar-noise .section-help {
+  max-width: 52ch;
+}
+
+.sonar-card {
+  gap: 16px;
+  padding: 20px;
+  background:
+    linear-gradient(160deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.88)),
+    rgba(15, 23, 42, 0.75);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+.sonar-card.ns-on {
+  border-color: rgba(34, 211, 238, 0.4);
+}
+
+.sonar-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.sonar-card-identity h3 {
+  margin: 4px 0;
+  font-size: 1.35rem;
+}
+
+.sonar-power {
+  flex-shrink: 0;
+}
+
+.sonar-meter-row {
+  min-height: 28px;
+}
+
+.sonar-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sonar-advanced-toggle {
+  justify-self: start;
+}
+
+.sonar-strength input[type='range'] {
+  width: 100%;
+  accent-color: #22d3ee;
+}
+
 @media (max-width: 900px) {
   .app-frame {
     grid-template-columns: 72px minmax(0, 1fr);
