@@ -81,6 +81,7 @@ function resolveAudioControl(): AudioControlApi | undefined {
       ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
     openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
     applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
+    probeHifiCable: () => ipcRenderer.invoke(audioChannels.probeHifiCable) as Promise<string>,
     subscribeSnapshot: (listener) => {
       const wrappedListener = (_event: Electron.IpcRendererEvent, snapshot: AudioSnapshot) => {
         listener(snapshot)
@@ -352,6 +353,17 @@ export function useAudioControlState() {
     setSnapshot(await audioControl.applyHifiCableStudioSettings())
   }, [])
 
+  const probeHifiCable = useCallback(async () => {
+    const audioControl = resolveAudioControl()
+    if (!audioControl) {
+      return ''
+    }
+
+    const report = await audioControl.probeHifiCable()
+    setSnapshot(await audioControl.getSnapshot())
+    return report
+  }, [])
+
   const toggleRoute = useCallback(async (appId: string, enabled: boolean) => {
     const audioControl = resolveAudioControl()
     if (!audioControl) {
@@ -487,6 +499,7 @@ export function useAudioControlState() {
     openHifiCablePlaybackSettings,
     openHifiCableRecordingSettings,
     applyHifiCableStudioSettings,
+    probeHifiCable,
     toggleRoute,
     setRouteVolume,
     setRouteEqualizer,
