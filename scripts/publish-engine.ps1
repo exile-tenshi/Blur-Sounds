@@ -37,7 +37,7 @@ if ($rnnoiseSource -and (Split-Path $rnnoiseSource -Parent) -ne $output) {
     Copy-Item -Force $rnnoiseSource (Join-Path $output 'rnnoise.dll')
 }
 if (-not (Test-Path (Join-Path $output 'rnnoise.dll'))) {
-    Write-Warning 'rnnoise.dll was not found next to the engine - AI noise cancellation may fail to load.'
+    throw 'rnnoise.dll was not found next to the engine - AI noise cancellation cannot load. Re-run nuget restore / publish.'
 }
 
 $exe = Join-Path $output 'VoiceMeeterEngine.exe'
