@@ -189,7 +189,11 @@ internal static partial class HifiCableFormatConfigurator
         {
             DeviceName = endpoint.FriendlyName,
             SampleRate = format?.SampleRate ?? 0,
-            BitsPerSample = format is null ? 0 : WaveFormatUtility.GetEffectiveBitsPerSample(format),
+            BitsPerSample = format is null
+                ? 0
+                : HifiCableFormat.IsEngineCleanFormat(format)
+                    ? HifiCableFormat.HiFiEngineBitsPerSample
+                    : WaveFormatUtility.GetEffectiveBitsPerSample(format),
             ExclusiveModeEnabled = exclusiveMode,
             AtStudioQuality = atStudioQuality,
             FormatLabel = format is null
