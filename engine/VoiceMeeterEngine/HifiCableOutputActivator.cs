@@ -184,9 +184,11 @@ internal sealed class HifiCableOutputActivator : IDisposable
         try
         {
             var nativeRate = recording.AudioClient.MixFormat.SampleRate;
-            if (nativeRate is HifiStreamingPolicy.EngineMixSampleRate
-                or HifiStreamingPolicy.DeviceSampleRate
-                or > 0)
+            // Prefer the live MixFormat only when it already matches the engine (48 kHz)
+            // or when both cable sides are still on the legacy 384 kHz studio rate.
+            // Opening Output at a different rate than Input is silent on bit-perfect Hi-Fi Cable.
+            if (nativeRate == HifiStreamingPolicy.EngineMixSampleRate ||
+                nativeRate == HifiStreamingPolicy.DeviceSampleRate)
             {
                 return nativeRate;
             }
