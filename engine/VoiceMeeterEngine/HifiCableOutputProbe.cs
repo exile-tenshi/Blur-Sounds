@@ -47,29 +47,37 @@ internal static class HifiCableOutputProbe
         };
 
         Exception? lastError = null;
+        using var enumerator = new MMDeviceEnumerator();
         foreach (var attempt in attempts)
         {
-            WasapiRenderBroadcast? render = null;
+            WasapiOutBroadcast? render = null;
             WasapiCapture? capture = null;
+            MMDevice? attemptPlayback = null;
             var capturedPeak = 0f;
             try
             {
+                attemptPlayback = enumerator.GetDevice(playback.ID);
+                HifiCableEndpointVolume.EnsureAudible(attemptPlayback);
+
                 ISampleProvider outputSource = attempt.Format.SampleRate == HifiStreamingPolicy.EngineMixSampleRate
                     ? tone
                     : new StudioRateOutputSampleProvider(tone, attempt.Format.SampleRate);
-                var waveProvider = OutputWaveProviderFactory.Create(outputSource, attempt.Format);
-                render = new WasapiRenderBroadcast();
+                var waveProvider = new PeakReportingWaveProvider(
+                    OutputWaveProviderFactory.Create(outputSource, attempt.Format));
+                render = new WasapiOutBroadcast();
                 render.Configure(
-                    playback,
-                    attempt.ShareMode,
-                    attempt.UseEventSync,
-                    LatencyTuning.HiFiOutputLatencyMilliseconds,
+                    attemptPlayback,
                     waveProvider,
-                    attempt.AllowAutoConvert);
+                    LatencyTuning.HiFiOutputLatencyMilliseconds,
+                    useEventSync: false);
+                attemptPlayback = null;
 
                 if (recording is not null)
                 {
-                    capture = new WasapiCapture(recording);
+                    capture = new WasapiCapture(recording)
+                    {
+                        ShareMode = AudioClientShareMode.Shared,
+                    };
                     capture.DataAvailable += (_, args) =>
                     {
                         if (args.BytesRecorded <= 0)
@@ -83,6 +91,7 @@ internal static class HifiCableOutputProbe
                     capture.StartRecording();
                 }
 
+                OutputPullMeter.Reset();
                 render.Play();
                 var recordMeterPeak = 0f;
                 var deadline = DateTime.UtcNow.AddMilliseconds(durationMilliseconds);
@@ -108,7 +117,7 @@ internal static class HifiCableOutputProbe
                 capture?.StopRecording();
 
                 report.AppendLine(
-                    $"OK {attempt.ShareMode} event={attempt.UseEventSync} {DescribeFormat(attempt.Format)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
+                    $"OK WasapiOut {DescribeFormat(attempt.Format)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
 
                 if (peak > 0.001f && (capturedPeak > 0.001f || recordMeterPeak > 0.001f))
                 {
@@ -118,13 +127,13 @@ internal static class HifiCableOutputProbe
             catch (Exception ex)
             {
                 lastError = ex;
-                report.AppendLine(
-                    $"FAIL {attempt.ShareMode} event={attempt.UseEventSync} {DescribeFormat(attempt.Format)}: {ex.Message}");
+                report.AppendLine($"FAIL WasapiOut {DescribeFormat(attempt.Format)}: {ex.Message}");
             }
             finally
             {
                 capture?.Dispose();
                 render?.Dispose();
+                attemptPlayback?.Dispose();
             }
         }
 

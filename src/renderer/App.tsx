@@ -107,6 +107,7 @@ const AppShell = memo(function AppShell() {
     openHifiCablePlaybackSettings,
     openHifiCableRecordingSettings,
     applyHifiCableStudioSettings,
+    probeHifiCable,
     toggleRoute,
     setRouteVolume,
     setRouteEqualizer,
@@ -326,6 +327,7 @@ const AppShell = memo(function AppShell() {
             recordingDevices={recordingDevices}
             hifiCable={snapshot.hifiCable}
             onApplyStudioSettings={() => void applyHifiCableStudioSettings()}
+            onProbeHifiCable={probeHifiCable}
             onOpenPlaybackSettings={() => void openHifiCablePlaybackSettings()}
             onOpenRecordingSettings={() => void openHifiCableRecordingSettings()}
             onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}

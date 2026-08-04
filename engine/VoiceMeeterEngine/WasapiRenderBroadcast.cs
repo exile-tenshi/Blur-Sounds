@@ -6,12 +6,14 @@ using NAudio.Wave;
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Direct WASAPI render loop for virtual cable output. Avoids NAudio WasapiOut stop/restart issues.
+/// Direct WASAPI render loop for non-Hi-Fi playback endpoints.
+/// Prefills the buffer before Start — required for reliable shared-mode render.
 /// </summary>
 internal sealed class WasapiRenderBroadcast : IDisposable
 {
     private const long ReftimesPerMillisecond = 10_000;
 
+    private MMDevice? device;
     private AudioClient? audioClient;
     private AudioRenderClient? renderClient;
     private IWaveProvider? waveProvider;
@@ -26,7 +28,7 @@ internal sealed class WasapiRenderBroadcast : IDisposable
     public string? LastRenderError => lastRenderError;
 
     public void Configure(
-        MMDevice device,
+        MMDevice endpoint,
         AudioClientShareMode shareMode,
         bool useEventSync,
         int latencyMilliseconds,
@@ -36,6 +38,8 @@ internal sealed class WasapiRenderBroadcast : IDisposable
         Stop();
         DisposeClients();
 
+        // Retain the endpoint so the AudioClient is not torn down by MMDevice finalizers.
+        device = endpoint;
         waveProvider = provider;
         audioClient = device.AudioClient;
         bytesPerFrame = Math.Max(1, provider.WaveFormat.BlockAlign);
@@ -114,7 +118,15 @@ internal sealed class WasapiRenderBroadcast : IDisposable
     {
         try
         {
-            audioClient!.Start();
+            // Prefill before Start — empty virtual-cable buffers often never drain otherwise.
+            var initialPadding = audioClient!.CurrentPadding;
+            var initialFrames = bufferFrameCount - initialPadding;
+            if (initialFrames > 0)
+            {
+                WriteFrames(initialFrames);
+            }
+
+            audioClient.Start();
 
             while (playbackState == 1)
             {
@@ -160,9 +172,6 @@ internal sealed class WasapiRenderBroadcast : IDisposable
 
         if (frameEvent is not null)
         {
-            // Event timeout must NOT stop the render loop. Virtual cables (Hi-Fi Cable)
-            // often miss EventCallback wakes; treating WaitOne failure as fatal left
-            // Cable Input silent after the first buffer fill.
             frameEvent.WaitOne(50);
             return playbackState == 1;
         }
@@ -208,5 +217,7 @@ internal sealed class WasapiRenderBroadcast : IDisposable
         audioClient?.Dispose();
         audioClient = null;
         waveProvider = null;
+        // Keep MMDevice referenced for the client lifetime; caller owns disposal/reuse.
+        device = null;
     }
 }
