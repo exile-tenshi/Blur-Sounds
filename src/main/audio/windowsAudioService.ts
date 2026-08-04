@@ -87,9 +87,12 @@ $excludedProcessNames = @(
 
 $knownAudioProcessNames = @(
   'Spotify', 'Discord', 'chrome', 'msedge', 'firefox', 'opera', 'brave', 'vivaldi', 'arc',
-  'Slack', 'Teams', 'Zoom', 'vlc', 'Steam', 'obs64', 'obs32', 'Cursor', 'Code',
+  'Slack', 'Teams', 'Zoom', 'vlc', 'Steam', 'steamwebhelper', 'obs64', 'obs32', 'Cursor', 'Code',
   'AppleMusic', 'iTunes', 'foobar2000', 'AIMP', 'MusicBee', 'deemix', 'TIDAL', 'Plex',
-  'Overwolf', 'Battle.net', 'EpicGamesLauncher', 'EADesktop', 'GalaxyClient'
+  'Overwolf', 'Battle.net', 'EpicGamesLauncher', 'EADesktop', 'GalaxyClient', 'RiotClientServices',
+  'LeagueClient', 'javaw', 'Minecraft.Windows', 'FortniteClient-Win64-Shipping', 'cs2', 'dota2',
+  'GTA5', 'PlayGTAV', 'VALORANT-Win64-Shipping', 'RainbowSix', 'r5apex', 'cod', 'ModernWarfare',
+  'Witcher3', 'Cyberpunk2077', 'eldenring', 'RocketLeague', 'Destiny2', 'Wow', 'WowClassic'
 )
 
 $processes = Get-Process -ErrorAction SilentlyContinue |
@@ -99,6 +102,7 @@ $processes = Get-Process -ErrorAction SilentlyContinue |
     $excludedProcessNames -notcontains $_.ProcessName -and
     (
       $_.MainWindowTitle -or
+      ($_.MainWindowHandle -ne 0) -or
       ($knownAudioProcessNames -contains $_.ProcessName)
     )
   } |
@@ -224,25 +228,74 @@ function dedupeDevices<T extends { id: string }>(devices: T[]): T[] {
   return [...unique.values()]
 }
 
+let cachedDevices: AudioDevice[] | undefined
+let cachedDevicesAt = 0
+let cachedDevicesInFlight: Promise<AudioDevice[]> | undefined
+const DEVICE_CACHE_TTL_MS = 5000
+
 export async function listAudioDevices(): Promise<AudioDevice[]> {
-  const devices = dedupeDevices(await runPowerShellJson<Omit<AudioDevice, 'kind'>>(deviceScript)).map((device) => ({
-    ...device,
-    kind: detectDeviceKind(device.name, device.id),
-  }))
+  const now = Date.now()
+  if (cachedDevices && now - cachedDevicesAt < DEVICE_CACHE_TTL_MS) {
+    return cachedDevices
+  }
 
-  const firstInput = devices.find((device) => device.kind === 'input')
-  const firstOutput = devices.find((device) => device.kind === 'output')
+  if (cachedDevicesInFlight) {
+    return cachedDevicesInFlight
+  }
 
-  return devices.map((device) => ({
-    ...device,
-    id: createBindableDeviceId(device.kind, device.name),
-    isDefault:
-      device.id === firstInput?.id && device.kind === 'input'
-        ? true
-        : device.id === firstOutput?.id && device.kind === 'output',
-  }))
+  cachedDevicesInFlight = (async () => {
+    const devices = dedupeDevices(
+      await runPowerShellJson<Omit<AudioDevice, 'kind'>>(deviceScript),
+    ).map((device) => ({
+      ...device,
+      kind: detectDeviceKind(device.name, device.id),
+    }))
+
+    const firstInput = devices.find((device) => device.kind === 'input')
+    const firstOutput = devices.find((device) => device.kind === 'output')
+
+    const next = devices.map((device) => ({
+      ...device,
+      id: createBindableDeviceId(device.kind, device.name),
+      isDefault:
+        device.id === firstInput?.id && device.kind === 'input'
+          ? true
+          : device.id === firstOutput?.id && device.kind === 'output',
+    }))
+    cachedDevices = next
+    cachedDevicesAt = Date.now()
+    return next
+  })().finally(() => {
+    cachedDevicesInFlight = undefined
+  })
+
+  return cachedDevicesInFlight
 }
 
+let cachedApplications: AudioApplication[] | undefined
+let cachedApplicationsAt = 0
+let cachedApplicationsInFlight: Promise<AudioApplication[]> | undefined
+const APPLICATION_CACHE_TTL_MS = 3000
+
 export async function listActiveApplications(): Promise<AudioApplication[]> {
-  return runPowerShellJson<AudioApplication>(applicationScript)
+  const now = Date.now()
+  if (cachedApplications && now - cachedApplicationsAt < APPLICATION_CACHE_TTL_MS) {
+    return cachedApplications
+  }
+
+  if (cachedApplicationsInFlight) {
+    return cachedApplicationsInFlight
+  }
+
+  cachedApplicationsInFlight = runPowerShellJson<AudioApplication>(applicationScript)
+    .then((applications) => {
+      cachedApplications = applications
+      cachedApplicationsAt = Date.now()
+      return applications
+    })
+    .finally(() => {
+      cachedApplicationsInFlight = undefined
+    })
+
+  return cachedApplicationsInFlight
 }
