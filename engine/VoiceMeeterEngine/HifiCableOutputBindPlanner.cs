@@ -20,7 +20,6 @@ internal static class HifiCableOutputBindPlanner
         {
             foreach (var format in HifiCableOutputFormat.GetPreferredFormats(deviceName))
             {
-                // Timer-driven first — more reliable than EventCallback on virtual devices.
                 attempts.Add(new WasapiBindAttempt(AudioClientShareMode.Shared, format, false, true));
                 attempts.Add(new WasapiBindAttempt(AudioClientShareMode.Shared, format, true, true));
             }
@@ -38,31 +37,31 @@ internal static class HifiCableOutputBindPlanner
             // MixFormat unavailable — fall through to 48 kHz attempts.
         }
 
-        // Prefer timer sync (useEventSync: false). Hi-Fi Cable EventCallback wakes are
-        // unreliable; a single missed wait previously killed the entire render thread.
+        // Prefer timer sync + PCM 24-bit first — matches Windows "24 bit, 48000 Hz" MixFormat.
+        // Float-without-autoconvert can Initialize oddly on some hosts and write silence.
         if (mixRate == HifiStreamingPolicy.EngineMixSampleRate || mixRate == 0)
         {
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, false, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmPacked, false, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
+            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, false, true);
+            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, false);
+            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, true);
             return attempts;
         }
 
         if (mixRate == HifiStreamingPolicy.DeviceSampleRate)
         {
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, false, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmPacked, false, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, true, false);
             AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, true);
+            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, false);
+            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, true, false);
         }
 
-        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, false, true);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
 
         return attempts;
     }
