@@ -203,9 +203,10 @@ export function mergeHifiCableFormatStatus(
     recordingAtStudioQuality,
     playbackFormatLabel: result.playbackStatus?.formatLabel,
     recordingFormatLabel: result.recordingStatus?.formatLabel,
+    // Shared mode is required — exclusive-allowed on either side is not "ready".
     exclusiveModeReady:
-      result.playbackStatus?.exclusiveModeEnabled === true &&
-      result.recordingStatus?.exclusiveModeEnabled === true,
+      result.playbackStatus?.exclusiveModeEnabled === false &&
+      result.recordingStatus?.exclusiveModeEnabled === false,
   }
 }
 
@@ -284,9 +285,10 @@ export function getHifiCableSetupSteps(): string[] {
   return [
     `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
     'Click Apply clean audio settings so Hi-Fi Cable Input and Output both use 24 bit, 48000 Hz (shared mode).',
-    'Confirm both Windows Sound → Advanced tabs match. Mismatched rates = silence on Hi-Fi Cable.',
+    'On both Advanced tabs, uncheck Allow exclusive control and Give exclusive mode applications priority.',
+    'Confirm both endpoints show the same rate. Mismatched rates = silence.',
     'Leave ASIO Bridge closed or on Pass-Through (Direct Mode steals the cable).',
-    'Start stream — status should say Hi-Fi Cable Output is active, and Cable Input write level should move.',
+    'Start stream — status should say Hi-Fi Cable Output is active, and Cable Input write level should move when you speak/play.',
     `In Discord/OBS, set the input device to ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
   ]
 }
