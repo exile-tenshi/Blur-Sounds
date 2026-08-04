@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="YellowDogMan.RRNoise.NET" Version="0.1.9" />
   </ItemGroup>
 
 </Project>
