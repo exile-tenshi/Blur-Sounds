@@ -391,8 +391,8 @@ export function NoiseSuppressionSection({
           <p className="eyebrow">Noise suppression</p>
           <h2>Microphone cleanup</h2>
           <p className="section-help">
-            Uses the microphone tracked below (same as Mixer). Choose the device on the card, turn
-            suppression on, then Start stream for live cleanup.
+            Uses the microphone tracked below (same as Mixer). Turn suppression on for cleanup, and
+            optionally enable Noise gate to hard-mute silence. Start stream for live processing.
           </p>
         </div>
         <span className="badge">{trackedSlots.length} tracked</span>
