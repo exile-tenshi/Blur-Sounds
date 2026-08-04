@@ -263,6 +263,8 @@ internal static partial class HifiCableFormatConfigurator
 
     private static void ConfigureEndpoint(IPolicyConfig policyConfig, MMDevice endpoint, string registryKind)
     {
+        HifiCableEndpointVolume.EnsureAudible(endpoint);
+
         if (IsEngineMatchedQuality(endpoint))
         {
             _ = TryApplyRegistryStudioFormat(endpoint.ID, registryKind);
