@@ -20,24 +20,29 @@ function shouldShowEngineNotice(engine: AudioSnapshot['engine']): boolean {
     return false
   }
 
-  return engine.state === 'error' || engine.state === 'starting' || engine.state === 'running'
+  // Keep the header/buttons still while streaming — only surface start/error copy.
+  return engine.state === 'error' || engine.state === 'starting'
 }
 
+/** Stable header label — live cable/output % belongs on meters, not this line. */
 function getEngineStatusLabel(engine: AudioSnapshot['engine']): string {
-  if (!engine.helperConnected && engine.state === 'stopped') {
-    return 'idle — click Start stream'
+  if (engine.state === 'starting') {
+    return 'starting'
   }
 
-  if (engine.state === 'running' && engine.hifiOutputActive === false) {
-    return 'running — Output inactive'
+  if (engine.state === 'error') {
+    return 'error'
   }
 
   if (engine.state === 'running') {
-    const pull = Math.round((engine.outputPullLevel ?? 0) * 100)
-    return pull > 0 ? `running · cable ${pull}%` : 'running · cable idle'
+    return engine.hifiOutputActive === false ? 'running · output inactive' : 'streaming'
   }
 
-  return engine.state
+  if (!engine.helperConnected) {
+    return 'idle'
+  }
+
+  return engine.state === 'stopped' ? 'idle' : engine.state
 }
 
 function FeatureStatusStrip({
@@ -64,7 +69,7 @@ function FeatureStatusStrip({
             : 'Noise idle'}
         </span>
       </div>
-      <div className="feature-status-item">
+      <div className="feature-status-item feature-status-clip">
         <span
           className={`status-dot${status.buffering || clipping ? '' : ' idle'}${clipping ? ' hot' : ''}`}
         />
@@ -179,13 +184,13 @@ const AppShell = memo(function AppShell() {
 
           <div className="header-actions">
             <div className="status-card">
-              <span className="status-dot" />
-              <div>
+              <span className={`status-dot${isEngineActive ? '' : ' idle'}`} />
+              <div className="status-card-copy">
                 <strong>Audio Engine</strong>
-                <p className="muted">
-                  {snapshot.engine.helperConnected ? 'Connected' : 'Offline'} ·{' '}
-                  {getEngineStatusLabel(snapshot.engine)} · output{' '}
-                  {Math.round(snapshot.engine.outputLevel * 100)}%
+                <p className="muted engine-status-line">
+                  <span>{snapshot.engine.helperConnected ? 'Connected' : 'Offline'}</span>
+                  <span aria-hidden="true"> · </span>
+                  <span>{getEngineStatusLabel(snapshot.engine)}</span>
                 </p>
               </div>
             </div>
@@ -194,28 +199,31 @@ const AppShell = memo(function AppShell() {
                 type="button"
                 className="secondary-button"
                 onClick={() => void stopEngine()}
-                disabled={isEngineBusy}
+                disabled={isEngineBusy || !isEngineActive}
               >
                 Stop
               </button>
               <button
                 type="button"
-                className="primary-button"
+                className="primary-button start-stream-button"
                 onClick={() => void startEngine()}
                 disabled={
                   isEngineBusy ||
+                  isEngineActive ||
                   !snapshot.hifiCable.playbackReady ||
                   !snapshot.hifiCable.recordingReady
                 }
                 title={
-                  !snapshot.hifiCable.playbackReady
-                    ? 'Install or enable Hi-Fi Cable Input in Setup first'
-                    : !snapshot.hifiCable.recordingReady
-                      ? 'Enable Hi-Fi Cable Output under Windows Sound → Recording'
-                      : 'Start the mix — meters and noise cleanup only move while streaming'
+                  isEngineActive
+                    ? 'Stream is already running — press Stop to end it'
+                    : !snapshot.hifiCable.playbackReady
+                      ? 'Install or enable Hi-Fi Cable Input in Setup first'
+                      : !snapshot.hifiCable.recordingReady
+                        ? 'Enable Hi-Fi Cable Output under Windows Sound → Recording'
+                        : 'Start the mix — meters and noise cleanup only move while streaming'
                 }
               >
-                {isEngineBusy ? 'Starting...' : 'Start stream'}
+                {isEngineActive ? 'Streaming' : isEngineBusy ? 'Starting…' : 'Start stream'}
               </button>
               <button
                 type="button"
@@ -231,7 +239,29 @@ const AppShell = memo(function AppShell() {
 
         <FeatureStatusStrip isEngineActive={isEngineActive} nsEnabledCount={nsEnabledCount} />
 
-        {error ? <p className="notice error">{error}</p> : null}
+        <div className="notice-slot">
+          {error ? <p className="notice error">{error}</p> : null}
+          {shouldShowEngineNotice(snapshot.engine) ? (
+            <p className={`notice${snapshot.engine.state === 'error' ? ' error' : ''}`}>
+              {snapshot.engine.message}
+            </p>
+          ) : null}
+          {!isInitialLoading && hasMixSources && !isEngineActive ? (
+            <p className="notice">
+              {!snapshot.hifiCable.playbackReady ? (
+                <>
+                  Hi-Fi Cable Input is missing or disabled — open <strong>Setup</strong>, install/enable
+                  it, then click Refresh. Mic level meters stay at idle until the stream can start.
+                </>
+              ) : (
+                <>
+                  Stream is stopped — click <strong>Start stream</strong> so mic levels move when you
+                  speak. Noise and clip settings can still be edited now.
+                </>
+              )}
+            </p>
+          ) : null}
+        </div>
         {isInitialLoading ? (
           <section className="loading-shell panel">
             <div className="loading-copy">
@@ -239,26 +269,6 @@ const AppShell = memo(function AppShell() {
               <h2>Scanning audio devices and apps</h2>
             </div>
           </section>
-        ) : null}
-        {shouldShowEngineNotice(snapshot.engine) ? (
-          <p className={`notice${snapshot.engine.state === 'error' ? ' error' : ''}`}>
-            {snapshot.engine.message}
-          </p>
-        ) : null}
-        {!isInitialLoading && hasMixSources && !isEngineActive ? (
-          <p className="notice">
-            {!snapshot.hifiCable.playbackReady ? (
-              <>
-                Hi-Fi Cable Input is missing or disabled — open <strong>Setup</strong>, install/enable
-                it, then click Refresh. Mic level meters stay at idle until the stream can start.
-              </>
-            ) : (
-              <>
-                Stream is stopped — click <strong>Start stream</strong> so mic levels move when you
-                speak. Noise and clip settings can still be edited now.
-              </>
-            )}
-          </p>
         ) : null}
 
         {activeSection === 'mixer' ? (
