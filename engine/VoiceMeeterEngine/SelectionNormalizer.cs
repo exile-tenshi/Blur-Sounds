@@ -40,6 +40,12 @@ internal sealed class NoiseSuppressionSettingsConfig
 
     [System.Text.Json.Serialization.JsonPropertyName("release")]
     public float Release { get; set; } = 40f;
+
+    [System.Text.Json.Serialization.JsonPropertyName("noiseGateEnabled")]
+    public bool NoiseGateEnabled { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("noiseGateThreshold")]
+    public float NoiseGateThreshold { get; set; } = 35f;
 }
 
 internal static class SelectionNormalizer

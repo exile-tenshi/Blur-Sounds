@@ -139,6 +139,7 @@ function MicEditorCard({
             <p className="muted">
               {inUse ? 'In use · auto-tracked' : isDefault ? 'Default device' : 'Available'}
               {settings.enabled ? ' · suppression on' : ' · suppression off'}
+              {settings.noiseGateEnabled ? ' · gate on' : ''}
             </p>
           </div>
         </button>
@@ -213,7 +214,7 @@ function MicEditorCard({
               value={settings.attack}
               min={0}
               max={100}
-              disabled={!settings.enabled || !slot.deviceId}
+              disabled={(!settings.enabled && !settings.noiseGateEnabled) || !slot.deviceId}
               onChange={(attack) => void onChange({ attack })}
             />
             <SliderField
@@ -221,9 +222,33 @@ function MicEditorCard({
               value={settings.release}
               min={0}
               max={100}
-              disabled={!settings.enabled || !slot.deviceId}
+              disabled={(!settings.enabled && !settings.noiseGateEnabled) || !slot.deviceId}
               onChange={(release) => void onChange({ release })}
             />
+
+            <div className="noise-gate-block">
+              <label className="eq-toggle noise-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.noiseGateEnabled}
+                  disabled={!slot.deviceId}
+                  onChange={(event) => void onChange({ noiseGateEnabled: event.target.checked })}
+                />
+                <span className="eq-toggle-track" />
+                <span>Noise gate</span>
+              </label>
+              <p className="muted">
+                Optional hard mute when you stop talking. Leave off if it chops the start of words.
+              </p>
+              <SliderField
+                label="Gate threshold"
+                value={settings.noiseGateThreshold}
+                min={0}
+                max={100}
+                disabled={!settings.noiseGateEnabled || !slot.deviceId}
+                onChange={(noiseGateThreshold) => void onChange({ noiseGateThreshold })}
+              />
+            </div>
           </div>
 
           <aside className="noise-editor-side">
@@ -254,7 +279,11 @@ function MicEditorCard({
                 className="secondary-button"
                 disabled={!slot.deviceId}
                 onClick={() =>
-                  void onChange({ ...DEFAULT_NOISE_SUPPRESSION, enabled: true })
+                  void onChange({
+                    ...DEFAULT_NOISE_SUPPRESSION,
+                    enabled: true,
+                    noiseGateEnabled: false,
+                  })
                 }
               >
                 Balanced
@@ -271,6 +300,8 @@ function MicEditorCard({
                     highPassHz: 100,
                     attack: 65,
                     release: 55,
+                    noiseGateEnabled: true,
+                    noiseGateThreshold: 45,
                   })
                 }
               >
@@ -288,6 +319,8 @@ function MicEditorCard({
                     highPassHz: 70,
                     attack: 40,
                     release: 30,
+                    noiseGateEnabled: false,
+                    noiseGateThreshold: 35,
                   })
                 }
               >
