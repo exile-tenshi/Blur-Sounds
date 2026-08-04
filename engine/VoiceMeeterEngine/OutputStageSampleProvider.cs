@@ -4,12 +4,14 @@ using NAudio.Wave.SampleProviders;
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Keeps a steady 48 kHz float buffer between the mixer and WASAPI output.
+/// Keeps a steady float buffer between the mixer and WASAPI output.
+/// Underruns hold the last frame instead of silence.
 /// </summary>
 internal sealed class OutputStageSampleProvider : ISampleProvider
 {
     private readonly ISampleProvider source;
     private readonly FloatCaptureRing ring;
+    private readonly SampleGapFill gapFill;
     private readonly float[] pullScratch;
     private readonly int minBufferedSamples;
 
@@ -18,6 +20,7 @@ internal sealed class OutputStageSampleProvider : ISampleProvider
         source = mixSource;
         WaveFormat = mixSource.WaveFormat;
         var channels = Math.Max(1, WaveFormat.Channels);
+        gapFill = new SampleGapFill(channels);
         var capacity = Math.Max(
             channels,
             WaveFormat.SampleRate * channels * bufferMilliseconds / 1000);
@@ -53,9 +56,14 @@ internal sealed class OutputStageSampleProvider : ISampleProvider
             written += pulled;
         }
 
+        if (written > 0)
+        {
+            gapFill.NoteSamplesRead(buffer, offset, written);
+        }
+
         if (written < count)
         {
-            Array.Clear(buffer, offset + written, count - written);
+            gapFill.FillGap(buffer, offset + written, count - written);
         }
 
         return count;
