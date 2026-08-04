@@ -288,6 +288,7 @@ export function getHifiCableSetupSteps(): string[] {
     'On both Advanced tabs, uncheck Allow exclusive control and Give exclusive mode applications priority.',
     'Playback → Hi-Fi Cable Input: Levels tab not muted / not at 0%. Recording → Hi-Fi Cable Output: same.',
     'ASIO Bridge: if it is not running, you are already in Pass-Through — do nothing. If a gold “ASIO Bridge” window is open, set it to PASS THRU (not ASIO / Direct), or close that window from the taskbar.',
+    'Click Test cable (plays tone). Watch Windows Recording → Hi-Fi Cable Output meter — it should jump. If not, Input/Output formats still do not match.',
     'Start stream in Blur Sounds — status should show cable % moving when you speak or play music.',
     `In Discord/OBS, set the input device to ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
   ]
