@@ -19,8 +19,9 @@ import type { SettingsStore } from '../settings/settingsStore.js'
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
 const MAX_WINDOW_SOURCES = 40
 const MAX_APP_SOURCES = 60
-const CAPTURER_TIMEOUT_MS = 3000
-const WINDOW_SCAN_TIMEOUT_MS = 2500
+const CAPTURER_TIMEOUT_MS = 2500
+const WINDOW_SCAN_TIMEOUT_MS = 2000
+const SCREEN_SOURCE_CACHE_MS = 60_000
 
 function sanitizeFilePart(value: string): string {
   return (
@@ -166,6 +167,8 @@ export class ClipRecorderService {
   private cachedWindows: ClipSource[] = []
   private cachedWindowsAt = 0
   private windowsScanInFlight?: Promise<ClipSource[]>
+  private cachedScreenSources: Electron.DesktopCapturerSource[] = []
+  private cachedScreenSourcesAt = 0
 
   constructor(private readonly settings: SettingsStore) {}
 
@@ -290,67 +293,44 @@ export class ClipRecorderService {
   }
 
   /**
-   * Resolve a real DesktopCapturerSource for getDisplayMedia.
-   * Only called when the user starts the buffer — not when opening Clips.
+   * Resolve a screen DesktopCapturerSource (cached). Never opens a window scan —
+   * window enumeration hangs on some PCs and broke getDisplayMedia with
+   * "Invalid capture constraints" when the handler returned an empty source.
    */
-  async resolveCaptureSource(
+  async resolveScreenSource(
     preferredSourceId?: string,
   ): Promise<Electron.DesktopCapturerSource | undefined> {
-    const appProcessId = parseAppSourceId(preferredSourceId)
-    let preferredName = (this.sourceName ?? '').trim().toLowerCase()
-
-    if (appProcessId !== undefined) {
-      const applications = await listActiveApplications().catch(() => [] as AudioApplication[])
-      const match = applications.find((application) => application.processId === appProcessId)
-      preferredName = (
-        match?.displayName ||
-        match?.processName ||
-        this.sourceName ||
-        ''
-      )
-        .trim()
-        .toLowerCase()
-    }
-
-    if (preferredSourceId?.startsWith('window:') || appProcessId !== undefined) {
-      try {
-        const windows = await getSourcesWithTimeout(
-          {
-            types: ['window'],
-            thumbnailSize: { width: 1, height: 1 },
-            fetchWindowIcons: false,
-          },
-          WINDOW_SCAN_TIMEOUT_MS,
-        )
-
-        if (preferredSourceId?.startsWith('window:')) {
-          const exact = windows.find((source) => source.id === preferredSourceId)
-          if (exact) {
-            return exact
-          }
-        }
-
-        if (preferredName) {
-          const byName =
-            windows.find((source) => source.name.trim().toLowerCase() === preferredName) ??
-            windows.find((source) => source.name.trim().toLowerCase().includes(preferredName)) ??
-            windows.find((source) => preferredName.includes(source.name.trim().toLowerCase()))
-          if (byName) {
-            return byName
-          }
-        }
-      } catch {
-        // Fall through to screen — fullscreen games are usually on the primary display.
-      }
-    }
-
     const displayId = parseDisplaySourceId(preferredSourceId)
-    const sources = await getSourcesWithTimeout({
-      types: ['screen'],
-      thumbnailSize: { width: 1, height: 1 },
-      fetchWindowIcons: false,
-    })
+    const now = Date.now()
 
+    if (
+      this.cachedScreenSources.length > 0 &&
+      now - this.cachedScreenSourcesAt < SCREEN_SOURCE_CACHE_MS
+    ) {
+      return this.pickScreenSource(this.cachedScreenSources, displayId)
+    }
+
+    const sources = await getSourcesWithTimeout(
+      {
+        types: ['screen'],
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false,
+      },
+      CAPTURER_TIMEOUT_MS,
+    )
+
+    if (sources.length > 0) {
+      this.cachedScreenSources = sources
+      this.cachedScreenSourcesAt = Date.now()
+    }
+
+    return this.pickScreenSource(sources, displayId)
+  }
+
+  private pickScreenSource(
+    sources: Electron.DesktopCapturerSource[],
+    displayId?: string,
+  ): Electron.DesktopCapturerSource | undefined {
     if (sources.length === 0) {
       return undefined
     }
@@ -363,6 +343,47 @@ export class ClipRecorderService {
     }
 
     return sources.find((source) => source.id.startsWith('screen:')) ?? sources[0]
+  }
+
+  /**
+   * Resolve a real DesktopCapturerSource for getDisplayMedia.
+   * Only called when the user starts the buffer — not when opening Clips.
+   */
+  async resolveCaptureSource(
+    preferredSourceId?: string,
+  ): Promise<Electron.DesktopCapturerSource | undefined> {
+    const appProcessId = parseAppSourceId(preferredSourceId)
+
+    // Process-list games/apps (app:*) — including VRChat — capture the primary
+    // desktop. Window capturer is unreliable for fullscreen/VR and was timing
+    // out into an empty getDisplayMedia grant.
+    if (appProcessId !== undefined || preferredSourceId?.startsWith('display:')) {
+      return this.resolveScreenSource(
+        preferredSourceId?.startsWith('display:') ? preferredSourceId : undefined,
+      )
+    }
+
+    if (preferredSourceId?.startsWith('window:')) {
+      try {
+        const windows = await getSourcesWithTimeout(
+          {
+            types: ['window'],
+            thumbnailSize: { width: 0, height: 0 },
+            fetchWindowIcons: false,
+          },
+          WINDOW_SCAN_TIMEOUT_MS,
+        )
+
+        const exact = windows.find((source) => source.id === preferredSourceId)
+        if (exact) {
+          return exact
+        }
+      } catch {
+        // Fall through to screen.
+      }
+    }
+
+    return this.resolveScreenSource(preferredSourceId)
   }
 
   setRecordingState(payload: {
