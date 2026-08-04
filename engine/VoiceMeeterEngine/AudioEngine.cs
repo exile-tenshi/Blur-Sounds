@@ -197,7 +197,12 @@ internal sealed class AudioEngine : IDisposable
         previous?.Stop();
         previous?.Dispose();
         nextBroadcast.Play();
-        StopHifiOutputActivator();
+
+        if (UsesHifiCableInput())
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+        }
 
         foreach (var source in microphoneSources.Values)
         {
@@ -266,18 +271,50 @@ internal sealed class AudioEngine : IDisposable
     }
 
     /// <summary>
-    /// Legacy no-op. Hi-Fi Cable is Pass-Through without any Output capture client
-    /// (VB-Audio manual). Keeping an Output keep-alive was based on a wrong assumption.
+    /// VB-Audio Hi-Fi Cable loops Input→Output while the recording endpoint is open.
+    /// Restart the Output keep-alive if it drops mid-stream (same approach as main).
     /// </summary>
     public void EnsureHifiOutputKeepAlive()
     {
-        StopHifiOutputActivator();
-    }
+        if (!UsesHifiCableInput())
+        {
+            return;
+        }
 
-    private void StopHifiOutputActivator()
-    {
-        hifiOutputActivator?.Dispose();
-        hifiOutputActivator = null;
+        lock (gate)
+        {
+            if (!string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(state, "starting", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        if (hifiOutputActivator?.IsActive == true)
+        {
+            return;
+        }
+
+        try
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+            if (hifiOutputActivator.IsActive)
+            {
+                lock (gate)
+                {
+                    message = "Streaming mix to input. Hi-Fi Cable Output is active.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (gate)
+            {
+                message =
+                    $"Hi-Fi Cable Output keep-alive failed ({ex.Message}). Listeners on Output may hear silence.";
+            }
+        }
     }
 
     public EngineTelemetry GetTelemetry()
@@ -336,9 +373,11 @@ internal sealed class AudioEngine : IDisposable
             SelectedInputReady = outputBroadcast is not null &&
                 !string.IsNullOrWhiteSpace(selection.InputDeviceId) &&
                 string.Equals(boundInputSelectionId, selection.InputDeviceId, StringComparison.Ordinal),
-            // Pass-Through does not require an Output keep-alive client.
-            HifiOutputActive = true,
-            HifiOutputError = null,
+            HifiOutputActive = !UsesHifiCableInput() || hifiOutputActivator?.IsActive == true,
+            HifiOutputError = UsesHifiCableInput() ? hifiOutputActivator is { IsActive: false }
+                ? hifiOutputActivator.LastError ?? "Hi-Fi Cable Output keep-alive is not running."
+                : null
+                : null,
             OutputLevel = ComputeMixedOutputLevel(),
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
@@ -1153,7 +1192,12 @@ internal sealed class AudioEngine : IDisposable
         }
 
         EnsureMixerInputsAttached();
-        StopHifiOutputActivator();
+
+        if (UsesHifiCableInput())
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+        }
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
         if (boundDevice is not null)
@@ -1179,18 +1223,18 @@ internal sealed class AudioEngine : IDisposable
 
         lock (gate)
         {
-            // Always start WASAPI render after sources are primed — Bind alone does not Play.
             outputBroadcast?.Play();
         }
 
         lock (gate)
         {
-            var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
-            var hifiSuffix = UsesHifiCableInput()
-                ? " Hi-Fi Cable Pass-Through — point Discord/OBS at Hi-Fi Cable Output."
-                : string.Empty;
-
             state = "running";
+            var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
+            var hifiSuffix = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true
+                ? " Hi-Fi Cable Output is active."
+                : UsesHifiCableInput()
+                    ? " Hi-Fi Cable Output keep-alive did not start — enable Recording → Hi-Fi Cable Output."
+                    : string.Empty;
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to input.{routeSuffix}{hifiSuffix}"
                 : $"Streaming mix to input.{routeSuffix}{hifiSuffix}";
