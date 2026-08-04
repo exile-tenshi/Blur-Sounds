@@ -119,6 +119,17 @@ export interface EngineSessionLevel {
   peak: number
 }
 
+export interface EngineAudioFormatInfo {
+  mixSampleRate?: number
+  streamSampleRate?: number
+  deviceSampleRate?: number
+  deviceBitsPerSample?: number
+  outputBinding?: string
+  renderError?: string
+  underrunCount?: number
+  policy?: string
+}
+
 export interface EngineStatus {
   state: EngineState
   helperConnected: boolean
@@ -127,14 +138,16 @@ export interface EngineStatus {
   underrunCount: number
   selectedMicrophoneReady: boolean
   selectedInputReady: boolean
-  /** False when Hi-Fi Cable Output keep-alive capture is not running. */
+  /** Always true for Hi-Fi Pass-Through (no Output keep-alive required). */
   hifiOutputActive?: boolean
   hifiOutputError?: string
   outputLevel: number
+  /** Peak of bytes actually written to the Output/WASAPI render client. */
   outputPullLevel?: number
   mixPullLevel?: number
   microphoneLevel: number
   sessionLevels: EngineSessionLevel[]
+  audioFormat?: EngineAudioFormatInfo
 }
 
 export interface EngineRouteTelemetry {

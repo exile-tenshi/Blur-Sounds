@@ -194,19 +194,21 @@ function AudioRoutingPanelInner({
 
       <div className="playback-meter">
         <div className="playback-meter-copy">
-          <strong>Transport level</strong>
+          <strong>Cable Input write level</strong>
           <p className="muted">
-            Level being sent from the mix to Hi-Fi Cable Input while the stream is running.
+            Bytes actually written to Hi-Fi Cable Input. If this stays at 0 while sources are live,
+            the mix is silent. If it moves but Discord is silent, check Output format / device
+            selection (Pass-Through needs matching Input/Output rates).
           </p>
         </div>
         <LevelMeter
-          level={
-            engineActive
-              ? Math.max(engine.outputPullLevel ?? 0, engine.mixPullLevel ?? 0, engine.outputLevel)
-              : 0
-          }
-          label="Route output level"
+          level={engineActive ? (engine.outputPullLevel ?? 0) : 0}
+          label="Hi-Fi Cable Input write level"
+          idleLabel={!engineActive ? 'Start stream' : undefined}
         />
+        {engineActive && engine.audioFormat?.outputBinding ? (
+          <p className="muted device-footnote">Bound: {engine.audioFormat.outputBinding}</p>
+        ) : null}
       </div>
 
       {showHifiRoutingHelp ? (
