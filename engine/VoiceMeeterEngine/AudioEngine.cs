@@ -271,6 +271,53 @@ internal sealed class AudioEngine : IDisposable
         AudioSessionMonitor.RefreshInBackground();
     }
 
+    /// <summary>
+    /// VB-Audio only loops Input→Output while Output capture is open. If the keep-alive
+    /// client dies mid-stream, restart it so Discord/OBS do not stay silent.
+    /// </summary>
+    public void EnsureHifiOutputKeepAlive()
+    {
+        if (!UsesHifiCableInput())
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            if (!string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(state, "starting", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        if (hifiOutputActivator?.IsActive == true)
+        {
+            return;
+        }
+
+        try
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+            if (hifiOutputActivator.IsActive)
+            {
+                lock (gate)
+                {
+                    message = "Streaming mix to input. Hi-Fi Cable Output is active.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (gate)
+            {
+                message =
+                    $"Hi-Fi Cable Output keep-alive failed ({ex.Message}) — listeners hear silence.";
+            }
+        }
+    }
+
     public EngineTelemetry GetTelemetry()
     {
         var routeTelemetry = routeConfigs.Values

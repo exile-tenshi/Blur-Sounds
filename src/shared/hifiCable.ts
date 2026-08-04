@@ -278,7 +278,8 @@ export function getHifiCableSetupSteps(): string[] {
     `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
     'Click Apply clean audio settings in Blur Sounds to reset Hi-Fi Cable Input and Output to 24 bit, 48000 Hz with exclusive mode enabled.',
     'If needed, open Windows Sound → Playback or Recording and confirm both Hi-Fi Cable devices show 48000 Hz on the Advanced tab.',
-    'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect).',
-    `Blur Sounds mixes at 48 kHz and sends to ${HIFI_CABLE_PLAYBACK_NAMES[0]}. Windows delivers ${HIFI_CABLE_QUALITY.shortLabel} on the cable. Other apps listen on ${HIFI_CABLE_RECORDING_NAMES[0]}.`,
+    'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect — mismatched rates = silence).',
+    'Leave ASIO Bridge closed, or set it to Pass-Through (Direct Mode steals the cable and listeners hear silence).',
+    `Blur Sounds sends the mix to ${HIFI_CABLE_PLAYBACK_NAMES[0]}. Point Discord/OBS/etc. at ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
   ]
 }
