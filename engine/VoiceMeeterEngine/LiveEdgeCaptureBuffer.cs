@@ -169,9 +169,9 @@ internal sealed class LiveEdgeSampleProvider : ISampleProvider
             var bytesRead = buffer.Read(readScratch, 0, bytesNeeded);
             var samplesRead = bytesRead / sizeof(float);
 
-            for (var index = 0; index < samplesRead; index++)
+            if (samplesRead > 0)
             {
-                samples[offset + index] = BitConverter.ToSingle(readScratch, index * sizeof(float));
+                Buffer.BlockCopy(readScratch, 0, samples, offset * sizeof(float), bytesRead);
             }
 
             if (samplesRead < count)
