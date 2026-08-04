@@ -2,14 +2,18 @@ export interface NoiseSuppressionSettings {
   enabled: boolean
   /** 0–100: how hard background noise is cut */
   strength: number
-  /** 0–100: gate sensitivity (higher = opens easier / more voice) */
+  /** 0–100: soft expander sensitivity (higher = opens easier / more voice) */
   threshold: number
   /** High-pass cutoff in Hz */
   highPassHz: number
-  /** 0–100: how quickly the gate opens */
+  /** 0–100: how quickly the gate/expander opens */
   attack: number
-  /** 0–100: how quickly the gate closes */
+  /** 0–100: how quickly the gate/expander closes */
   release: number
+  /** Optional hard noise gate — mutes the mic when you're silent */
+  noiseGateEnabled: boolean
+  /** 0–100: hard-gate sensitivity (higher = closes more / needs louder speech) */
+  noiseGateThreshold: number
 }
 
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
@@ -19,6 +23,8 @@ export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   highPassHz: 85,
   attack: 55,
   release: 40,
+  noiseGateEnabled: false,
+  noiseGateThreshold: 35,
 }
 
 export function clampNoisePercent(value: number): number {
@@ -52,5 +58,9 @@ export function normalizeNoiseSuppression(
     highPassHz: clampHighPassHz(partial.highPassHz ?? DEFAULT_NOISE_SUPPRESSION.highPassHz),
     attack: clampNoisePercent(partial.attack ?? DEFAULT_NOISE_SUPPRESSION.attack),
     release: clampNoisePercent(partial.release ?? DEFAULT_NOISE_SUPPRESSION.release),
+    noiseGateEnabled: Boolean(partial.noiseGateEnabled),
+    noiseGateThreshold: clampNoisePercent(
+      partial.noiseGateThreshold ?? DEFAULT_NOISE_SUPPRESSION.noiseGateThreshold,
+    ),
   }
 }
