@@ -686,26 +686,23 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
-    // Same Start path as main: apply clean settings, then start. Warn on format issues
-    // but do not hard-block streaming — the Output keep-alive + bind planner handle the cable.
+    // Hi-Fi Cable is bit-perfect — refuse Start when Input/Output MixFormats diverge
+    // or are not clean 48 kHz. Soft-continuing here was the main "no audio through Hi-Fi" bug.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
-      const formatWarning = describeHifiFormatStartBlocker(result)
-      if (formatWarning) {
-        this.engineStatus = {
-          ...this.engineStatus,
-          message: formatWarning,
-        }
+      const formatBlocker = describeHifiFormatStartBlocker(result)
+      if (formatBlocker) {
+        this.setEngineError(formatBlocker)
+        return this.emitCachedSnapshot()
       }
     } catch (error) {
-      this.engineStatus = {
-        ...this.engineStatus,
-        message:
-          error instanceof Error
-            ? `Hi-Fi Cable format warning: ${error.message}`
-            : 'Hi-Fi Cable format warning: unable to apply studio settings.',
-      }
+      this.setEngineError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to apply Hi-Fi Cable clean audio settings. Set both endpoints to 48 kHz · 24-bit in Windows Sound.',
+      )
+      return this.emitCachedSnapshot()
     }
 
     if (!this.selection.inputDeviceId) {
@@ -724,6 +721,20 @@ export class RoutingStore {
       this.setEngineError(
         error instanceof Error ? error.message : 'Unable to start the audio engine.',
       )
+      return this.emitCachedSnapshot()
+    }
+
+    // Keep-alive on Hi-Fi Cable Output is required for the VB-Audio Input→Output loop.
+    if (this.engineStatus.hifiOutputActive === false) {
+      const keepAliveError =
+        this.engineStatus.hifiOutputError ||
+        'Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output, leave ASIO Bridge on Pass-Through, then Start again.'
+      try {
+        await this.engine.stop()
+      } catch {
+        // Still surface the keep-alive failure below.
+      }
+      this.setEngineError(keepAliveError)
     }
 
     return this.emitCachedSnapshot()
