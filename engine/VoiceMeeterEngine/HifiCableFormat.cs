@@ -132,10 +132,18 @@ internal static partial class HifiCableFormat
 
     {
 
-        return format.SampleRate == EngineCleanSampleRate &&
+        if (format.SampleRate != EngineCleanSampleRate || format.Channels != MaxChannels)
+        {
+            return false;
+        }
 
-               format.Channels == MaxChannels &&
+        // Shared-mode MixFormat is often 32-bit float; treat that as clean at 48 kHz.
+        if (format.Encoding == WaveFormatEncoding.IeeeFloat)
+        {
+            return format.BitsPerSample >= 32;
+        }
 
+        return WaveFormatUtility.GetEffectiveBitsPerSample(format) >= HiFiEngineBitsPerSample ||
                format.BitsPerSample >= HiFiEngineBitsPerSample;
 
     }

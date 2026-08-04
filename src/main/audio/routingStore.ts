@@ -38,7 +38,7 @@ import { remapStaleApplicationRoutes } from '../../shared/appRouteRemap.js'
 import { createDefaultEngineStatus, normalizeEngineStatus } from '../../shared/engineStatus.js'
 import {
   detectHifiCableDependency,
-  describeHifiFormatStartWarning,
+  describeHifiFormatStartBlocker,
   findHifiCablePlaybackDevice,
   findHifiCableRecordingDevice,
   formatHifiCableRecordingUnavailableMessage,
@@ -686,27 +686,23 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
-    // Prefer clean 48 kHz on both Input and Output. Soft-fail only on hard exceptions —
-    // still surface partial / mismatched format results so Start does not look "healthy"
-    // while the bit-perfect VB-Audio loop is silent.
+    // Hi-Fi Cable is bit-perfect — refuse Start when Input/Output MixFormats diverge
+    // or are not clean 48 kHz. Soft-continuing here was the main "no audio through Hi-Fi" bug.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
-      const formatWarning = describeHifiFormatStartWarning(result)
-      if (formatWarning) {
-        this.engineStatus = {
-          ...this.engineStatus,
-          message: formatWarning,
-        }
+      const formatBlocker = describeHifiFormatStartBlocker(result)
+      if (formatBlocker) {
+        this.setEngineError(formatBlocker)
+        return this.emitCachedSnapshot()
       }
     } catch (error) {
-      this.engineStatus = {
-        ...this.engineStatus,
-        message:
-          error instanceof Error
-            ? `Hi-Fi Cable format warning: ${error.message}`
-            : 'Hi-Fi Cable format warning: unable to apply studio settings.',
-      }
+      this.setEngineError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to apply Hi-Fi Cable clean audio settings. Set both endpoints to 48 kHz · 24-bit in Windows Sound.',
+      )
+      return this.emitCachedSnapshot()
     }
 
     if (!this.selection.inputDeviceId) {
