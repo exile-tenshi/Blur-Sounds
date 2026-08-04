@@ -7,12 +7,16 @@ namespace VoiceMeeterEngine;
 /// </summary>
 internal static class WasapiStreamFlags
 {
+    // AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY — required alongside AUTOCONVERTPCM on modern Windows.
+    private const AudioClientStreamFlags SrcDefaultQuality =
+        (AudioClientStreamFlags)0x08000000;
+
     public static AudioClientStreamFlags ForSharedCapture(bool useAutoConvert, bool useEventSync)
     {
         var flags = AudioClientStreamFlags.None;
         if (useAutoConvert)
         {
-            flags |= AudioClientStreamFlags.AutoConvertPcm;
+            flags |= AudioClientStreamFlags.AutoConvertPcm | SrcDefaultQuality;
         }
 
         if (useEventSync)
@@ -28,7 +32,7 @@ internal static class WasapiStreamFlags
         var flags = AudioClientStreamFlags.None;
         if (allowAutoConvert)
         {
-            flags |= AudioClientStreamFlags.AutoConvertPcm;
+            flags |= AudioClientStreamFlags.AutoConvertPcm | SrcDefaultQuality;
         }
 
         if (useEventSync)

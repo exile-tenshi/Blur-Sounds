@@ -160,7 +160,11 @@ internal sealed class WasapiRenderBroadcast : IDisposable
 
         if (frameEvent is not null)
         {
-            return frameEvent.WaitOne(200);
+            // Event timeout must NOT stop the render loop. Virtual cables (Hi-Fi Cable)
+            // often miss EventCallback wakes; treating WaitOne failure as fatal left
+            // Cable Input silent after the first buffer fill.
+            frameEvent.WaitOne(50);
+            return playbackState == 1;
         }
 
         Thread.Sleep(3);
