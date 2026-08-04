@@ -367,15 +367,7 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
             var buffered = ring.BufferedSamples;
             if (minPlayoutSamples > 0 && buffered < minPlayoutSamples)
             {
-                if (hasWrittenAudio())
-                {
-                    gapFill.FillGap(samples, offset, count);
-                }
-                else
-                {
-                    Array.Clear(samples, offset, count);
-                }
-
+                Array.Clear(samples, offset, count);
                 return count;
             }
 

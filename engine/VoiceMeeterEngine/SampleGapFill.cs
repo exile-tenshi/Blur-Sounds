@@ -1,7 +1,8 @@
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Fills short reads by holding the last good frame (not silence) to avoid bitrattling clicks.
+/// Zero-fills short reads so downstream always receives full blocks.
+/// Hold-last was tried for crackle reduction but caused buzz/static under underrun.
 /// </summary>
 internal sealed class SampleGapFill
 {
@@ -45,9 +46,6 @@ internal sealed class SampleGapFill
         }
 
         underrunCount++;
-        for (var index = 0; index < count; index++)
-        {
-            buffer[offset + index] = lastFrame[index % channels];
-        }
+        Array.Clear(buffer, offset, count);
     }
 }

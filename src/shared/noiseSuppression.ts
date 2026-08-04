@@ -58,7 +58,8 @@ export function normalizeNoiseSuppression(
     highPassHz: clampHighPassHz(partial.highPassHz ?? DEFAULT_NOISE_SUPPRESSION.highPassHz),
     attack: clampNoisePercent(partial.attack ?? DEFAULT_NOISE_SUPPRESSION.attack),
     release: clampNoisePercent(partial.release ?? DEFAULT_NOISE_SUPPRESSION.release),
-    noiseGateEnabled: Boolean(partial.noiseGateEnabled),
+    // Gate alone ducks speech in/out — only keep it when NS is actually on.
+    noiseGateEnabled: Boolean(partial.enabled) && Boolean(partial.noiseGateEnabled),
     noiseGateThreshold: clampNoisePercent(
       partial.noiseGateThreshold ?? DEFAULT_NOISE_SUPPRESSION.noiseGateThreshold,
     ),

@@ -1757,7 +1757,7 @@ internal sealed class MicSource : IDisposable
             comfortUnderrun: comfortUnderrun,
             deviceName: deviceName,
             jitterBufferMilliseconds: LatencyTuning.MicCaptureJitterBufferMilliseconds,
-            holdLastOnUnderrun: true,
+            holdLastOnUnderrun: false,
             enableTrim: true);
         var provider = CapturePipeline.Build(captureBuffer, captureFormat, mixFormat, comfortCapture);
         var noiseSuppressionProvider = new NoiseSuppressionSampleProvider(provider);
