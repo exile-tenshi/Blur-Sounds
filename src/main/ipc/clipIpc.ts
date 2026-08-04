@@ -34,21 +34,44 @@ export function registerClipIpc(
   })
 
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const grant = (source: Electron.DesktopCapturerSource) => {
+      const isScreen = source.id.startsWith('screen:')
+      // System loopback is reliable with screen capture; window + loopback is
+      // rejected as "Invalid capture constraints" on some Electron builds.
+      callback(
+        isScreen
+          ? { video: source, audio: 'loopback' }
+          : { video: source },
+      )
+    }
+
     try {
       const preferredId = settings.get().clip.sourceId
       const match = await recorder.resolveCaptureSource(preferredId)
-
-      if (!match) {
-        callback({})
+      if (match) {
+        grant(match)
         return
       }
 
-      callback({
-        video: match,
-        audio: 'loopback',
-      })
+      const fallback = await recorder.resolveScreenSource()
+      if (fallback) {
+        grant(fallback)
+        return
+      }
+
+      callback({})
     } catch {
-      // Timeout / capturer hang — fail the getDisplayMedia request instead of freezing forever.
+      try {
+        const fallback = await recorder.resolveScreenSource()
+        if (fallback) {
+          grant(fallback)
+          return
+        }
+      } catch {
+        // Last resort below.
+      }
+
+      // Empty grant rejects getDisplayMedia — prefer that over freezing forever.
       callback({})
     }
   })

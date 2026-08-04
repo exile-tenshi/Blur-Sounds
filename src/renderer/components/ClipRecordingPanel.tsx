@@ -76,8 +76,8 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
                 : 'Pick a desktop or app source.'}
             </p>
             <p className="muted">
-              Desktops and running games/apps load together. Fullscreen games can also use a Desktop
-              source.
+              Game/app picks capture your primary desktop (works for fullscreen and VRChat). Prefer a
+              Desktop source if the buffer will not start.
             </p>
           </div>
         </div>
