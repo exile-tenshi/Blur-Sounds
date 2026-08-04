@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  DEFAULT_NOISE_SUPPRESSION,
-  normalizeNoiseSuppression,
-  type NoiseSuppressionSettings,
-} from '../../shared/noiseSuppression'
+  applyNoisePreset,
+  detectNoiseMicKind,
+  micKindLabel,
+  presetsForMic,
+  recommendedPresetForMic,
+} from '../../shared/noisePresets'
+import { normalizeNoiseSuppression, type NoiseSuppressionSettings } from '../../shared/noiseSuppression'
 import type { AudioDevice, MicrophoneSlot } from '../../shared/audioTypes'
 import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots'
 import { LevelMeter } from './LevelMeter'
@@ -100,16 +103,19 @@ function MicNoiseCard({
   onSelectDevice: (deviceId: string) => Promise<void>
 }) {
   const settings = normalizeNoiseSuppression(slot.noiseSuppressionSettings ?? slot.noiseSuppression)
+  const kind = detectNoiseMicKind(deviceName)
+  const presets = presetsForMic(deviceName)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [activePresetId, setActivePresetId] = useState<string | null>(null)
 
   return (
     <article className={`noise-mic-card sonar-card${settings.enabled ? ' ns-on' : ''}${inUse ? ' in-use' : ''}`}>
       <div className="sonar-card-top">
         <div className="sonar-card-identity">
-          <p className="eyebrow">Microphone</p>
+          <p className="eyebrow">{micKindLabel(kind)}</p>
           <h3>{deviceName || 'Select a microphone'}</h3>
           <p className="muted">
-            AI noise cancellation (RNNoise)
+            RNNoise neural cleanup
             {settings.enabled ? ' · on' : ' · off'}
             {settings.noiseGateEnabled ? ' · gate' : ''}
           </p>
@@ -119,7 +125,10 @@ function MicNoiseCard({
             type="checkbox"
             checked={settings.enabled}
             disabled={!slot.deviceId}
-            onChange={(event) => void onChange({ enabled: event.target.checked })}
+            onChange={(event) => {
+              setActivePresetId(null)
+              void onChange({ enabled: event.target.checked })
+            }}
           />
           <span className="eq-toggle-track" />
           <span>{settings.enabled ? 'On' : 'Off'}</span>
@@ -132,7 +141,10 @@ function MicNoiseCard({
       <select
         id={`ns-device-${slot.id}`}
         value={slot.deviceId ?? ''}
-        onChange={(event) => void onSelectDevice(event.target.value)}
+        onChange={(event) => {
+          setActivePresetId(null)
+          void onSelectDevice(event.target.value)
+        }}
       >
         <option value="">Select a microphone…</option>
         {devices.map((device) => (
@@ -158,55 +170,33 @@ function MicNoiseCard({
         label="Strength"
         value={settings.strength}
         disabled={!settings.enabled || !slot.deviceId}
-        onChange={(strength) => void onChange({ strength })}
+        onChange={(strength) => {
+          setActivePresetId(null)
+          void onChange({ strength })
+        }}
       />
 
       <div className="noise-preset-row sonar-presets">
-        <button
-          type="button"
-          className={`chip-button${settings.enabled && settings.strength <= 50 ? ' active' : ''}`}
-          disabled={!slot.deviceId}
-          onClick={() =>
-            void onChange({
-              enabled: true,
-              strength: 45,
-              noiseGateEnabled: false,
-            })
-          }
-        >
-          Soft
-        </button>
-        <button
-          type="button"
-          className={`chip-button${settings.enabled && settings.strength > 50 && settings.strength < 85 ? ' active' : ''}`}
-          disabled={!slot.deviceId}
-          onClick={() =>
-            void onChange({
-              ...DEFAULT_NOISE_SUPPRESSION,
-              enabled: true,
-              strength: 70,
-              noiseGateEnabled: false,
-            })
-          }
-        >
-          Balanced
-        </button>
-        <button
-          type="button"
-          className={`chip-button${settings.enabled && settings.strength >= 85 ? ' active' : ''}`}
-          disabled={!slot.deviceId}
-          onClick={() =>
-            void onChange({
-              enabled: true,
-              strength: 92,
-              noiseGateEnabled: true,
-              noiseGateThreshold: 40,
-            })
-          }
-        >
-          Aggressive
-        </button>
+        {presets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            title={preset.hint}
+            className={`chip-button${activePresetId === preset.id ? ' active' : ''}`}
+            disabled={!slot.deviceId}
+            onClick={() => {
+              setActivePresetId(preset.id)
+              void onChange(applyNoisePreset(preset))
+            }}
+          >
+            {preset.label}
+          </button>
+        ))}
       </div>
+      <p className="muted sonar-preset-hint">
+        {presets.find((preset) => preset.id === activePresetId)?.hint ??
+          'Pick a preset for your mic type. VR headsets get stronger fan cleanup.'}
+      </p>
 
       <button
         type="button"
@@ -223,7 +213,10 @@ function MicNoiseCard({
               type="checkbox"
               checked={settings.noiseGateEnabled}
               disabled={!slot.deviceId}
-              onChange={(event) => void onChange({ noiseGateEnabled: event.target.checked })}
+              onChange={(event) => {
+                setActivePresetId(null)
+                void onChange({ noiseGateEnabled: event.target.checked })
+              }}
             />
             <span className="eq-toggle-track" />
             <span>Hard mute when silent</span>
@@ -232,7 +225,10 @@ function MicNoiseCard({
             label="Gate threshold"
             value={settings.noiseGateThreshold}
             disabled={!settings.noiseGateEnabled || !slot.deviceId}
-            onChange={(noiseGateThreshold) => void onChange({ noiseGateThreshold })}
+            onChange={(noiseGateThreshold) => {
+              setActivePresetId(null)
+              void onChange({ noiseGateThreshold })
+            }}
           />
           <p className="muted">Optional. Leave off if it clips the start of words.</p>
         </div>
@@ -273,9 +269,10 @@ export function NoiseSuppressionSection({
     }
 
     setAutoTrackedDefault(true)
+    const preset = recommendedPresetForMic(preferred.name)
     void onEnsureDevice(preferred.id).then(async (slotId) => {
       if (slotId) {
-        await onChange(slotId, { enabled: true, strength: 70 })
+        await onChange(slotId, applyNoisePreset(preset))
       }
     })
   }, [autoTrackedDefault, microphoneDevices, onChange, onEnsureDevice, trackedSlots.length])
@@ -287,15 +284,15 @@ export function NoiseSuppressionSection({
           <p className="eyebrow">Noise</p>
           <h2>Noise cancellation</h2>
           <p className="section-help">
-            SteelSeries-style mic cleanup powered by RNNoise — the same neural class Discord used.
-            Turn it on, pick Soft / Balanced / Aggressive, then Start stream.
+            Neural cleanup tuned per mic type (VR headsets, gaming headsets, USB, broadcast). Off means
+            fully bypassed — no processing.
           </p>
         </div>
       </div>
 
       {!engineActive ? (
         <p className="notice">
-          Stream is idle — enable cancellation below, then press <strong>Start stream</strong>.
+          Stream is idle — pick a preset, then press <strong>Start stream</strong>.
         </p>
       ) : null}
 
