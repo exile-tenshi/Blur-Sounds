@@ -145,9 +145,10 @@ export function HifiSetupPanel({
         <strong>Hi-Fi Cable setup</strong>
         <p className="muted">
           Click <strong>Apply clean audio settings</strong> so Input and Output both use{' '}
-          <strong>{HIFI_CABLE_QUALITY.label}</strong> in shared mode. If ASIO Bridge is not open, the
-          cable is already Pass-Through — you do not need that app. Discord/OBS must select{' '}
-          <strong>Hi-Fi Cable Output</strong> as their mic.
+          <strong>{HIFI_CABLE_QUALITY.label}</strong> in shared mode. The mix goes to Discord/OBS via{' '}
+          <strong>Hi-Fi Cable Output</strong> — it should not play through your headset. If you hear
+          yourself/apps locally, uncheck <strong>Listen to this device</strong> on Hi-Fi Cable Output,
+          set ASIO Bridge to Pass-Through, and turn Discord input monitoring off.
         </p>
         <ol>
           {setupSteps.map((step) => (

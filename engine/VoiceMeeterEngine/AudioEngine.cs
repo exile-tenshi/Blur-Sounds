@@ -1208,6 +1208,14 @@ internal sealed class AudioEngine : IDisposable
 
                 return;
             }
+
+            if (!string.IsNullOrWhiteSpace(hifiOutputActivator.ListenThroughWarning))
+            {
+                lock (gate)
+                {
+                    message = hifiOutputActivator.ListenThroughWarning;
+                }
+            }
         }
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
