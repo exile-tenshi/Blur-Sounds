@@ -3,8 +3,9 @@ using NAudio.Wave;
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Low-latency live-edge capture queue for application loopback.
-/// Keeps only the newest audio and discards stale samples on read.
+/// Live-edge capture queue for application loopback / music.
+/// Soft-trims toward a target depth; never discards on every read.
+/// Underruns hold the last frame instead of silence to avoid bitrattling crackle.
 /// </summary>
 internal sealed class LiveEdgeCaptureBuffer
 {
@@ -13,6 +14,7 @@ internal sealed class LiveEdgeCaptureBuffer
     private readonly WaveFormat floatFormat;
     private readonly BufferedWaveProvider buffer;
     private readonly int targetBufferedBytes;
+    private readonly int softTrimThresholdBytes;
     private byte[] discardBuffer = [];
     private float[] convertScratch = [];
     private byte[] floatByteScratch = [];
@@ -24,6 +26,7 @@ internal sealed class LiveEdgeCaptureBuffer
         targetBufferedBytes = Math.Max(
             floatFormat.BlockAlign,
             floatFormat.AverageBytesPerSecond * LatencyTuning.LiveEdgeMaxMilliseconds / 1000);
+        softTrimThresholdBytes = targetBufferedBytes + (targetBufferedBytes / 2);
 
         buffer = new BufferedWaveProvider(floatFormat)
         {
@@ -101,7 +104,7 @@ internal sealed class LiveEdgeCaptureBuffer
 
     public ISampleProvider CreateReader()
     {
-        return new LiveEdgeSampleProvider(gate, buffer, floatFormat);
+        return new LiveEdgeSampleProvider(gate, buffer, floatFormat, softTrimThresholdBytes, targetBufferedBytes);
     }
 
     private void DiscardOldestBeyond(int maxBytes)
@@ -112,7 +115,10 @@ internal sealed class LiveEdgeCaptureBuffer
             return;
         }
 
-        DiscardBytes(excess);
+        var maxTrim = Math.Max(
+            floatFormat.BlockAlign,
+            floatFormat.AverageBytesPerSecond * LatencyTuning.MaxTrimPassMilliseconds / 1000);
+        DiscardBytes(Math.Min(excess, maxTrim));
     }
 
     private void DiscardBytes(int byteCount)
@@ -137,14 +143,25 @@ internal sealed class LiveEdgeSampleProvider : ISampleProvider
     private readonly object gate;
     private readonly BufferedWaveProvider buffer;
     private readonly WaveFormat floatFormat;
+    private readonly int softTrimThresholdBytes;
+    private readonly int targetBufferedBytes;
+    private readonly SampleGapFill gapFill;
     private byte[] readScratch = [];
     private byte[] discardBuffer = [];
 
-    public LiveEdgeSampleProvider(object gate, BufferedWaveProvider buffer, WaveFormat floatFormat)
+    public LiveEdgeSampleProvider(
+        object gate,
+        BufferedWaveProvider buffer,
+        WaveFormat floatFormat,
+        int softTrimThresholdBytes,
+        int targetBufferedBytes)
     {
         this.gate = gate;
         this.buffer = buffer;
         this.floatFormat = floatFormat;
+        this.softTrimThresholdBytes = softTrimThresholdBytes;
+        this.targetBufferedBytes = targetBufferedBytes;
+        gapFill = new SampleGapFill(Math.Max(1, floatFormat.Channels));
         WaveFormat = floatFormat;
     }
 
@@ -155,10 +172,21 @@ internal sealed class LiveEdgeSampleProvider : ISampleProvider
         lock (gate)
         {
             var bytesNeeded = count * sizeof(float);
+
+            // Soft catch-up only when heavily over-buffered — never discard-on-read.
             var available = buffer.BufferedBytes;
-            if (available > bytesNeeded)
+            if (available > softTrimThresholdBytes)
             {
-                DiscardBytes(available - bytesNeeded);
+                var excess = available - targetBufferedBytes;
+                var maxTrim = Math.Max(
+                    floatFormat.BlockAlign,
+                    floatFormat.AverageBytesPerSecond * LatencyTuning.MaxTrimPassMilliseconds / 1000);
+                var drop = Math.Min(excess / 4, maxTrim);
+                drop -= drop % floatFormat.BlockAlign;
+                if (drop > 0)
+                {
+                    DiscardBytes(drop);
+                }
             }
 
             if (readScratch.Length < bytesNeeded)
@@ -172,6 +200,7 @@ internal sealed class LiveEdgeSampleProvider : ISampleProvider
             if (samplesRead > 0)
             {
                 Buffer.BlockCopy(readScratch, 0, samples, offset * sizeof(float), bytesRead);
+                gapFill.NoteSamplesRead(samples, offset, samplesRead);
             }
 
             if (samplesRead < count)
@@ -181,7 +210,7 @@ internal sealed class LiveEdgeSampleProvider : ISampleProvider
                     CaptureDiagnostics.NoteCaptureUnderrun();
                 }
 
-                Array.Clear(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
+                gapFill.FillGap(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
             }
 
             return count;
