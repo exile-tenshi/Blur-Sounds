@@ -668,6 +668,36 @@ export class RoutingStore {
     return this.emitCachedSnapshot()
   }
 
+  /** Plays a test tone into Hi-Fi Cable Input and reports whether Output hears it. */
+  async probeHifiCable(): Promise<string> {
+    try {
+      if (this.isEngineActive()) {
+        await this.engine.stop()
+      }
+
+      const report = await this.engine.probeHifiCable()
+      const passed =
+        /meterPeak=(?!0\.000)\d+\.\d+/.test(report) ||
+        /capturePeak=(?!0\.000)\d+\.\d+/.test(report)
+      this.engineStatus = {
+        ...createDefaultEngineStatus(),
+        helperConnected: this.engineStatus.helperConnected,
+        state: 'stopped',
+        message: passed
+          ? `Hi-Fi Cable test passed — Output heard the tone. Start stream, then point Discord at Hi-Fi Cable Output.\n${report}`
+          : `Hi-Fi Cable test failed — tone did not reach Output. Check Playback → Hi-Fi Cable Input Advanced is 48 kHz · 24-bit (same as Output), exclusive mode off on both.\n${report}`,
+      }
+      this.emitCachedSnapshot()
+      return report
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to test Hi-Fi Cable.'
+      this.setEngineError(message)
+      this.emitCachedSnapshot()
+      return message
+    }
+  }
+
   async startEngine(): Promise<AudioSnapshot> {
     if (this.devices.length === 0) {
       await this.refreshDevices()

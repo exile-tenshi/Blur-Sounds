@@ -28,6 +28,7 @@ const audioControlApi: AudioControlApi = {
   openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
   openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
   applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
+  probeHifiCable: () => ipcRenderer.invoke(audioChannels.probeHifiCable),
   subscribeSnapshot: (listener: Parameters<AudioControlApi['subscribeSnapshot']>[0]) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, snapshot: Parameters<typeof listener>[0]) => {
       listener(snapshot)

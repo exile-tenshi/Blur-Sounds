@@ -15,6 +15,7 @@ interface HifiSetupPanelProps {
   recordingDevices: AudioDevice[]
   hifiCable: HifiCableInfo
   onApplyStudioSettings: () => void
+  onProbeHifiCable: () => Promise<string>
   onOpenPlaybackSettings: () => void
   onOpenRecordingSettings: () => void
   onSelectInput: (deviceId: string) => Promise<void>
@@ -27,6 +28,7 @@ export function HifiSetupPanel({
   recordingDevices,
   hifiCable,
   onApplyStudioSettings,
+  onProbeHifiCable,
   onOpenPlaybackSettings,
   onOpenRecordingSettings,
   onSelectInput,
@@ -120,6 +122,15 @@ export function HifiSetupPanel({
           </a>
           <button type="button" className="primary-button" onClick={onApplyStudioSettings}>
             Apply clean audio settings
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              void onProbeHifiCable()
+            }}
+          >
+            Test cable (plays tone)
           </button>
           <button type="button" className="secondary-button" onClick={onOpenPlaybackSettings}>
             Open Playback sound settings

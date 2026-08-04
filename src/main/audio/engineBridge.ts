@@ -62,7 +62,18 @@ interface EngineHifiCableFormatEvent {
   }
 }
 
-type EngineEvent = EngineTelemetryEvent | EngineDevicesEvent | EngineHifiCableFormatEvent
+interface EngineProbeEvent {
+  type: 'probe'
+  payload: {
+    report: string
+  }
+}
+
+type EngineEvent =
+  | EngineTelemetryEvent
+  | EngineDevicesEvent
+  | EngineHifiCableFormatEvent
+  | EngineProbeEvent
 
 type TelemetryListener = (status: EngineStatus, routes: EngineRouteTelemetry[]) => void
 
@@ -92,6 +103,8 @@ export class NativeEngineBridge {
   private pendingDevicesRejectors: Array<(error: Error) => void> = []
   private pendingHifiFormatResolvers: Array<(result: EngineHifiCableFormatEvent['payload']) => void> = []
   private pendingHifiFormatRejectors: Array<(error: Error) => void> = []
+  private pendingProbeResolvers: Array<(report: string) => void> = []
+  private pendingProbeRejectors: Array<(error: Error) => void> = []
 
   constructor() {
     const runtime = resolveEngineRuntime()
@@ -220,6 +233,32 @@ export class NativeEngineBridge {
       })
 
       this.sendCommand('configureHifiCable', { selection: {}, routes: [] })
+      return resultPromise
+    })
+  }
+
+  async probeHifiCable(): Promise<string> {
+    return this.enqueueEngineOperation(async () => {
+      await this.ensureHelper()
+
+      const resultPromise = new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingProbeResolvers = []
+          this.pendingProbeRejectors = []
+          reject(new Error('Timed out while testing Hi-Fi Cable.'))
+        }, 15000)
+
+        this.pendingProbeResolvers.push((report) => {
+          clearTimeout(timeout)
+          resolve(report)
+        })
+        this.pendingProbeRejectors.push((error) => {
+          clearTimeout(timeout)
+          reject(error)
+        })
+      })
+
+      this.sendCommand('probeHifiOutput', { selection: {}, routes: [] })
       return resultPromise
     })
   }
@@ -410,6 +449,16 @@ export class NativeEngineBridge {
           }
           this.pendingHifiFormatResolvers = []
           this.pendingHifiFormatRejectors = []
+          this.markHelperReady()
+          continue
+        }
+
+        if (event.type === 'probe') {
+          for (const resolve of this.pendingProbeResolvers) {
+            resolve(event.payload.report)
+          }
+          this.pendingProbeResolvers = []
+          this.pendingProbeRejectors = []
           this.markHelperReady()
         }
       } catch (error) {

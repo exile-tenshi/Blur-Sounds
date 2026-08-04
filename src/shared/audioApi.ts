@@ -28,6 +28,7 @@ export const audioChannels = {
   openHifiCablePlaybackSettings: 'system:openHifiCablePlaybackSettings',
   openHifiCableRecordingSettings: 'system:openHifiCableRecordingSettings',
   applyHifiCableStudioSettings: 'audio:applyHifiCableStudioSettings',
+  probeHifiCable: 'audio:probeHifiCable',
 } as const
 
 export interface HifiCableFormatResult {
@@ -57,4 +58,5 @@ export interface AudioControlApi {
   openHifiCablePlaybackSettings: () => Promise<void>
   openHifiCableRecordingSettings: () => Promise<void>
   applyHifiCableStudioSettings: () => Promise<HifiCableFormatResult>
+  probeHifiCable: () => Promise<string>
 }
