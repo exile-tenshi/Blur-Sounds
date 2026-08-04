@@ -56,7 +56,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 7
+export const CLIPS_PICKER_BUILD = 8
 
 function pickRecorderMimeType(): string {
   const candidates = [
