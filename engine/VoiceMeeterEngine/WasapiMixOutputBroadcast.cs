@@ -97,7 +97,7 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
     {
         if (outputFormat.SampleRate == source.WaveFormat.SampleRate)
         {
-            return new OutputStageSampleProvider(source, bufferMilliseconds: 120);
+            return new OutputStageSampleProvider(source, bufferMilliseconds: LatencyTuning.OutputStageBufferMilliseconds);
         }
 
         return new StudioRateOutputSampleProvider(source, outputFormat.SampleRate);
@@ -114,8 +114,8 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
             return new InvalidOperationException(
                 $"Unable to open {deviceName} ({qualityHint}). " +
                 "Open Windows Sound → Playback, double-click Hi-Fi Cable Input → Advanced tab → " +
-                $"set Default Format to {HifiCableFormat.HiFiEngineBitsPerSample} bit, {HifiCableFormat.HiFiEngineSampleRate} Hz (Studio Quality). " +
-                "Use the same format on Hi-Fi Cable Output.",
+                $"set Default Format to {HifiCableFormat.HiFiEngineBitsPerSample} bit, {HifiCableFormat.EngineCleanSampleRate} Hz (Clean audio). " +
+                "Use the same format on Hi-Fi Cable Output (Input and Output must match — Hi-Fi Cable is bit-perfect).",
                 inner);
         }
 

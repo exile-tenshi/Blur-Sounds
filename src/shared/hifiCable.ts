@@ -2,7 +2,7 @@ import type { AudioDevice, HifiCableEndpointStatus, HifiCableInfo } from './audi
 
 export const HIFI_CABLE_PRODUCT_URL = 'https://vb-audio.com/Cable/index.htm'
 export const HIFI_CABLE_DOWNLOAD_URL =
-  'https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip'
+  'http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip'
 
 export const HIFI_CABLE_QUALITY = {
   sampleRateHz: 48000,
@@ -210,7 +210,7 @@ export function mergeHifiCableFormatStatus(
 }
 
 export function formatHifiCableMissingMessage(): string {
-  return 'Hi-Fi Cable Input is required. Download Hi-Fi Cable from vb-audio.com, install it, then click Refresh.'
+  return `Hi-Fi Cable Input is required. Download Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL}, install it, then click Refresh.`
 }
 
 export function formatHifiCableDisabledMessage(): string {
@@ -225,12 +225,61 @@ export function formatHifiCableUnavailableMessage(info: HifiCableInfo): string {
   return formatHifiCableMissingMessage()
 }
 
+export function formatHifiCableRecordingUnavailableMessage(): string {
+  return 'Hi-Fi Cable Output (recording) is missing or disabled. Enable it under Windows Sound → Recording, then Refresh. Other apps listen on Output — without it the mix never leaves the cable.'
+}
+
+/** Warn when Start continues despite incomplete / mismatched cable formats. */
+export function describeHifiFormatStartWarning(result: {
+  playbackConfigured: boolean
+  recordingConfigured: boolean
+  playbackStatus?: HifiCableEndpointStatus
+  recordingStatus?: HifiCableEndpointStatus
+  message?: string
+}): string | undefined {
+  const playbackOk =
+    result.playbackStatus?.atStudioQuality === true || result.playbackConfigured
+  const recordingOk =
+    result.recordingStatus?.atStudioQuality === true || result.recordingConfigured
+
+  if (playbackOk && recordingOk) {
+    const playbackRate = result.playbackStatus?.sampleRate
+    const recordingRate = result.recordingStatus?.sampleRate
+    if (
+      playbackRate &&
+      recordingRate &&
+      playbackRate !== recordingRate
+    ) {
+      return (
+        `Hi-Fi Cable Input is ${playbackRate} Hz but Output is ${recordingRate} Hz. ` +
+        'The cable is bit-perfect — both sides must match or listeners hear silence. ' +
+        'Click Apply clean audio settings (48 kHz · 24-bit) on both endpoints.'
+      )
+    }
+
+    return undefined
+  }
+
+  if (!result.playbackConfigured && !result.recordingConfigured) {
+    return (
+      result.message ||
+      'Hi-Fi Cable format was not applied. Set Input and Output to 48 kHz · 24-bit in Windows Sound, then Start again.'
+    )
+  }
+
+  return (
+    result.message ||
+    'Hi-Fi Cable format was only applied partially. Confirm Input and Output both show 48 kHz · 24-bit.'
+  )
+}
+
 export function getHifiCableSetupSteps(): string[] {
   return [
-    'Download and install Hi-Fi Cable & ASIO Bridge from vb-audio.com (run setup as administrator, reboot if prompted).',
+    `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
     'Click Apply clean audio settings in Blur Sounds to reset Hi-Fi Cable Input and Output to 24 bit, 48000 Hz with exclusive mode enabled.',
     'If needed, open Windows Sound → Playback or Recording and confirm both Hi-Fi Cable devices show 48000 Hz on the Advanced tab.',
-    'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect).',
-    `Blur Sounds mixes at 48 kHz and sends to ${HIFI_CABLE_PLAYBACK_NAMES[0]}. Windows delivers ${HIFI_CABLE_QUALITY.shortLabel} on the cable. Other apps listen on ${HIFI_CABLE_RECORDING_NAMES[0]}.`,
+    'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect — mismatched rates = silence).',
+    'Leave ASIO Bridge closed, or set it to Pass-Through (Direct Mode steals the cable and listeners hear silence).',
+    `Blur Sounds sends the mix to ${HIFI_CABLE_PLAYBACK_NAMES[0]}. Point Discord/OBS/etc. at ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
   ]
 }
