@@ -407,8 +407,9 @@ internal static partial class HifiCableFormatConfigurator
                 HifiCableStudioFormatBlob.DeviceFormatPropertyName,
                 HifiCableStudioFormatBlob.RegistryPropertyBlob,
                 RegistryValueKind.Binary);
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 1, RegistryValueKind.DWord);
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 1, RegistryValueKind.DWord);
+            // Leave exclusive mode off — Discord/OBS use shared-mode capture on Output.
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 0, RegistryValueKind.DWord);
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 0, RegistryValueKind.DWord);
             return true;
         }
         catch
@@ -419,30 +420,10 @@ internal static partial class HifiCableFormatConfigurator
 
     private static void TryEnableExclusiveMode(string endpointId, string registryKind)
     {
-        var guid = ExtractEndpointGuid(endpointId);
-        if (guid is null)
-        {
-            return;
-        }
-
-        var propertiesPath =
-            $@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\{registryKind}\{{{guid}}}\Properties";
-
-        try
-        {
-            using var propertiesKey = Registry.LocalMachine.OpenSubKey(propertiesPath, writable: true);
-            if (propertiesKey is null)
-            {
-                return;
-            }
-
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 1, RegistryValueKind.DWord);
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 1, RegistryValueKind.DWord);
-        }
-        catch
-        {
-            // Exclusive-mode registry writes can require elevation.
-        }
+        // Intentionally leave exclusive mode disabled. Shared-mode Pass-Through is what
+        // Discord/OBS need on Hi-Fi Cable Output; forcing exclusive flags caused confusion.
+        _ = endpointId;
+        _ = registryKind;
     }
 
     private static string? ExtractEndpointGuid(string endpointId)
