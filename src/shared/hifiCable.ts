@@ -283,11 +283,10 @@ export function describeHifiFormatStartWarning(
 export function getHifiCableSetupSteps(): string[] {
   return [
     `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
-    'Click Apply clean audio settings so Hi-Fi Cable Input and Output both use 24 bit, 48000 Hz (shared mode).',
-    'Confirm both Windows Sound → Advanced tabs show the same rate. Mismatched rates = silence (no SRC).',
-    'Close ASIO Bridge, or leave it on Pass-Through. Direct Mode routes away from Output and sounds like silence.',
-    `Start stream in Blur Sounds — watch Cable Input write level move when you speak.`,
+    'Click Apply clean audio settings so Hi-Fi Cable Input and Output both use 24 bit, 48000 Hz.',
+    'Confirm both Windows Sound → Advanced tabs match. Mismatched rates = silence.',
+    'Leave ASIO Bridge closed or on Pass-Through (Direct Mode steals the cable).',
+    'Start stream — status should say Hi-Fi Cable Output is active, and Cable Input write level should move.',
     `In Discord/OBS, set the input device to ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
-    'To hear the cable on speakers yourself: Recording → Hi-Fi Cable Output → Listen → your headphones (optional).',
   ]
 }
