@@ -112,6 +112,12 @@ internal sealed class EngineTelemetry
     [JsonPropertyName("selectedInputReady")]
     public bool SelectedInputReady { get; set; }
 
+    [JsonPropertyName("hifiOutputActive")]
+    public bool HifiOutputActive { get; set; } = true;
+
+    [JsonPropertyName("hifiOutputError")]
+    public string? HifiOutputError { get; set; }
+
     [JsonPropertyName("outputLevel")]
     public float OutputLevel { get; set; }
 

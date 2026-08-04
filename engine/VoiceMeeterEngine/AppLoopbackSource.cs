@@ -7,7 +7,7 @@ namespace VoiceMeeterEngine;
 internal sealed class AppLoopbackSource : IDisposable
 {
     private readonly ProcessWasapiCapture capture;
-    private readonly FifoCaptureBuffer captureBuffer;
+    private readonly LiveEdgeCaptureBuffer captureBuffer;
     private readonly WaveFormat captureFormat;
     private readonly int captureSampleRate;
     private readonly FullBlockVolumeSampleProvider volumeProvider;
@@ -21,7 +21,7 @@ internal sealed class AppLoopbackSource : IDisposable
 
     private AppLoopbackSource(
         ProcessWasapiCapture capture,
-        FifoCaptureBuffer captureBuffer,
+        LiveEdgeCaptureBuffer captureBuffer,
         WaveFormat captureFormat,
         FullBlockVolumeSampleProvider volumeProvider,
         float initialVolume,
@@ -139,10 +139,7 @@ internal sealed class AppLoopbackSource : IDisposable
             captureSampleRate,
             mixFormat.Channels);
         var captureFormat = capture.WaveFormat;
-        var captureBuffer = new FifoCaptureBuffer(
-            captureFormat,
-            maxMilliseconds: LatencyTuning.LoopbackCaptureMaxMilliseconds,
-            jitterBufferMilliseconds: LatencyTuning.LoopbackCaptureJitterBufferMilliseconds);
+        var captureBuffer = new LiveEdgeCaptureBuffer(captureFormat);
         var provider = CapturePipeline.Build(captureBuffer, captureFormat, mixFormat);
         var volumeProvider = new FullBlockVolumeSampleProvider(provider) { Volume = volume };
 
