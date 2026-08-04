@@ -1789,5 +1789,6 @@ internal sealed class MicSource : IDisposable
         capture.DataAvailable -= OnCaptureDataAvailable;
         Stop();
         capture.Dispose();
+        noiseSuppressionProvider.Dispose();
     }
 }

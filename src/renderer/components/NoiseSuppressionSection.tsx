@@ -16,25 +16,17 @@ interface NoiseSuppressionSectionProps {
   onEnsureDevice: (deviceId: string) => Promise<string | undefined>
   onChange: (slotId: string, settings: Partial<NoiseSuppressionSettings>) => Promise<void>
   onSelectDeviceForSlot: (slotId: string, deviceId: string) => Promise<void>
-  onRemoveSlot: (slotId: string) => Promise<void>
+  onRemoveSlot?: (slotId: string) => Promise<void>
 }
 
-function SliderField({
+function PercentSlider({
   label,
   value,
-  min,
-  max,
-  step = 1,
-  suffix,
   disabled,
   onChange,
 }: {
   label: string
   value: number
-  min: number
-  max: number
-  step?: number
-  suffix?: string
   disabled?: boolean
   onChange: (value: number) => void
 }) {
@@ -55,19 +47,16 @@ function SliderField({
   }
 
   return (
-    <label className={`ns-slider${disabled ? ' disabled' : ''}`}>
+    <label className={`ns-slider sonar-strength${disabled ? ' disabled' : ''}`}>
       <span>
         {label}
-        <strong>
-          {localValue}
-          {suffix ?? ''}
-        </strong>
+        <strong>{localValue}</strong>
       </span>
       <input
         type="range"
-        min={min}
-        max={max}
-        step={step}
+        min={0}
+        max={100}
+        step={1}
         value={localValue}
         disabled={disabled}
         onPointerDown={() => {
@@ -86,248 +75,166 @@ function SliderField({
           localValueRef.current = nextValue
           setLocalValue(nextValue)
         }}
-        onKeyUp={(event) => {
-          if (
-            event.key === 'ArrowLeft' ||
-            event.key === 'ArrowRight' ||
-            event.key === 'Home' ||
-            event.key === 'End'
-          ) {
-            commitValue(localValueRef.current)
-          }
-        }}
       />
     </label>
   )
 }
 
-function MicEditorCard({
+function MicNoiseCard({
   slot,
   deviceName,
   devices,
   inUse,
-  isDefault,
   microphoneLevel,
   engineActive,
-  expanded,
-  onExpand,
   onChange,
   onSelectDevice,
-  onRemove,
 }: {
   slot: MicrophoneSlot
   deviceName: string
   devices: AudioDevice[]
   inUse: boolean
-  isDefault: boolean
   microphoneLevel: number
   engineActive: boolean
-  expanded: boolean
-  onExpand: () => void
   onChange: (settings: Partial<NoiseSuppressionSettings>) => Promise<void>
   onSelectDevice: (deviceId: string) => Promise<void>
-  onRemove: () => Promise<void>
 }) {
   const settings = normalizeNoiseSuppression(slot.noiseSuppressionSettings ?? slot.noiseSuppression)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   return (
-    <article className={`noise-mic-card${expanded ? ' expanded' : ''}${inUse ? ' in-use' : ''}`}>
-      <div className="noise-mic-card-header">
-        <button type="button" className="noise-mic-card-title" onClick={onExpand}>
-          <div>
-            <h3>{deviceName || 'Unassigned microphone'}</h3>
-            <p className="muted">
-              {inUse ? 'In use · auto-tracked' : isDefault ? 'Default device' : 'Available'}
-              {settings.enabled ? ' · suppression on' : ' · suppression off'}
-              {settings.noiseGateEnabled ? ' · gate on' : ''}
-            </p>
-          </div>
+    <article className={`noise-mic-card sonar-card${settings.enabled ? ' ns-on' : ''}${inUse ? ' in-use' : ''}`}>
+      <div className="sonar-card-top">
+        <div className="sonar-card-identity">
+          <p className="eyebrow">Microphone</p>
+          <h3>{deviceName || 'Select a microphone'}</h3>
+          <p className="muted">
+            AI noise cancellation (RNNoise)
+            {settings.enabled ? ' · on' : ' · off'}
+            {settings.noiseGateEnabled ? ' · gate' : ''}
+          </p>
+        </div>
+        <label className="eq-toggle noise-toggle sonar-power">
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            disabled={!slot.deviceId}
+            onChange={(event) => void onChange({ enabled: event.target.checked })}
+          />
+          <span className="eq-toggle-track" />
+          <span>{settings.enabled ? 'On' : 'Off'}</span>
+        </label>
+      </div>
+
+      <label className="field-label" htmlFor={`ns-device-${slot.id}`}>
+        Device
+      </label>
+      <select
+        id={`ns-device-${slot.id}`}
+        value={slot.deviceId ?? ''}
+        onChange={(event) => void onSelectDevice(event.target.value)}
+      >
+        <option value="">Select a microphone…</option>
+        {devices.map((device) => (
+          <option key={device.id} value={device.id} disabled={!device.isAvailable}>
+            {device.name}
+            {device.isDefault ? ' (default)' : ''}
+            {!device.isAvailable ? ' (offline)' : ''}
+          </option>
+        ))}
+      </select>
+
+      <div className="sonar-meter-row">
+        <LevelMeter
+          level={engineActive && !slot.muted ? microphoneLevel : 0}
+          label={`${deviceName || 'Microphone'} level`}
+          idleLabel={
+            !engineActive ? 'Start stream' : slot.muted ? 'Paused' : !slot.deviceId ? 'Pick mic' : undefined
+          }
+        />
+      </div>
+
+      <PercentSlider
+        label="Strength"
+        value={settings.strength}
+        disabled={!settings.enabled || !slot.deviceId}
+        onChange={(strength) => void onChange({ strength })}
+      />
+
+      <div className="noise-preset-row sonar-presets">
+        <button
+          type="button"
+          className={`chip-button${settings.enabled && settings.strength <= 50 ? ' active' : ''}`}
+          disabled={!slot.deviceId}
+          onClick={() =>
+            void onChange({
+              enabled: true,
+              strength: 45,
+              noiseGateEnabled: false,
+            })
+          }
+        >
+          Soft
         </button>
-        <div className="noise-mic-card-actions">
+        <button
+          type="button"
+          className={`chip-button${settings.enabled && settings.strength > 50 && settings.strength < 85 ? ' active' : ''}`}
+          disabled={!slot.deviceId}
+          onClick={() =>
+            void onChange({
+              ...DEFAULT_NOISE_SUPPRESSION,
+              enabled: true,
+              strength: 70,
+              noiseGateEnabled: false,
+            })
+          }
+        >
+          Balanced
+        </button>
+        <button
+          type="button"
+          className={`chip-button${settings.enabled && settings.strength >= 85 ? ' active' : ''}`}
+          disabled={!slot.deviceId}
+          onClick={() =>
+            void onChange({
+              enabled: true,
+              strength: 92,
+              noiseGateEnabled: true,
+              noiseGateThreshold: 40,
+            })
+          }
+        >
+          Aggressive
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className="secondary-button sonar-advanced-toggle"
+        onClick={() => setShowAdvanced((value) => !value)}
+      >
+        {showAdvanced ? 'Hide gate' : 'Noise gate'}
+      </button>
+
+      {showAdvanced ? (
+        <div className="noise-gate-block">
           <label className="eq-toggle noise-toggle">
             <input
               type="checkbox"
-              checked={settings.enabled}
+              checked={settings.noiseGateEnabled}
               disabled={!slot.deviceId}
-              onChange={(event) => void onChange({ enabled: event.target.checked })}
+              onChange={(event) => void onChange({ noiseGateEnabled: event.target.checked })}
             />
             <span className="eq-toggle-track" />
-            <span>{settings.enabled ? 'On' : 'Off'}</span>
+            <span>Hard mute when silent</span>
           </label>
-          <button type="button" className="secondary-button" onClick={onExpand}>
-            {expanded ? 'Hide' : 'Edit'}
-          </button>
-          <button type="button" className="remove-button" onClick={() => void onRemove()}>
-            Remove
-          </button>
-        </div>
-      </div>
-
-      {expanded ? (
-        <div className="noise-editor-grid">
-          <div className="noise-editor-main">
-            <label className="field-label" htmlFor={`ns-device-${slot.id}`}>
-              Microphone device
-            </label>
-            <select
-              id={`ns-device-${slot.id}`}
-              value={slot.deviceId ?? ''}
-              onChange={(event) => void onSelectDevice(event.target.value)}
-            >
-              <option value="">Select a microphone…</option>
-              {devices.map((device) => (
-                <option key={device.id} value={device.id} disabled={!device.isAvailable}>
-                  {device.name}
-                  {device.isDefault ? ' (default)' : ''}
-                  {!device.isAvailable ? ' (offline)' : ''}
-                </option>
-              ))}
-            </select>
-
-            <SliderField
-              label="Strength"
-              value={settings.strength}
-              min={0}
-              max={100}
-              disabled={!settings.enabled || !slot.deviceId}
-              onChange={(strength) => void onChange({ strength })}
-            />
-            <SliderField
-              label="Voice threshold"
-              value={settings.threshold}
-              min={0}
-              max={100}
-              disabled={!settings.enabled || !slot.deviceId}
-              onChange={(threshold) => void onChange({ threshold })}
-            />
-            <SliderField
-              label="High-pass"
-              value={settings.highPassHz}
-              min={40}
-              max={220}
-              suffix=" Hz"
-              disabled={!settings.enabled || !slot.deviceId}
-              onChange={(highPassHz) => void onChange({ highPassHz })}
-            />
-            <SliderField
-              label="Attack"
-              value={settings.attack}
-              min={0}
-              max={100}
-              disabled={(!settings.enabled && !settings.noiseGateEnabled) || !slot.deviceId}
-              onChange={(attack) => void onChange({ attack })}
-            />
-            <SliderField
-              label="Release"
-              value={settings.release}
-              min={0}
-              max={100}
-              disabled={(!settings.enabled && !settings.noiseGateEnabled) || !slot.deviceId}
-              onChange={(release) => void onChange({ release })}
-            />
-
-            <div className="noise-gate-block">
-              <label className="eq-toggle noise-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.noiseGateEnabled}
-                  disabled={!slot.deviceId}
-                  onChange={(event) => void onChange({ noiseGateEnabled: event.target.checked })}
-                />
-                <span className="eq-toggle-track" />
-                <span>Noise gate</span>
-              </label>
-              <p className="muted">
-                Optional hard mute when you stop talking. Leave off if it chops the start of words.
-              </p>
-              <SliderField
-                label="Gate threshold"
-                value={settings.noiseGateThreshold}
-                min={0}
-                max={100}
-                disabled={!settings.noiseGateEnabled || !slot.deviceId}
-                onChange={(noiseGateThreshold) => void onChange({ noiseGateThreshold })}
-              />
-            </div>
-          </div>
-
-          <aside className="noise-editor-side">
-            <div className="noise-meter-card">
-              <p className="field-label">Live mic level</p>
-              <LevelMeter
-                level={engineActive && !slot.muted ? microphoneLevel : 0}
-                label={`${deviceName || 'Microphone'} level`}
-                idleLabel={
-                  !engineActive
-                    ? 'Start stream'
-                    : slot.muted
-                      ? 'Paused'
-                      : !slot.deviceId
-                        ? 'Pick mic'
-                        : undefined
-                }
-              />
-              <p className="muted">
-                {!engineActive
-                  ? 'Levels only move while the stream is running — click Start stream in the header.'
-                  : 'Each mic has its own suppression settings. Mixer, clips, and this editor all stay active together.'}
-              </p>
-            </div>
-            <div className="noise-preset-row">
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={!slot.deviceId}
-                onClick={() =>
-                  void onChange({
-                    ...DEFAULT_NOISE_SUPPRESSION,
-                    enabled: true,
-                    noiseGateEnabled: false,
-                  })
-                }
-              >
-                Balanced
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={!slot.deviceId}
-                onClick={() =>
-                  void onChange({
-                    enabled: true,
-                    strength: 90,
-                    threshold: 45,
-                    highPassHz: 100,
-                    attack: 65,
-                    release: 55,
-                    noiseGateEnabled: true,
-                    noiseGateThreshold: 45,
-                  })
-                }
-              >
-                Aggressive
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={!slot.deviceId}
-                onClick={() =>
-                  void onChange({
-                    enabled: true,
-                    strength: 45,
-                    threshold: 70,
-                    highPassHz: 70,
-                    attack: 40,
-                    release: 30,
-                    noiseGateEnabled: false,
-                    noiseGateThreshold: 35,
-                  })
-                }
-              >
-                Soft
-              </button>
-            </div>
-          </aside>
+          <PercentSlider
+            label="Gate threshold"
+            value={settings.noiseGateThreshold}
+            disabled={!settings.noiseGateEnabled || !slot.deviceId}
+            onChange={(noiseGateThreshold) => void onChange({ noiseGateThreshold })}
+          />
+          <p className="muted">Optional. Leave off if it clips the start of words.</p>
         </div>
       ) : null}
     </article>
@@ -342,17 +249,15 @@ export function NoiseSuppressionSection({
   onEnsureDevice,
   onChange,
   onSelectDeviceForSlot,
-  onRemoveSlot,
 }: NoiseSuppressionSectionProps) {
   const slots = useMemo(
     () => normalizeMicrophoneSlots({ microphones: selectionMicrophones }),
     [selectionMicrophones],
   )
   const trackedSlots = slots.filter((slot) => slot.deviceId)
-  const [expandedSlotId, setExpandedSlotId] = useState(trackedSlots[0]?.id ?? slots[0]?.id ?? '')
+  const primarySlot = trackedSlots[0] ?? slots[0]
   const [autoTrackedDefault, setAutoTrackedDefault] = useState(false)
 
-  // Auto-track default / Mixer mic so Noise uses the card below — no separate Add row.
   useEffect(() => {
     if (autoTrackedDefault || trackedSlots.length > 0 || microphoneDevices.length === 0) {
       return
@@ -370,65 +275,47 @@ export function NoiseSuppressionSection({
     setAutoTrackedDefault(true)
     void onEnsureDevice(preferred.id).then(async (slotId) => {
       if (slotId) {
-        setExpandedSlotId(slotId)
-        await onChange(slotId, { enabled: true })
+        await onChange(slotId, { enabled: true, strength: 70 })
       }
     })
   }, [autoTrackedDefault, microphoneDevices, onChange, onEnsureDevice, trackedSlots.length])
 
-  // Keep expanded card pointed at a real slot when mixer/noise adds or removes mics.
-  useEffect(() => {
-    if (expandedSlotId && slots.some((slot) => slot.id === expandedSlotId)) {
-      return
-    }
-    setExpandedSlotId(trackedSlots[0]?.id ?? slots[0]?.id ?? '')
-  }, [expandedSlotId, slots, trackedSlots])
-
   return (
-    <section className="panel noise-editor">
+    <section className="panel noise-editor sonar-noise">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Noise suppression</p>
-          <h2>Microphone cleanup</h2>
+          <p className="eyebrow">Noise</p>
+          <h2>Noise cancellation</h2>
           <p className="section-help">
-            Uses the microphone tracked below (same as Mixer). Turn suppression on for cleanup, and
-            optionally enable Noise gate to hard-mute silence. Start stream for live processing.
+            SteelSeries-style mic cleanup powered by RNNoise — the same neural class Discord used.
+            Turn it on, pick Soft / Balanced / Aggressive, then Start stream.
           </p>
         </div>
-        <span className="badge">{trackedSlots.length} tracked</span>
       </div>
 
       {!engineActive ? (
         <p className="notice">
-          Stream is idle — pick your mic on the card below, turn suppression on, then press{' '}
-          <strong>Start stream</strong> in Mixer.
+          Stream is idle — enable cancellation below, then press <strong>Start stream</strong>.
         </p>
       ) : null}
 
       <div className="noise-mic-list">
-        {slots.length === 0 ? (
+        {!primarySlot ? (
           <p className="empty-state">No microphone hardware detected yet. Click Refresh.</p>
         ) : (
-          slots.map((slot) => {
-            const device = microphoneDevices.find((item) => item.id === slot.deviceId)
-            return (
-              <MicEditorCard
-                key={slot.id}
-                slot={slot}
-                deviceName={device?.name ?? (slot.deviceId ? 'Unknown microphone' : '')}
-                devices={microphoneDevices}
-                inUse={Boolean(slot.deviceId) && engineActive && !slot.muted}
-                isDefault={Boolean(device?.isDefault)}
-                microphoneLevel={microphoneLevel}
-                engineActive={engineActive}
-                expanded={expandedSlotId === slot.id}
-                onExpand={() => setExpandedSlotId(slot.id)}
-                onChange={(settings) => onChange(slot.id, settings)}
-                onSelectDevice={(deviceId) => onSelectDeviceForSlot(slot.id, deviceId)}
-                onRemove={() => onRemoveSlot(slot.id)}
-              />
-            )
-          })
+          <MicNoiseCard
+            slot={primarySlot}
+            deviceName={
+              microphoneDevices.find((item) => item.id === primarySlot.deviceId)?.name ??
+              (primarySlot.deviceId ? 'Unknown microphone' : '')
+            }
+            devices={microphoneDevices}
+            inUse={Boolean(primarySlot.deviceId) && engineActive && !primarySlot.muted}
+            microphoneLevel={microphoneLevel}
+            engineActive={engineActive}
+            onChange={(settings) => onChange(primarySlot.id, settings)}
+            onSelectDevice={(deviceId) => onSelectDeviceForSlot(primarySlot.id, deviceId)}
+          />
         )}
       </div>
     </section>

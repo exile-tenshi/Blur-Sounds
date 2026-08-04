@@ -1,14 +1,14 @@
 export interface NoiseSuppressionSettings {
   enabled: boolean
-  /** 0–100: how hard background noise is cut */
+  /** 0–100: RNNoise dry/wet mix (100 = full neural cleanup) */
   strength: number
-  /** 0–100: soft expander sensitivity (higher = opens easier / more voice) */
+  /** Legacy soft-expander knob — unused by RNNoise, kept for saved settings compat */
   threshold: number
-  /** High-pass cutoff in Hz */
+  /** Legacy high-pass Hz — unused by RNNoise, kept for saved settings compat */
   highPassHz: number
-  /** 0–100: how quickly the gate/expander opens */
+  /** 0–100: optional hard-gate open speed */
   attack: number
-  /** 0–100: how quickly the gate/expander closes */
+  /** 0–100: optional hard-gate close speed */
   release: number
   /** Optional hard noise gate — mutes the mic when you're silent */
   noiseGateEnabled: boolean

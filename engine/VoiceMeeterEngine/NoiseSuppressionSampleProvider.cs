@@ -1,55 +1,62 @@
-using NAudio.Dsp;
 using NAudio.Wave;
+using RNNoise.NET;
 
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Real-time microphone noise suppression with editable strength / threshold / high-pass / timing,
-/// plus an optional hard noise gate that can fully mute silence.
+/// Neural mic noise cancellation via RNNoise (Xiph), with strength dry/wet mix
+/// and an optional hard noise gate. Falls back to pass-through if the native DLL
+/// cannot load.
 /// </summary>
-internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
+internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
-    private const float NoiseLearnRate = 0.015f;
-    private const float SpeechLearnRate = 0.35f;
     private const float MinEnvelope = 1e-6f;
+    private const float NoiseLearnRate = 0.02f;
+    private const float SpeechLearnRate = 0.4f;
 
     private readonly ISampleProvider source;
     private readonly int channels;
-    private readonly BiQuadFilter[] highPassFilters;
-    private readonly float[] channelEnvelope;
-    private float noiseFloor = 0.002f;
+    private readonly object gate = new();
+    private Denoiser? denoiser;
+    private bool denoiserFailed;
+    private readonly float[] dryFrame = new float[Native.FRAME_SIZE];
+    private readonly float[] processFrame = new float[Native.FRAME_SIZE];
+    private readonly float[] outputFrame = new float[Native.FRAME_SIZE];
+    private int frameFill;
+    private int outputRead;
+    private int outputCount;
+    private float channelEnvelope = MinEnvelope;
     private float gateGain = 1f;
     private bool enabled;
     private bool noiseGateEnabled;
-    private float highPassHz = 85f;
     private float strength = 70f;
-    private float threshold = 55f;
+    private float noiseGateThreshold = 35f;
     private float attack = 55f;
     private float release = 40f;
-    private float noiseGateThreshold = 35f;
 
     public NoiseSuppressionSampleProvider(ISampleProvider source)
     {
         this.source = source;
         WaveFormat = source.WaveFormat;
         channels = Math.Max(1, WaveFormat.Channels);
-        channelEnvelope = new float[channels];
-        highPassFilters = new BiQuadFilter[channels];
-        RebuildHighPass();
-        for (var channel = 0; channel < channels; channel++)
-        {
-            channelEnvelope[channel] = MinEnvelope;
-        }
     }
 
     public WaveFormat WaveFormat { get; }
 
     public void SetEnabled(bool nextEnabled)
     {
-        enabled = nextEnabled;
-        if (!IsProcessingActive)
+        lock (gate)
         {
-            gateGain = 1f;
+            enabled = nextEnabled;
+            if (!IsProcessingActive)
+            {
+                gateGain = 1f;
+                ResetBuffers();
+            }
+            else
+            {
+                EnsureDenoiser();
+            }
         }
     }
 
@@ -63,23 +70,28 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
         bool nextNoiseGateEnabled = false,
         float nextNoiseGateThreshold = 35f)
     {
-        enabled = nextEnabled;
-        noiseGateEnabled = nextNoiseGateEnabled;
-        strength = Math.Clamp(nextStrength, 0f, 100f);
-        threshold = Math.Clamp(nextThreshold, 0f, 100f);
-        attack = Math.Clamp(nextAttack, 0f, 100f);
-        release = Math.Clamp(nextRelease, 0f, 100f);
-        noiseGateThreshold = Math.Clamp(nextNoiseGateThreshold, 0f, 100f);
-        var clampedHighPass = Math.Clamp(nextHighPassHz, 40f, 220f);
-        if (Math.Abs(clampedHighPass - highPassHz) >= 0.5f)
+        lock (gate)
         {
-            highPassHz = clampedHighPass;
-            RebuildHighPass();
-        }
+            // Legacy threshold / high-pass knobs are unused by RNNoise but kept for IPC compat.
+            _ = nextThreshold;
+            _ = nextHighPassHz;
 
-        if (!IsProcessingActive)
-        {
-            gateGain = 1f;
+            enabled = nextEnabled;
+            noiseGateEnabled = nextNoiseGateEnabled;
+            strength = Math.Clamp(nextStrength, 0f, 100f);
+            attack = Math.Clamp(nextAttack, 0f, 100f);
+            release = Math.Clamp(nextRelease, 0f, 100f);
+            noiseGateThreshold = Math.Clamp(nextNoiseGateThreshold, 0f, 100f);
+
+            if (!IsProcessingActive)
+            {
+                gateGain = 1f;
+                ResetBuffers();
+            }
+            else
+            {
+                EnsureDenoiser();
+            }
         }
     }
 
@@ -90,113 +102,188 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
     public int Read(float[] buffer, int offset, int count)
     {
         var samplesRead = source.Read(buffer, offset, count);
-        if (samplesRead <= 0 || !IsProcessingActive)
+        if (samplesRead <= 0)
         {
             return samplesRead;
         }
 
-        for (var index = 0; index < samplesRead; index++)
+        lock (gate)
         {
-            var channel = index % channels;
-            var sample = enabled
-                ? highPassFilters[channel].Transform(buffer[offset + index])
-                : buffer[offset + index];
-            var abs = Math.Abs(sample);
-            var previous = channelEnvelope[channel];
-            var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
-            var envelope = previous + (abs - previous) * learn;
-            channelEnvelope[channel] = Math.Max(MinEnvelope, envelope);
-
-            if (channel == 0)
+            if (!IsProcessingActive || channels <= 0)
             {
-                UpdateGate(envelope);
+                return samplesRead;
             }
 
-            buffer[offset + index] = sample * gateGain;
+            var frames = samplesRead / channels;
+            for (var frame = 0; frame < frames; frame++)
+            {
+                var frameOffset = offset + (frame * channels);
+                var dry = AverageFrame(buffer, frameOffset);
+                var clean = ProcessMonoSample(dry);
+
+                if (noiseGateEnabled)
+                {
+                    UpdateGate(Math.Abs(clean));
+                    clean *= gateGain;
+                }
+                else
+                {
+                    gateGain = 1f;
+                }
+
+                for (var channel = 0; channel < channels; channel++)
+                {
+                    buffer[frameOffset + channel] = clean;
+                }
+            }
         }
 
         return samplesRead;
     }
 
-    private void RebuildHighPass()
+    public void Dispose()
     {
-        for (var channel = 0; channel < channels; channel++)
+        lock (gate)
         {
-            highPassFilters[channel] = BiQuadFilter.HighPassFilter(WaveFormat.SampleRate, highPassHz, 0.707f);
+            denoiser?.Dispose();
+            denoiser = null;
         }
     }
 
-    private void UpdateGate(float envelope)
+    private bool EnsureDenoiser()
     {
-        var attackRate = Math.Clamp(0.15f + attack * 0.007f, 0.12f, 0.9f);
-        var releaseRate = Math.Clamp(0.03f + release * 0.0025f, 0.02f, 0.35f);
-        float targetGain = 1f;
-
-        if (enabled)
+        if (denoiser is not null)
         {
-            // Soft expander / suppression floor.
-            var maxAttenuation = Math.Clamp(0.35f - strength * 0.0032f, 0.02f, 0.35f);
-            var openMarginDb = Math.Clamp(14f - threshold * 0.1f, 3f, 14f);
-            var closeMarginDb = Math.Max(1.5f, openMarginDb * 0.45f);
+            return true;
+        }
 
-            var noiseDb = ToDb(noiseFloor);
-            var envelopeDb = ToDb(envelope);
+        if (denoiserFailed)
+        {
+            return false;
+        }
 
-            if (envelopeDb < noiseDb + closeMarginDb)
+        try
+        {
+            denoiser = new Denoiser();
+            ResetBuffers();
+            return true;
+        }
+        catch
+        {
+            denoiserFailed = true;
+            denoiser = null;
+            return false;
+        }
+    }
+
+    private float ProcessMonoSample(float sample)
+    {
+        if (outputRead < outputCount)
+        {
+            return outputFrame[outputRead++];
+        }
+
+        dryFrame[frameFill++] = sample;
+        if (frameFill < Native.FRAME_SIZE)
+        {
+            // First ~10 ms of each stream: pass dry until a full RNNoise frame is ready.
+            return sample;
+        }
+
+        frameFill = 0;
+        outputRead = 0;
+        outputCount = Native.FRAME_SIZE;
+
+        var wet = enabled ? strength / 100f : 0f;
+        if (!enabled || wet <= 0.001f || !EnsureDenoiser())
+        {
+            Array.Copy(dryFrame, outputFrame, Native.FRAME_SIZE);
+            return outputFrame[outputRead++];
+        }
+
+        Array.Copy(dryFrame, processFrame, Native.FRAME_SIZE);
+        try
+        {
+            // finish:false — never zero-pad mid-stream.
+            denoiser!.Denoise(processFrame.AsSpan(), finish: false);
+            if (wet >= 0.999f)
             {
-                noiseFloor += (envelope - noiseFloor) * NoiseLearnRate;
-                noiseFloor = Math.Clamp(noiseFloor, MinEnvelope, 0.05f);
-            }
-
-            var openThreshold = noiseDb + openMarginDb;
-            var closeThreshold = noiseDb + closeMarginDb;
-
-            if (envelopeDb >= openThreshold)
-            {
-                targetGain = 1f;
-            }
-            else if (envelopeDb <= closeThreshold)
-            {
-                targetGain = maxAttenuation;
+                Array.Copy(processFrame, outputFrame, Native.FRAME_SIZE);
             }
             else
             {
-                var t = (envelopeDb - closeThreshold) / (openThreshold - closeThreshold);
-                targetGain = maxAttenuation + (1f - maxAttenuation) * Smoothstep(t);
+                var dryMix = 1f - wet;
+                for (var index = 0; index < Native.FRAME_SIZE; index++)
+                {
+                    outputFrame[index] = (dryFrame[index] * dryMix) + (processFrame[index] * wet);
+                }
             }
         }
-
-        if (noiseGateEnabled)
+        catch
         {
-            // Hard gate: mute below an absolute-ish threshold. Higher control = closes more.
-            // Map 0–100 → about -48 dB … -18 dB.
-            var gateCloseDb = -48f + noiseGateThreshold * 0.3f;
-            var gateOpenDb = gateCloseDb + 4f;
-            var envelopeDb = ToDb(envelope);
+            denoiserFailed = true;
+            try
+            {
+                denoiser?.Dispose();
+            }
+            catch
+            {
+                // Ignore dispose failures after native issues.
+            }
 
-            if (envelopeDb <= gateCloseDb)
-            {
-                targetGain = 0f;
-            }
-            else if (envelopeDb < gateOpenDb)
-            {
-                var t = (envelopeDb - gateCloseDb) / (gateOpenDb - gateCloseDb);
-                targetGain = Math.Min(targetGain, Smoothstep(t));
-            }
+            denoiser = null;
+            Array.Copy(dryFrame, outputFrame, Native.FRAME_SIZE);
         }
 
-        var rate = targetGain > gateGain ? attackRate : releaseRate;
-        gateGain += (targetGain - gateGain) * rate;
+        return outputFrame[outputRead++];
     }
 
-    private static float ToDb(float linear)
+    private void UpdateGate(float abs)
     {
-        return 20f * MathF.Log10(Math.Max(linear, MinEnvelope));
+        var previous = channelEnvelope;
+        var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
+        channelEnvelope = Math.Max(MinEnvelope, previous + (abs - previous) * learn);
+
+        var thresholdLinear = MathF.Pow(10f, (-48f + (noiseGateThreshold * 0.3f)) / 20f);
+        var target = channelEnvelope >= thresholdLinear ? 1f : 0f;
+        var attackCoeff = 0.08f + ((100f - attack) * 0.004f);
+        var releaseCoeff = 0.02f + ((100f - release) * 0.0015f);
+        var coeff = target > gateGain ? attackCoeff : releaseCoeff;
+        gateGain += (target - gateGain) * coeff;
+        if (gateGain < 0.0001f)
+        {
+            gateGain = 0f;
+        }
+        else if (gateGain > 0.999f)
+        {
+            gateGain = 1f;
+        }
     }
 
-    private static float Smoothstep(float t)
+    private float AverageFrame(float[] buffer, int frameOffset)
     {
-        t = Math.Clamp(t, 0f, 1f);
-        return t * t * (3f - 2f * t);
+        if (channels == 1)
+        {
+            return buffer[frameOffset];
+        }
+
+        var sum = 0f;
+        for (var channel = 0; channel < channels; channel++)
+        {
+            sum += buffer[frameOffset + channel];
+        }
+
+        return sum / channels;
+    }
+
+    private void ResetBuffers()
+    {
+        frameFill = 0;
+        outputRead = 0;
+        outputCount = 0;
+        Array.Clear(dryFrame);
+        Array.Clear(processFrame);
+        Array.Clear(outputFrame);
+        channelEnvelope = MinEnvelope;
     }
 }
