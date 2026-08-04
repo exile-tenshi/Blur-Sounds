@@ -20,8 +20,15 @@ function shouldShowEngineNotice(engine: AudioSnapshot['engine']): boolean {
     return false
   }
 
-  // Keep the header/buttons still while streaming — only surface start/error copy.
-  return engine.state === 'error' || engine.state === 'starting'
+  // Start/error copy, plus Listen-through warnings while streaming.
+  if (engine.state === 'error' || engine.state === 'starting') {
+    return true
+  }
+
+  return (
+    engine.state === 'running' &&
+    /listen to this device|speakers will hear|asio bridge|direct mode/i.test(engine.message)
+  )
 }
 
 /** Stable header label — live cable/output % belongs on meters, not this line. */

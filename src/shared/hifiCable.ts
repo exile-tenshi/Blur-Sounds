@@ -287,9 +287,10 @@ export function getHifiCableSetupSteps(): string[] {
     'Click Apply clean audio settings so Hi-Fi Cable Input and Output both use 24 bit, 48000 Hz (shared mode).',
     'On both Advanced tabs, uncheck Allow exclusive control and Give exclusive mode applications priority.',
     'Playback → Hi-Fi Cable Input: Levels tab not muted / not at 0%. Recording → Hi-Fi Cable Output: same.',
-    'ASIO Bridge: if it is not running, you are already in Pass-Through — do nothing. If a gold “ASIO Bridge” window is open, set it to PASS THRU (not ASIO / Direct), or close that window from the taskbar.',
-    'Click Test cable (plays tone). Watch Windows Recording → Hi-Fi Cable Output meter — it should jump. If not, Input/Output formats still do not match.',
-    'Start stream in Blur Sounds — status should show cable % moving when you speak or play music.',
-    `In Discord/OBS, set the input device to ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
+    'CRITICAL — Recording → Hi-Fi Cable Output → Listen tab: uncheck “Listen to this device”. If that is on, your speakers hear the full cable mix (mic + apps). Blur Sounds turns this off on Start when Windows allows it.',
+    'ASIO Bridge: if a gold ASIO Bridge window is open, set PASS THRU (not ASIO / Direct), or close it. Direct mode also plays the cable through your headset.',
+    'Click Test cable (plays tone). Watch Windows Recording → Hi-Fi Cable Output meter — it should jump. You should NOT hear the tone in your headset unless Listen/Direct is still on.',
+    'Start stream in Blur Sounds — status should show Streaming when the mix is live.',
+    `In Discord/OBS, set the input device to ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic). Turn Discord Input Monitoring / sidetone OFF if you hear yourself locally.`,
   ]
 }

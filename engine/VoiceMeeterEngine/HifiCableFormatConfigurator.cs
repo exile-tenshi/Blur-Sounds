@@ -267,7 +267,15 @@ internal static partial class HifiCableFormatConfigurator
 
     private static void ConfigureEndpoint(IPolicyConfig policyConfig, MMDevice endpoint, string registryKind)
     {
-        HifiCableEndpointVolume.EnsureAudible(endpoint);
+        if (string.Equals(registryKind, "Capture", StringComparison.OrdinalIgnoreCase))
+        {
+            HifiCableListenThrough.Disable(endpoint);
+            HifiCableEndpointVolume.EnsureCaptureUnmuted(endpoint);
+        }
+        else
+        {
+            HifiCableEndpointVolume.EnsurePlaybackAudible(endpoint);
+        }
 
         if (IsEngineMatchedQuality(endpoint))
         {
