@@ -24,7 +24,7 @@ internal sealed class OutputStageSampleProvider : ISampleProvider
         var capacity = Math.Max(
             channels,
             WaveFormat.SampleRate * channels * bufferMilliseconds / 1000);
-        ring = new FloatCaptureRing(capacity);
+        ring = new FloatCaptureRing(capacity, channels);
         minBufferedSamples = Math.Max(
             channels,
             WaveFormat.SampleRate * channels * 48 / 1000);

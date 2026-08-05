@@ -54,6 +54,11 @@ internal sealed class Pcm24WaveProvider : IWaveProvider
             for (var channel = 0; channel < WaveFormat.Channels; channel++)
             {
                 var sample = floatBuffer[(frame * WaveFormat.Channels) + channel];
+                if (float.IsNaN(sample) || float.IsInfinity(sample))
+                {
+                    sample = 0f;
+                }
+
                 var pcm = (int)Math.Round(Math.Clamp(sample, -1f, 1f) * pcmScale);
                 pcm = Math.Clamp(pcm, Pcm24Min, Pcm24Max);
                 WritePcm24Sample(buffer, ref writeOffset, pcm);
