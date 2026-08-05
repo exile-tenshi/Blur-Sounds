@@ -235,7 +235,10 @@ function MicNoiseCard({
               void onChange({ noiseGateThreshold })
             }}
           />
-          <p className="muted">Optional. Leave off if it clips the start of words.</p>
+          <p className="muted">
+            Optional and usually off — a hard mute ducks the start of words. Prefer a stronger
+            preset / strength instead.
+          </p>
         </div>
       ) : null}
     </article>
