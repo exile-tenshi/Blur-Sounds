@@ -105,6 +105,7 @@ function MicNoiseCard({
   const settings = normalizeNoiseSuppression(slot.noiseSuppressionSettings ?? slot.noiseSuppression)
   const kind = detectNoiseMicKind(deviceName)
   const presets = presetsForMic(deviceName)
+  const recommended = recommendedPresetForMic(deviceName)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
 
@@ -182,25 +183,30 @@ function MicNoiseCard({
       />
 
       <div className="noise-preset-row sonar-presets">
-        {presets.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            title={preset.hint}
-            className={`chip-button${activePresetId === preset.id ? ' active' : ''}`}
-            disabled={!slot.deviceId}
-            onClick={() => {
-              setActivePresetId(preset.id)
-              void onChange(applyNoisePreset(preset))
-            }}
-          >
-            {preset.label}
-          </button>
-        ))}
+        {presets.map((preset) => {
+          const isRecommended = preset.id === recommended.id
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              title={preset.hint}
+              className={`chip-button${activePresetId === preset.id ? ' active' : ''}${
+                isRecommended ? ' recommended' : ''
+              }`}
+              disabled={!slot.deviceId}
+              onClick={() => {
+                setActivePresetId(preset.id)
+                void onChange(applyNoisePreset(preset))
+              }}
+            >
+              {preset.label}
+            </button>
+          )
+        })}
       </div>
       <p className="muted sonar-preset-hint">
         {presets.find((preset) => preset.id === activePresetId)?.hint ??
-          'Pick a preset for your mic type. VR headsets get stronger fan cleanup.'}
+          `Suggested for this mic: ${recommended.label}. Pick desk stand, boom arm, headset, VR, and more.`}
       </p>
 
       <button
