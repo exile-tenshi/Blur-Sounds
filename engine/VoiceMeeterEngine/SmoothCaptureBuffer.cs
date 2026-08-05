@@ -12,10 +12,14 @@ internal sealed class FloatCaptureRing
     private int head;
     private int count;
     private readonly int capacity;
+    private readonly int channels;
 
-    public FloatCaptureRing(int capacitySamples)
+    public FloatCaptureRing(int capacitySamples, int channelCount = 1)
     {
-        capacity = Math.Max(2, capacitySamples);
+        channels = Math.Max(1, channelCount);
+        // Keep capacity channel-aligned so overflow discards cannot desync L/R.
+        var alignedCapacity = Math.Max(channels * 2, capacitySamples - (capacitySamples % channels));
+        capacity = Math.Max(channels * 2, alignedCapacity);
         storage = new float[capacity];
     }
 
@@ -54,11 +58,16 @@ internal sealed class FloatCaptureRing
                 sampleCount = capacity;
             }
 
+            // Drop whole frames only — a non-aligned overflow permanently swaps channels.
             var overflow = count + sampleCount - capacity;
             if (overflow > 0)
             {
-                head = (head + overflow) % capacity;
-                count -= overflow;
+                overflow -= overflow % channels;
+                if (overflow > 0)
+                {
+                    head = (head + overflow) % capacity;
+                    count -= overflow;
+                }
             }
 
             var writePos = (head + count) % capacity;
@@ -178,7 +187,7 @@ internal sealed class SmoothCaptureBuffer
                 CaptureDeviceTuning.GetJitterBufferMilliseconds(deviceName) / 1000)
             : jitterSamples;
 
-        ring = new FloatCaptureRing(ringSamples);
+        ring = new FloatCaptureRing(ringSamples, floatFormat.Channels);
         lastFrame = new float[floatFormat.Channels];
     }
 
@@ -266,10 +275,11 @@ internal sealed class SmoothCaptureBuffer
         }
 
         var channels = Math.Max(1, floatFormat.Channels);
-        // Trim as soon as we drift past one packet so latency cannot climb.
+        // Require meaningful backlog before trimming — MaxTrimPass alone (12 ms) was
+        // trimming continuously and sounded like digital breakup on busy captures.
         var minExcessBeforeTrim = Math.Max(
             channels,
-            floatFormat.SampleRate * channels * LatencyTuning.MaxTrimPassMilliseconds / 1000);
+            floatFormat.SampleRate * channels * 200 / 1000);
         if (excess < minExcessBeforeTrim)
         {
             return;
