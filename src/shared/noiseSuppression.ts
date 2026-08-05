@@ -4,7 +4,7 @@ export interface NoiseSuppressionSettings {
   strength: number
   /** Legacy soft-expander knob — unused by RNNoise, kept for saved settings compat */
   threshold: number
-  /** Legacy high-pass Hz — unused by RNNoise, kept for saved settings compat */
+  /** High-pass cut in Hz before RNNoise (rumble / fan thump) */
   highPassHz: number
   /** 0–100: optional hard-gate open speed */
   attack: number
@@ -18,9 +18,9 @@ export interface NoiseSuppressionSettings {
 
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
-  strength: 65,
+  strength: 72,
   threshold: 55,
-  highPassHz: 80,
+  highPassHz: 85,
   attack: 55,
   release: 40,
   noiseGateEnabled: false,

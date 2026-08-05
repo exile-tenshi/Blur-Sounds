@@ -1,21 +1,20 @@
 using System.Collections.Generic;
+using NAudio.Dsp;
 using NAudio.Wave;
 using RNNoise.NET;
 
 namespace VoiceMeeterEngine;
 
 /// <summary>
-/// Neural mic noise cancellation via RNNoise. Uses a fixed ~10 ms frame delay so
-/// every input sample produces exactly one output sample (no drops / no in-out).
-/// Completely bypasses when NS and the optional gate are both off.
+/// Neural mic noise cancellation via RNNoise. Fixed ~10 ms frame delay, 1:1 samples.
+/// High-pass + strong wet curve so cleanup is actually audible at normal strengths.
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
     private const float MinEnvelope = 1e-6f;
     private const float NoiseLearnRate = 0.02f;
     private const float SpeechLearnRate = 0.4f;
-    /// <summary>RNNoise often lowers speech a bit — restore level without clipping.</summary>
-    private const float RnnoiseMakeup = 1.25f;
+    private const float RnnoiseMakeup = 1.35f;
 
     private readonly ISampleProvider source;
     private readonly int channels;
@@ -26,6 +25,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private readonly Queue<float> outputQueue = new(Native.FRAME_SIZE * 2);
     private Denoiser? denoiser;
     private bool denoiserFailed;
+    private BiQuadFilter? highPass;
+    private float highPassHz = 80f;
     private float channelEnvelope = MinEnvelope;
     private float gateGain = 1f;
     private bool enabled;
@@ -40,6 +41,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         this.source = source;
         WaveFormat = source.WaveFormat;
         channels = Math.Max(1, WaveFormat.Channels);
+        RebuildHighPass();
     }
 
     public WaveFormat WaveFormat { get; }
@@ -78,15 +80,20 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         lock (gate)
         {
             _ = nextThreshold;
-            _ = nextHighPassHz;
 
             enabled = nextEnabled;
-            // Gate alone causes speech ducking — only allow while NS is on.
             noiseGateEnabled = nextEnabled && nextNoiseGateEnabled;
             strength = Math.Clamp(nextStrength, 0f, 100f);
             attack = Math.Clamp(nextAttack, 0f, 100f);
             release = Math.Clamp(nextRelease, 0f, 100f);
             noiseGateThreshold = Math.Clamp(nextNoiseGateThreshold, 0f, 100f);
+
+            var clampedHighPass = Math.Clamp(nextHighPassHz, 40f, 220f);
+            if (Math.Abs(clampedHighPass - highPassHz) >= 0.5f)
+            {
+                highPassHz = clampedHighPass;
+                RebuildHighPass();
+            }
 
             if (!IsProcessingActive)
             {
@@ -123,6 +130,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             {
                 var frameOffset = offset + (frame * channels);
                 var dry = AverageFrame(buffer, frameOffset);
+                if (enabled && highPass is not null)
+                {
+                    dry = highPass.Transform(dry);
+                }
+
                 var clean = ProcessMonoSample(dry);
 
                 if (noiseGateEnabled)
@@ -173,14 +185,13 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             return outputQueue.Dequeue();
         }
 
-        // First RNNoise frame (~10 ms) is still filling — keep timeline continuous with silence,
-        // never pass dry here or those samples would also be replayed from the output queue.
         return 0f;
     }
 
     private void ProcessFullFrame()
     {
-        var wet = enabled ? Math.Clamp(strength / 100f, 0f, 1f) : 0f;
+        // Strength maps aggressively so mid values actually clean (65 ≈ 90% wet).
+        var wet = enabled ? StrengthToWet(strength) : 0f;
         if (!enabled || wet <= 0.001f || !EnsureDenoiser())
         {
             for (var index = 0; index < Native.FRAME_SIZE; index++)
@@ -194,7 +205,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         Array.Copy(dryFrame, processFrame, Native.FRAME_SIZE);
         try
         {
-            // finish:false — never zero-pad mid-stream.
             denoiser!.Denoise(processFrame.AsSpan(), finish: false);
 
             var dryMix = 1f - wet;
@@ -223,6 +233,16 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 outputQueue.Enqueue(dryFrame[index]);
             }
         }
+    }
+
+    /// <summary>
+    /// UI 0–100 → wet amount. Curve reaches near-full cleanup by ~70 so presets work.
+    /// </summary>
+    private static float StrengthToWet(float strengthPercent)
+    {
+        var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
+        // sqrt-ish: 40→0.74, 65→0.90, 80→0.96, 100→1.0
+        return MathF.Pow(normalized, 0.45f);
     }
 
     private bool EnsureDenoiser()
@@ -256,7 +276,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
         channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
-        // Softer than a hard mute — duck to 18% instead of silence to avoid extreme in/out.
         var thresholdLinear = MathF.Pow(10f, (-48f + (noiseGateThreshold * 0.3f)) / 20f);
         var target = channelEnvelope >= thresholdLinear ? 1f : 0.18f;
         var attackCoeff = 0.08f + ((100f - attack) * 0.004f);
@@ -282,6 +301,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         return sum / channels;
     }
 
+    private void RebuildHighPass()
+    {
+        highPass = BiQuadFilter.HighPassFilter(WaveFormat.SampleRate, highPassHz, 0.707f);
+    }
+
     private void ResetIdleState()
     {
         gateGain = 1f;
@@ -290,6 +314,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         outputQueue.Clear();
         Array.Clear(dryFrame);
         Array.Clear(processFrame);
+        RebuildHighPass();
         try
         {
             denoiser?.Dispose();
