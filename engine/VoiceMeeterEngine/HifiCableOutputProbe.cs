@@ -61,8 +61,18 @@ internal static class HifiCableOutputProbe
                 ISampleProvider outputSource = attempt.Format.SampleRate == HifiStreamingPolicy.EngineMixSampleRate
                     ? tone
                     : new StudioRateOutputSampleProvider(tone, attempt.Format.SampleRate);
+                var bindFormat = WaveFormatUtility.IsFloatFormat(attempt.Format)
+                    ? attempt.Format
+                    : WaveFormat.CreateIeeeFloatWaveFormat(
+                        attempt.Format.SampleRate,
+                        Math.Max(1, attempt.Format.Channels));
+                if (bindFormat.SampleRate != outputSource.WaveFormat.SampleRate)
+                {
+                    outputSource = new StudioRateOutputSampleProvider(outputSource, bindFormat.SampleRate);
+                }
+
                 var waveProvider = new PeakReportingWaveProvider(
-                    OutputWaveProviderFactory.Create(outputSource, attempt.Format));
+                    OutputWaveProviderFactory.Create(outputSource, bindFormat));
                 render = new WasapiOutBroadcast();
                 render.Configure(
                     attemptPlayback,
@@ -116,7 +126,7 @@ internal static class HifiCableOutputProbe
                 capture?.StopRecording();
 
                 report.AppendLine(
-                    $"OK WasapiOut {DescribeFormat(attempt.Format)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
+                    $"OK WasapiOut {DescribeFormat(bindFormat)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
 
                 if (peak > 0.001f && (capturedPeak > 0.001f || recordMeterPeak > 0.001f))
                 {
