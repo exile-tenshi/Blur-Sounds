@@ -1305,6 +1305,10 @@ progress {
   color: #ecfeff;
 }
 
+.chip-button.recommended:not(.active) {
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
 .clip-it-button {
   min-width: 140px;
   font-size: 1.05rem;

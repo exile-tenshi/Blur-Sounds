@@ -55,23 +55,23 @@ internal static class LatencyTuning
     /// <summary>Microphone FIFO cap at Hi-Fi Cable studio rate.</summary>
     public const int HiFiMicCaptureMaxMilliseconds = MicCaptureMaxMilliseconds;
 
-    /// <summary>FIFO / live-edge target for application loopback.</summary>
-    public const int LoopbackCaptureMaxMilliseconds = 320;
+    /// <summary>FIFO target for application loopback (steady music playback).</summary>
+    public const int LoopbackCaptureMaxMilliseconds = 480;
 
     /// <summary>In-memory ring size for application loopback capture.</summary>
-    public const int LoopbackCaptureRingMilliseconds = 480;
+    public const int LoopbackCaptureRingMilliseconds = 640;
 
     /// <summary>Shared-mode WASAPI buffer for process loopback capture.</summary>
-    public const int AppLoopbackCaptureBufferMilliseconds = 64;
+    public const int AppLoopbackCaptureBufferMilliseconds = 80;
 
     /// <summary>Audio to buffer before an app loopback source joins the mix.</summary>
-    public const int AppLoopbackWarmupMilliseconds = 120;
+    public const int AppLoopbackWarmupMilliseconds = 160;
 
     /// <summary>Mic standby buffer before joining the live mix (0 = pull immediately).</summary>
     public const int MicCaptureJitterBufferMilliseconds = 0;
 
     /// <summary>App loopback standby buffer before joining the live mix.</summary>
-    public const int LoopbackCaptureJitterBufferMilliseconds = 64;
+    public const int LoopbackCaptureJitterBufferMilliseconds = 96;
 
     /// <summary>Process loopback is often quieter than mic; keep unity to avoid clipping.</summary>
     public const float LoopbackMakeupGain = 1.0f;
