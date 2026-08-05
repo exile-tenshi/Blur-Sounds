@@ -112,7 +112,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       highPassHz: 100,
       attack: 65,
       release: 50,
-      noiseGateEnabled: true,
+      // Hard gate ducks speech — leave cleanup to RNNoise strength only.
+      noiseGateEnabled: false,
       noiseGateThreshold: 38,
     },
   },
