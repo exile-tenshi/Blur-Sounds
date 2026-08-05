@@ -54,9 +54,15 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
                     HifiCableEndpointVolume.EnsureAudible(attemptDevice);
                 }
 
-                var outputSource = CreateOutputSource(delegatingSource, attempt.Format);
+                // WasapiOut shared Init always enables AutoConvert and does not install a DMO
+                // resampler. Feeding packed PCM24 Extensible there produces extreme digital
+                // corruption on Hi-Fi Cable — keep the provider in IEEE float at the attempt rate.
+                var bindFormat = isHiFiTarget
+                    ? ToWasapiOutSafeFormat(attempt.Format)
+                    : attempt.Format;
+                var outputSource = CreateOutputSource(delegatingSource, bindFormat);
                 var waveProvider = new FullBlockWaveProvider(
-                    OutputWaveProviderFactory.Create(outputSource, attempt.Format));
+                    OutputWaveProviderFactory.Create(outputSource, bindFormat));
                 var latencyMilliseconds = isHiFiTarget
                     ? LatencyTuning.HiFiOutputLatencyMilliseconds
                     : LatencyTuning.OutputLatencyMilliseconds;
@@ -91,9 +97,9 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
                 boundDevice = attemptDevice;
                 attemptDevice = null; // ownership transferred to boundDevice / output
                 BindingDescription = isHiFiTarget
-                    ? $"Hi-Fi Cable {deviceName} · WasapiOut · {DescribeAttemptFormat(attempt.Format)}"
+                    ? $"Hi-Fi Cable {deviceName} · WasapiOut · {DescribeAttemptFormat(bindFormat)}"
                     : $"WASAPI {deviceName} · {DescribeAttemptFormat(attempt.Format)}";
-                AudioDiagnostics.SetOutputBinding(BindingDescription, attempt.Format);
+                AudioDiagnostics.SetOutputBinding(BindingDescription, bindFormat);
                 return;
             }
             catch (Exception ex)
@@ -139,6 +145,22 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
         }
 
         return new StudioRateOutputSampleProvider(staged, outputFormat.SampleRate);
+    }
+
+    /// <summary>
+    /// WasapiOut must receive IEEE float (or a true MixFormat-compatible layout).
+    /// Packed 24-bit PCM Extensible is rewritten as float at the same rate.
+    /// </summary>
+    private static WaveFormat ToWasapiOutSafeFormat(WaveFormat attemptFormat)
+    {
+        if (WaveFormatUtility.IsFloatFormat(attemptFormat))
+        {
+            return attemptFormat;
+        }
+
+        return WaveFormat.CreateIeeeFloatWaveFormat(
+            attemptFormat.SampleRate,
+            Math.Max(1, attemptFormat.Channels));
     }
 
     private static InvalidOperationException CreateBindException(

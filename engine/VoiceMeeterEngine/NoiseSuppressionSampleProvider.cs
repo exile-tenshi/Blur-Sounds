@@ -212,6 +212,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
                 var mixed = (dryFrame[index] * dryMix) + (processFrame[index] * wet);
+                if (float.IsNaN(mixed) || float.IsInfinity(mixed))
+                {
+                    mixed = dryFrame[index];
+                }
+
                 outputQueue.Enqueue(Math.Clamp(mixed * makeup, -1f, 1f));
             }
         }

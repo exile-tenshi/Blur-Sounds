@@ -7,7 +7,7 @@ namespace VoiceMeeterEngine;
 internal sealed class AppLoopbackSource : IDisposable
 {
     private readonly ProcessWasapiCapture capture;
-    private readonly SmoothCaptureBuffer captureBuffer;
+    private readonly FifoCaptureBuffer captureBuffer;
     private readonly WaveFormat captureFormat;
     private readonly int captureSampleRate;
     private readonly FullBlockVolumeSampleProvider volumeProvider;
@@ -21,7 +21,7 @@ internal sealed class AppLoopbackSource : IDisposable
 
     private AppLoopbackSource(
         ProcessWasapiCapture capture,
-        SmoothCaptureBuffer captureBuffer,
+        FifoCaptureBuffer captureBuffer,
         WaveFormat captureFormat,
         FullBlockVolumeSampleProvider volumeProvider,
         float initialVolume,
@@ -131,6 +131,7 @@ internal sealed class AppLoopbackSource : IDisposable
         bool includeProcessTree = true,
         bool isHiFiOutput = false)
     {
+        _ = isHiFiOutput;
         var captureSampleRate = mixFormat.SampleRate;
 
         var capture = await ProcessLoopbackPool.AcquireAsync(
@@ -139,17 +140,11 @@ internal sealed class AppLoopbackSource : IDisposable
             captureSampleRate,
             mixFormat.Channels);
         var captureFormat = capture.WaveFormat;
-        // Smooth FIFO (not live-edge) — music needs stable buffering, not aggressive trim.
-        var captureBuffer = new SmoothCaptureBuffer(
+        // Simple FIFO (main's working music path) — avoid SmoothCapture live trim on loopback.
+        var captureBuffer = new FifoCaptureBuffer(
             captureFormat,
-            mixFormat.SampleRate,
-            isHiFiOutput,
-            comfortUnderrun: false,
-            deviceName: null,
-            maxCaptureMilliseconds: LatencyTuning.LoopbackCaptureMaxMilliseconds,
-            jitterBufferMilliseconds: LatencyTuning.LoopbackCaptureJitterBufferMilliseconds,
-            holdLastOnUnderrun: false,
-            enableTrim: true);
+            maxMilliseconds: LatencyTuning.LoopbackCaptureMaxMilliseconds,
+            jitterBufferMilliseconds: LatencyTuning.LoopbackCaptureJitterBufferMilliseconds);
         var provider = CapturePipeline.Build(captureBuffer, captureFormat, mixFormat);
         var volumeProvider = new FullBlockVolumeSampleProvider(provider) { Volume = volume };
 
