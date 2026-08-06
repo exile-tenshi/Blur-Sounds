@@ -1197,21 +1197,27 @@ internal sealed class AudioEngine : IDisposable
 
         if (UsesHifiCableInput())
         {
+            // Soft-fail: VB-Audio Pass-Through can still deliver without a keep-alive client.
+            // Hard-failing here aborted Play() and looked like a dead cable.
             hifiOutputActivator ??= new HifiCableOutputActivator();
-            hifiOutputActivator.Start();
+            try
+            {
+                hifiOutputActivator.Start();
+            }
+            catch
+            {
+                // Surfaced via LastError / telemetry below.
+            }
+
             if (hifiOutputActivator.IsActive != true)
             {
                 lock (gate)
                 {
-                    state = "error";
                     message = hifiOutputActivator.LastError ??
-                              "Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output, uncheck Exclusive Mode on both cable endpoints, leave ASIO Bridge on Pass-Through, then Start again.";
+                              "Hi-Fi Cable Output keep-alive did not start — Discord/OBS may stay silent. Enable Recording → Hi-Fi Cable Output, leave ASIO Bridge on Pass-Through.";
                 }
-
-                return;
             }
-
-            if (!string.IsNullOrWhiteSpace(hifiOutputActivator.ListenThroughWarning))
+            else if (!string.IsNullOrWhiteSpace(hifiOutputActivator.ListenThroughWarning))
             {
                 lock (gate)
                 {

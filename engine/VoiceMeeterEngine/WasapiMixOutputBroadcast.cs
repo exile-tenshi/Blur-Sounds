@@ -6,8 +6,8 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Streams the live mix to a Windows playback endpoint (Hi-Fi Cable Input, Voicemeeter input, etc.).
-/// Hi-Fi Cable uses the same WasapiRenderBroadcast path as main — NAudio WasapiOut corrupts
-/// virtual-cable audio (extreme bitrattling) even with IEEE float providers.
+/// Hi-Fi Cable prefers NAudio WasapiOut with IEEE float (custom WASAPI render stays silent on some
+/// hosts). Packed PCM24 is never fed to WasapiOut — that path caused extreme bitrattling.
 /// </summary>
 internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
 {
@@ -56,7 +56,9 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
                     HifiCableEndpointVolume.EnsurePlaybackAudible(attemptDevice);
                 }
 
-                var bindFormat = ResolveBindFormat(attemptDevice, attempt.Format, isHiFiTarget);
+                var bindFormat = isHiFiTarget
+                    ? ToWasapiOutSafeFormat(ResolveBindFormat(attemptDevice, attempt.Format, isHiFiTarget: true))
+                    : attempt.Format;
                 var outputSource = CreateOutputSource(delegatingSource, bindFormat);
                 var waveProvider = new FullBlockWaveProvider(
                     OutputWaveProviderFactory.Create(outputSource, bindFormat));
@@ -64,23 +66,41 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
                     ? LatencyTuning.HiFiOutputLatencyMilliseconds
                     : LatencyTuning.OutputLatencyMilliseconds;
 
-                var render = new WasapiRenderBroadcast();
-                render.Configure(
-                    attemptDevice,
-                    attempt.ShareMode,
-                    useEventSync: attempt.UseEventSync,
-                    latencyMilliseconds,
-                    waveProvider,
-                    attempt.AllowAutoConvert);
-                outputs.Add(render);
-                playAction = render.Play;
-                stopAction = render.Stop;
+                if (isHiFiTarget)
+                {
+                    // WasapiOut + float is the reliable Cable Input pump on this product.
+                    // Custom WasapiRenderBroadcast Initialize can succeed while Play stays silent.
+                    var wasapiOut = new WasapiOutBroadcast();
+                    wasapiOut.Configure(
+                        attemptDevice,
+                        waveProvider,
+                        latencyMilliseconds,
+                        useEventSync: false);
+                    outputs.Add(wasapiOut);
+                    playAction = wasapiOut.Play;
+                    stopAction = wasapiOut.Stop;
+                    BindingDescription =
+                        $"Hi-Fi Cable {deviceName} · WasapiOut · {DescribeAttemptFormat(bindFormat)}";
+                }
+                else
+                {
+                    var render = new WasapiRenderBroadcast();
+                    render.Configure(
+                        attemptDevice,
+                        attempt.ShareMode,
+                        useEventSync: attempt.UseEventSync,
+                        latencyMilliseconds,
+                        waveProvider,
+                        attempt.AllowAutoConvert);
+                    outputs.Add(render);
+                    playAction = render.Play;
+                    stopAction = render.Stop;
+                    BindingDescription =
+                        $"WASAPI {deviceName} · {DescribeAttemptFormat(bindFormat)}";
+                }
 
                 boundDevice = attemptDevice;
                 attemptDevice = null;
-                BindingDescription = isHiFiTarget
-                    ? $"Hi-Fi Cable {deviceName} · WASAPI · {DescribeAttemptFormat(bindFormat)}"
-                    : $"WASAPI {deviceName} · {DescribeAttemptFormat(bindFormat)}";
                 AudioDiagnostics.SetOutputBinding(BindingDescription, bindFormat);
                 return;
             }
@@ -89,6 +109,47 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
                 lastError = ex;
                 DisposeOutputs();
                 attemptDevice?.Dispose();
+            }
+        }
+
+        // Last resort for Hi-Fi: custom WASAPI render if every WasapiOut attempt failed.
+        if (isHiFiTarget)
+        {
+            foreach (var attempt in attempts)
+            {
+                MMDevice? attemptDevice = null;
+                try
+                {
+                    attemptDevice = enumerator.GetDevice(deviceId);
+                    HifiCableEndpointVolume.EnsurePlaybackAudible(attemptDevice);
+                    var bindFormat = ResolveBindFormat(attemptDevice, attempt.Format, isHiFiTarget: true);
+                    var outputSource = CreateOutputSource(delegatingSource, bindFormat);
+                    var waveProvider = new FullBlockWaveProvider(
+                        OutputWaveProviderFactory.Create(outputSource, bindFormat));
+                    var render = new WasapiRenderBroadcast();
+                    render.Configure(
+                        attemptDevice,
+                        attempt.ShareMode,
+                        useEventSync: false,
+                        LatencyTuning.HiFiOutputLatencyMilliseconds,
+                        waveProvider,
+                        attempt.AllowAutoConvert);
+                    outputs.Add(render);
+                    playAction = render.Play;
+                    stopAction = render.Stop;
+                    boundDevice = attemptDevice;
+                    attemptDevice = null;
+                    BindingDescription =
+                        $"Hi-Fi Cable {deviceName} · WASAPI · {DescribeAttemptFormat(bindFormat)}";
+                    AudioDiagnostics.SetOutputBinding(BindingDescription, bindFormat);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    DisposeOutputs();
+                    attemptDevice?.Dispose();
+                }
             }
         }
 
@@ -121,7 +182,6 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
             return attemptFormat;
         }
 
-        // Shared-mode Hi-Fi Cable is cleanest when we match MixFormat exactly (usually float32).
         try
         {
             var mixFormat = device.AudioClient.MixFormat;
@@ -137,12 +197,19 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
             // Fall through to attempt format.
         }
 
+        return ToWasapiOutSafeFormat(attemptFormat);
+    }
+
+    /// <summary>
+    /// WasapiOut must receive IEEE float. Packed 24-bit PCM Extensible is rewritten as float.
+    /// </summary>
+    private static WaveFormat ToWasapiOutSafeFormat(WaveFormat attemptFormat)
+    {
         if (WaveFormatUtility.IsFloatFormat(attemptFormat))
         {
             return attemptFormat;
         }
 
-        // Never feed packed PCM24 into shared AutoConvert — rewrite as float at the same rate.
         return WaveFormat.CreateIeeeFloatWaveFormat(
             attemptFormat.SampleRate,
             Math.Max(1, attemptFormat.Channels));
