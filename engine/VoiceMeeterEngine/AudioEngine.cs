@@ -537,7 +537,7 @@ internal sealed class AudioEngine : IDisposable
     private void AttachMicrophoneToMixer(string slotId, MicSource mic)
     {
         var block = new FullBlockSampleProvider(mic.SampleProvider);
-        var equalizer = new EqualizerSampleProvider(block);
+        var equalizer = new EqualizerSampleProvider(block, voiceFriendly: true);
         var input = new PausedAwareMixInput(() => mic.IsMuted, equalizer);
 
         lock (mixLock)

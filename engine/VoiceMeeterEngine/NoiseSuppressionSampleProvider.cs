@@ -8,8 +8,8 @@ namespace VoiceMeeterEngine;
 /// <summary>
 /// Neural mic noise cancellation via RNNoise. Fixed ~10 ms frame delay, 1:1 samples.
 /// High-pass + wet mix + hysteresis residual floor; peak-limit only on overs.
-/// Impulsive desk taps stay mostly dry + ducked so RNNoise doesn't turn them
-/// into a whooshy “spaceship” swirl while normal speech stays wet/clean.
+/// Impulsive desk taps stay 100% dry (RNNoise never sees them) so no wet
+/// “vrooom” overlay sits on top of the real tap. Impact still removes them.
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
@@ -152,12 +152,18 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             {
                 var frameOffset = offset + (frame * channels);
                 var dry = AverageFrame(buffer, frameOffset);
+                UpdateImpulseDetector(Math.Abs(dry));
+
+                // High-pass rings on desk taps (“vroom”). Keep filter state updated but
+                // use the unfiltered sample while an impulse is active.
                 if (enabled && highPass is not null)
                 {
-                    dry = highPass.Transform(dry);
+                    var filtered = highPass.Transform(dry);
+                    if (impulseAmount < 0.22f)
+                    {
+                        dry = filtered;
+                    }
                 }
-
-                UpdateImpulseDetector(Math.Abs(dry));
 
                 // Only soft-clip true overs — never auto-duck taps (Impact slider owns that).
                 dry = SoftClip(dry, 0.95f);
@@ -174,22 +180,26 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                     residualGain = 1f;
                 }
 
-                if (noiseGateEnabled)
+                if (noiseGateEnabled && impulseAmount < 0.22f)
                 {
                     UpdateGate(Math.Abs(clean));
                     clean *= gateGain;
                 }
-                else
+                else if (!noiseGateEnabled)
                 {
                     gateGain = 1f;
                 }
 
-                if (compressorEnabled)
+                // Compressor on taps adds a whooshy pump — skip while impulse is held.
+                if (compressorEnabled && impulseAmount < 0.22f)
                 {
                     clean = ApplyCompressor(clean);
                 }
 
-                clean = SoftLimit(clean);
+                if (impulseAmount < 0.22f)
+                {
+                    clean = SoftLimit(clean);
+                }
 
                 if (!float.IsFinite(clean))
                 {
@@ -251,27 +261,36 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         }
 
         Array.Copy(dryFrame, processFrame, Native.FRAME_SIZE);
+
+        // If this frame is a desk tap / bump, never run RNNoise on it — even a little wet
+        // mixes as a spaceship “vrooom” overlay on top of the real tap.
+        var frameImpulse = MeasureFrameImpulse(dryFrame);
+        var blendImpulse = Math.Max(impulseAmount, frameImpulse);
+        if (blendImpulse > 0.18f)
+        {
+            // Hold the dry window through the tap’s resonant decay.
+            impulseAmount = Math.Max(impulseAmount, blendImpulse);
+            var impactGain = 1f - (blendImpulse * (impact / 100f) * 0.97f);
+            for (var index = 0; index < Native.FRAME_SIZE; index++)
+            {
+                outputQueue.Enqueue(dryFrame[index] * impactGain);
+            }
+
+            return;
+        }
+
         try
         {
             denoiser!.Denoise(processFrame.AsSpan(), finish: false);
 
-            // Desk taps / bumps must stay dry through RNNoise (wet = spaceship swirl).
-            // Impact slider then chooses natural level vs remove those sounds.
-            var frameImpulse = MeasureFrameImpulse(dryFrame);
-            var blendImpulse = Math.Max(impulseAmount, frameImpulse);
-            var impactAmount = impact / 100f;
-            var frameWet = wet * (1f - blendImpulse);
-            // Impact 0 → gain 1 (sounds like the real tap). Impact 100 → near-mute.
-            var impactGain = 1f - (blendImpulse * impactAmount * 0.97f);
-
-            var dryMix = 1f - frameWet;
-            var makeup = 1f + ((RnnoiseMakeup - 1f) * frameWet);
+            var dryMix = 1f - wet;
+            var makeup = 1f + ((RnnoiseMakeup - 1f) * wet);
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
-                var mixed = ((dryFrame[index] * dryMix) + (processFrame[index] * frameWet)) * impactGain * makeup;
+                var mixed = ((dryFrame[index] * dryMix) + (processFrame[index] * wet)) * makeup;
                 if (float.IsNaN(mixed) || float.IsInfinity(mixed))
                 {
-                    mixed = dryFrame[index] * impactGain;
+                    mixed = dryFrame[index];
                 }
 
                 outputQueue.Enqueue(mixed);
@@ -320,8 +339,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
         // Speech rises together; taps jump far above the voice follower.
         var excess = peakEnvelope - (channelEnvelope * 2.8f);
-        var targetImpulse = Math.Clamp(excess / 0.18f, 0f, 1f);
-        var coeff = targetImpulse > impulseAmount ? 0.45f : 0.08f;
+        var targetImpulse = Math.Clamp(excess / 0.16f, 0f, 1f);
+        // Fast open, slow release — hold dry through the tap’s decay so no wet overlay sneaks in.
+        var coeff = targetImpulse > impulseAmount ? 0.65f : 0.012f;
         impulseAmount += (targetImpulse - impulseAmount) * coeff;
         impulseAmount = Math.Clamp(impulseAmount, 0f, 1f);
     }
@@ -342,14 +362,14 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         }
 
         var rms = MathF.Sqrt(sumSq / Math.Max(1, frame.Length));
-        if (peak < 0.04f || rms < MinEnvelope)
+        if (peak < 0.03f || rms < MinEnvelope)
         {
             return 0f;
         }
 
         var crest = peak / Math.Max(rms, MinEnvelope);
         // Speech crest is moderate; desk taps / bumps are much peakier.
-        return Math.Clamp((crest - 7.5f) / 14f, 0f, 1f);
+        return Math.Clamp((crest - 6.0f) / 12f, 0f, 1f);
     }
 
     /// <summary>
