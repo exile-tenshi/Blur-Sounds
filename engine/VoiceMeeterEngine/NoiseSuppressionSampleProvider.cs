@@ -7,16 +7,18 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Neural mic noise cancellation via RNNoise. Fixed ~10 ms frame delay, 1:1 samples.
-/// High-pass + strong wet curve so cleanup is actually audible at normal strengths.
+/// High-pass + wet mix + gentle residual floor; soft-limited so taps don't explode.
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
     private const float MinEnvelope = 1e-6f;
-    private const float NoiseLearnRate = 0.04f;
-    private const float SpeechLearnRate = 0.55f;
-    private const float RnnoiseMakeup = 1.45f;
-    /// <summary>How hard residual room tone is crushed after RNNoise (scales with intensity).</summary>
-    private const float ResidualFloorMin = 0.04f;
+    private const float NoiseLearnRate = 0.03f;
+    private const float SpeechLearnRate = 0.35f;
+    /// <summary>Light makeup only — high makeup made mic taps blast.</summary>
+    private const float RnnoiseMakeup = 1.12f;
+    /// <summary>Residual room floor when quiet (not near-mute — that pumped on taps).</summary>
+    private const float ResidualFloorMin = 0.14f;
+    private const float SoftLimitCeiling = 0.82f;
 
     private readonly ISampleProvider source;
     private readonly int channels;
@@ -32,6 +34,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float channelEnvelope = MinEnvelope;
     private float gateGain = 1f;
     private float residualGain = 1f;
+    private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
     private float strength = 88f;
@@ -146,10 +149,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                     dry = highPass.Transform(dry);
                 }
 
+                // Tame pathological input spikes before RNNoise (mic taps / bumps).
+                dry = SoftClip(dry, 0.95f);
+
                 var clean = ProcessMonoSample(dry);
 
-                // Always crush residual room tone after RNNoise when AI is on —
-                // optional Noise Gate is a harder cut; this is the ClearCast floor.
                 if (enabled)
                 {
                     UpdateResidual(Math.Abs(clean));
@@ -174,6 +178,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 {
                     clean = ApplyCompressor(clean);
                 }
+
+                clean = SoftLimit(clean);
 
                 if (!float.IsFinite(clean))
                 {
@@ -223,7 +229,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
     private void ProcessFullFrame()
     {
-        // Strength maps aggressively so mid values actually clean (65 ≈ 90% wet).
         var wet = enabled ? StrengthToWet(strength) : 0f;
         if (!enabled || wet <= 0.001f || !EnsureDenoiser())
         {
@@ -250,7 +255,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                     mixed = dryFrame[index];
                 }
 
-                outputQueue.Enqueue(Math.Clamp(mixed * makeup, -1f, 1f));
+                outputQueue.Enqueue(SoftClip(mixed * makeup, SoftLimitCeiling));
             }
         }
         catch
@@ -274,17 +279,17 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet amount. Mid intensity is nearly full RNNoise (ClearCast-like).
-    /// 40→0.90, 60→0.96, 75→0.985, 90→0.995, 100→1.0
+    /// UI 0–100 → wet. Strong but not instantaneous full-wet (avoids brittle voice).
+    /// 50→0.84, 70→0.92, 85→0.96, 100→1.0
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        return MathF.Pow(normalized, 0.22f);
+        return MathF.Pow(normalized, 0.32f);
     }
 
     /// <summary>
-    /// Soft expander after RNNoise: intensity pushes residual noise toward ResidualFloorMin.
+    /// Gentle residual floor — slow open/close so taps don't pump the gain.
     /// </summary>
     private void UpdateResidual(float abs)
     {
@@ -293,12 +298,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
         var wet = StrengthToWet(strength);
-        // Speech open threshold drops as intensity rises (catch quieter talk, kill more room).
-        var speechOpen = 0.055f - (wet * 0.028f);
-        var noiseFloor = ResidualFloorMin + ((1f - wet) * 0.2f);
+        var speechOpen = 0.048f - (wet * 0.012f);
+        var noiseFloor = ResidualFloorMin + ((1f - wet) * 0.22f);
         var target = channelEnvelope >= speechOpen ? 1f : noiseFloor;
-        // Fast open for speech, slower close so words aren't chopped.
-        var coeff = target > residualGain ? 0.45f : 0.08f + ((1f - wet) * 0.06f);
+        // Slow open prevents tap/plosive gain snaps; moderate close keeps words intact.
+        var coeff = target > residualGain ? 0.12f : 0.045f + ((1f - wet) * 0.04f);
         residualGain += (target - residualGain) * coeff;
         residualGain = Math.Clamp(residualGain, ResidualFloorMin, 1f);
     }
@@ -331,27 +335,27 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float ApplyCompressor(float sample)
     {
         var abs = Math.Abs(sample);
-        var learn = abs > compressorEnvelope ? 0.35f : 0.05f;
+        var learn = abs > compressorEnvelope ? 0.28f : 0.04f;
         compressorEnvelope = Math.Max(MinEnvelope, compressorEnvelope + ((abs - compressorEnvelope) * learn));
 
-        // Level 0–100 → mild ratio toward ~3:1 with soft threshold.
         var amount = compressorLevel / 100f;
         if (amount <= 0.001f)
         {
             return sample;
         }
 
-        var threshold = 0.22f - (amount * 0.08f);
+        var threshold = 0.24f - (amount * 0.06f);
         if (compressorEnvelope <= threshold)
         {
             return sample;
         }
 
         var over = compressorEnvelope / threshold;
-        var ratio = 1f + (amount * 2f);
+        var ratio = 1f + (amount * 1.6f);
         var gain = MathF.Pow(1f / over, 1f - (1f / ratio));
-        gain = Math.Clamp(gain, 0.35f, 1f);
-        return Math.Clamp(sample * gain * (1f + (amount * 0.12f)), -1f, 1f);
+        gain = Math.Clamp(gain, 0.45f, 1f);
+        // No extra makeup boost on compressor — that amplified taps.
+        return sample * gain;
     }
 
     private void UpdateGate(float abs)
@@ -360,14 +364,41 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
         channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
-        var thresholdLinear = MathF.Pow(10f, (-52f + (noiseGateThreshold * 0.28f)) / 20f);
-        // Harder close than before — optional gate can go near-mute between words.
-        var target = channelEnvelope >= thresholdLinear ? 1f : 0.06f;
-        var attackCoeff = 0.1f + ((100f - attack) * 0.0045f);
-        var releaseCoeff = 0.02f + ((100f - release) * 0.0014f);
+        var thresholdLinear = MathF.Pow(10f, (-50f + (noiseGateThreshold * 0.28f)) / 20f);
+        var target = channelEnvelope >= thresholdLinear ? 1f : 0.12f;
+        var attackCoeff = 0.08f + ((100f - attack) * 0.0035f);
+        var releaseCoeff = 0.018f + ((100f - release) * 0.0012f);
         var coeff = target > gateGain ? attackCoeff : releaseCoeff;
         gateGain += (target - gateGain) * coeff;
-        gateGain = Math.Clamp(gateGain, 0.06f, 1f);
+        gateGain = Math.Clamp(gateGain, 0.12f, 1f);
+    }
+
+    /// <summary>Fast peak limiter so mic taps / bumps stay listenable.</summary>
+    private float SoftLimit(float sample)
+    {
+        var abs = Math.Abs(sample);
+        var learn = abs > limiterEnvelope ? 0.55f : 0.08f;
+        limiterEnvelope = Math.Max(MinEnvelope, limiterEnvelope + ((abs - limiterEnvelope) * learn));
+
+        if (limiterEnvelope <= SoftLimitCeiling)
+        {
+            return SoftClip(sample, SoftLimitCeiling);
+        }
+
+        var gain = SoftLimitCeiling / limiterEnvelope;
+        return SoftClip(sample * gain, SoftLimitCeiling);
+    }
+
+    private static float SoftClip(float sample, float ceiling)
+    {
+        if (!float.IsFinite(sample))
+        {
+            return 0f;
+        }
+
+        var scaled = sample / Math.Max(0.05f, ceiling);
+        // Gentle tanh knee — avoids hard digital clipping on taps.
+        return ceiling * MathF.Tanh(scaled);
     }
 
     private float AverageFrame(float[] buffer, int frameOffset)
@@ -397,6 +428,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         residualGain = 1f;
         channelEnvelope = MinEnvelope;
         compressorEnvelope = MinEnvelope;
+        limiterEnvelope = MinEnvelope;
         inputQueue.Clear();
         outputQueue.Clear();
         Array.Clear(dryFrame);
