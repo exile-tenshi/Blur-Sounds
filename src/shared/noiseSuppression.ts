@@ -1,6 +1,6 @@
 export interface NoiseSuppressionSettings {
   enabled: boolean
-  /** 0–100: RNNoise dry/wet mix (100 = full neural cleanup) */
+  /** 0–100: ClearCast AI intensity (Min → Max) */
   strength: number
   /** Legacy soft-expander knob — unused by RNNoise, kept for saved settings compat */
   threshold: number
@@ -10,10 +10,14 @@ export interface NoiseSuppressionSettings {
   attack: number
   /** 0–100: optional hard-gate close speed */
   release: number
-  /** Optional hard noise gate — mutes the mic when you're silent */
+  /** Optional noise gate */
   noiseGateEnabled: boolean
-  /** 0–100: hard-gate sensitivity (higher = closes more / needs louder speech) */
+  /** 0–100: gate sensitivity */
   noiseGateThreshold: number
+  /** Optional soft compressor after AI cleanup */
+  compressorEnabled: boolean
+  /** 0–100: compressor amount (Sonar “Level”) */
+  compressorLevel: number
 }
 
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
@@ -25,6 +29,8 @@ export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   release: 40,
   noiseGateEnabled: false,
   noiseGateThreshold: 35,
+  compressorEnabled: false,
+  compressorLevel: 30,
 }
 
 export function clampNoisePercent(value: number): number {
@@ -51,17 +57,21 @@ export function normalizeNoiseSuppression(
     return { ...DEFAULT_NOISE_SUPPRESSION }
   }
 
+  const enabled = Boolean(partial.enabled)
   return {
-    enabled: Boolean(partial.enabled),
+    enabled,
     strength: clampNoisePercent(partial.strength ?? DEFAULT_NOISE_SUPPRESSION.strength),
     threshold: clampNoisePercent(partial.threshold ?? DEFAULT_NOISE_SUPPRESSION.threshold),
     highPassHz: clampHighPassHz(partial.highPassHz ?? DEFAULT_NOISE_SUPPRESSION.highPassHz),
     attack: clampNoisePercent(partial.attack ?? DEFAULT_NOISE_SUPPRESSION.attack),
     release: clampNoisePercent(partial.release ?? DEFAULT_NOISE_SUPPRESSION.release),
-    // Gate alone ducks speech in/out — only keep it when NS is actually on.
-    noiseGateEnabled: Boolean(partial.enabled) && Boolean(partial.noiseGateEnabled),
+    noiseGateEnabled: Boolean(partial.noiseGateEnabled),
     noiseGateThreshold: clampNoisePercent(
       partial.noiseGateThreshold ?? DEFAULT_NOISE_SUPPRESSION.noiseGateThreshold,
+    ),
+    compressorEnabled: enabled && Boolean(partial.compressorEnabled),
+    compressorLevel: clampNoisePercent(
+      partial.compressorLevel ?? DEFAULT_NOISE_SUPPRESSION.compressorLevel,
     ),
   }
 }
