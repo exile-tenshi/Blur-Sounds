@@ -25,6 +25,8 @@ const audioControlApi: AudioControlApi = {
   setMicrophoneNoiseSuppression: (
     payload: Parameters<AudioControlApi['setMicrophoneNoiseSuppression']>[0],
   ) => ipcRenderer.invoke(audioChannels.setMicrophoneNoiseSuppression, payload),
+  setMicrophoneEqualizer: (payload: Parameters<AudioControlApi['setMicrophoneEqualizer']>[0]) =>
+    ipcRenderer.invoke(audioChannels.setMicrophoneEqualizer, payload),
   openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
   openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
   applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),

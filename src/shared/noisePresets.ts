@@ -3,6 +3,7 @@ import {
   normalizeNoiseSuppression,
   type NoiseSuppressionSettings,
 } from './noiseSuppression.js'
+import { MIC_EQ_PRESETS, type RouteEqualizerSettings } from './audioConstants.js'
 
 export type NoiseMicKind =
   | 'vr-headset'
@@ -22,6 +23,12 @@ export interface NoisePreset {
   hint: string
   kinds: NoiseMicKind[] | 'all'
   settings: Partial<NoiseSuppressionSettings> & { enabled: true }
+  /** Optional mic EQ curve applied with this ClearCast preset. */
+  equalizer?: RouteEqualizerSettings
+}
+
+function micEq(presetId: string): RouteEqualizerSettings | undefined {
+  return MIC_EQ_PRESETS.find((preset) => preset.id === presetId)?.settings
 }
 
 export const NOISE_PRESETS: NoisePreset[] = [
@@ -41,6 +48,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 32,
     },
+    equalizer: micEq('rumble-cut'),
   },
   {
     id: 'gaming-headset',
@@ -58,6 +66,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 34,
     },
+    equalizer: micEq('headset'),
   },
   {
     id: 'boom-arm',
@@ -75,6 +84,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 34,
     },
+    equalizer: micEq('boom-arm'),
   },
   {
     id: 'desk-stand',
@@ -92,6 +102,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 36,
     },
+    equalizer: micEq('broadcast'),
   },
   {
     id: 'usb-condenser',
@@ -109,6 +120,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 32,
     },
+    equalizer: micEq('voice-clarity'),
   },
   {
     id: 'dynamic',
@@ -126,6 +138,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 28,
     },
+    equalizer: micEq('warm'),
   },
   {
     id: 'lapel',
@@ -143,6 +156,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 38,
     },
+    equalizer: micEq('voice-clarity'),
   },
   {
     id: 'laptop',
@@ -160,6 +174,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 40,
     },
+    equalizer: micEq('rumble-cut'),
   },
   {
     id: 'webcam',
@@ -177,6 +192,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 38,
     },
+    equalizer: micEq('bright'),
   },
   {
     id: 'soft',
@@ -192,6 +208,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: false,
       compressorLevel: 22,
     },
+    equalizer: micEq('flat'),
   },
   {
     id: 'balanced',
@@ -207,6 +224,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 34,
     },
+    equalizer: micEq('voice-clarity'),
   },
   {
     id: 'streaming',
@@ -224,6 +242,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 36,
     },
+    equalizer: micEq('broadcast'),
   },
   {
     id: 'aggressive',
@@ -241,6 +260,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
       compressorEnabled: true,
       compressorLevel: 42,
     },
+    equalizer: micEq('rumble-cut'),
   },
 ]
 

@@ -8,6 +8,7 @@ import type {
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
   SetMicrophoneNoiseSuppressionPayload,
+  SetMicrophoneEqualizerPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteMutedPayload,
@@ -19,6 +20,7 @@ import {
   DEFAULT_ROUTE_EQUALIZER,
   DEFAULT_INPUT_GAIN,
   equalizerSettingsToPayload,
+  normalizeMicEqualizer,
   readRouteEqualizer,
   type RouteEqualizerSettings,
 } from '../../shared/audioConstants.js'
@@ -554,6 +556,25 @@ export class RoutingStore {
       this.scheduleMixSync()
     }
 
+    return this.emitCachedSnapshot()
+  }
+
+  async setMicrophoneEqualizer(payload: SetMicrophoneEqualizerPayload): Promise<AudioSnapshot> {
+    const slots = normalizeMicrophoneSlots(this.selection)
+    const slotId = payload.slotId ?? slots.find((slot) => slot.deviceId)?.id ?? slots[0]?.id
+
+    if (!slotId) {
+      return this.emitCachedSnapshot()
+    }
+
+    this.selection = {
+      ...this.selection,
+      microphones: updateMicrophoneSlot(slots, slotId, {
+        equalizer: normalizeMicEqualizer(payload.equalizer),
+      }),
+    }
+
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 

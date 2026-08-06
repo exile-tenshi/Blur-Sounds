@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  DEFAULT_MIC_EQUALIZER,
+  MIC_EQ_BAND_LABELS,
+  MIC_EQ_PRESETS,
+  MIC_EQ_REGION_LABELS,
+  normalizeMicEqualizer,
+  type RouteEqualizerSettings,
+} from '../../shared/audioConstants'
+import {
   applyNoisePreset,
   micKindLabel,
   NOISE_PRESETS,
@@ -9,6 +17,7 @@ import {
 import { normalizeNoiseSuppression, type NoiseSuppressionSettings } from '../../shared/noiseSuppression'
 import type { AudioDevice, MicrophoneSlot } from '../../shared/audioTypes'
 import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots'
+import { GraphicalEqualizer } from './GraphicalEqualizer'
 
 interface NoiseSuppressionSectionProps {
   selectionMicrophones: MicrophoneSlot[] | undefined
@@ -18,6 +27,7 @@ interface NoiseSuppressionSectionProps {
   onEnsureDevice: (deviceId: string) => Promise<string | undefined>
   onChange: (slotId: string, settings: Partial<NoiseSuppressionSettings>) => Promise<void>
   onSelectDeviceForSlot: (slotId: string, deviceId: string) => Promise<void>
+  onSetEqualizer: (slotId: string, equalizer: RouteEqualizerSettings) => Promise<void>
   onRemoveSlot?: (slotId: string) => Promise<void>
 }
 
@@ -429,6 +439,7 @@ function MicNoiseCard({
   engineActive,
   onChange,
   onSelectDevice,
+  onSetEqualizer,
 }: {
   slot: MicrophoneSlot
   deviceName: string
@@ -437,6 +448,7 @@ function MicNoiseCard({
   engineActive: boolean
   onChange: (settings: Partial<NoiseSuppressionSettings>) => Promise<void>
   onSelectDevice: (deviceId: string) => Promise<void>
+  onSetEqualizer: (equalizer: RouteEqualizerSettings) => Promise<void>
 }) {
   const settings = normalizeNoiseSuppression(slot.noiseSuppressionSettings ?? slot.noiseSuppression)
   const presets = presetsForMic(deviceName)
@@ -470,6 +482,9 @@ function MicNoiseCard({
     setActivePresetId(preset.id)
     setAutoGate(false)
     void onChange(applyNoisePreset(preset))
+    if (preset.equalizer) {
+      void onSetEqualizer(normalizeMicEqualizer(preset.equalizer))
+    }
   }
 
   const starCurrentPreset = () => {
@@ -727,6 +742,22 @@ function MicNoiseCard({
           }}
         />
       </section>
+
+      <section className="clearcast-module clearcast-equalizer">
+        <GraphicalEqualizer
+          title="Equalizer"
+          value={normalizeMicEqualizer(slot.equalizer ?? DEFAULT_MIC_EQUALIZER)}
+          disabled={!slot.deviceId}
+          alwaysEditable
+          bandLabels={MIC_EQ_BAND_LABELS}
+          regionLabels={MIC_EQ_REGION_LABELS}
+          presets={MIC_EQ_PRESETS}
+          onChange={(equalizer) => {
+            setActivePresetId(null)
+            void onSetEqualizer(equalizer)
+          }}
+        />
+      </section>
     </div>
   )
 }
@@ -739,6 +770,7 @@ export function NoiseSuppressionSection({
   onEnsureDevice,
   onChange,
   onSelectDeviceForSlot,
+  onSetEqualizer,
 }: NoiseSuppressionSectionProps) {
   const slots = useMemo(
     () => normalizeMicrophoneSlots({ microphones: selectionMicrophones }),
@@ -802,6 +834,7 @@ export function NoiseSuppressionSection({
             engineActive={engineActive}
             onChange={(settings) => onChange(primarySlot.id, settings)}
             onSelectDevice={(deviceId) => onSelectDeviceForSlot(primarySlot.id, deviceId)}
+            onSetEqualizer={(equalizer) => onSetEqualizer(primarySlot.id, equalizer)}
           />
         )}
       </div>

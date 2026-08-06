@@ -1,4 +1,5 @@
 import type { NoiseSuppressionSettings } from './noiseSuppression.js'
+import type { RouteEqualizerSettings } from './audioConstants.js'
 
 export type { NoiseSuppressionSettings }
 
@@ -62,6 +63,8 @@ export interface MicrophoneSlot {
   /** @deprecated use noiseSuppressionSettings.enabled */
   noiseSuppression?: boolean
   noiseSuppressionSettings?: NoiseSuppressionSettings
+  /** Six-band mic equalizer (ClearCast / Sonar-style). */
+  equalizer?: RouteEqualizerSettings
 }
 
 export interface DeviceSelection {
@@ -189,12 +192,15 @@ export interface SetMicrophoneNoiseSuppressionPayload {
   settings?: Partial<NoiseSuppressionSettings>
 }
 
+export interface SetMicrophoneEqualizerPayload {
+  slotId?: string
+  equalizer: RouteEqualizerSettings
+}
+
 export interface SetRouteVolumePayload {
   routeId: string
   volume: number
 }
-
-import type { RouteEqualizerSettings } from './audioConstants.js'
 
 export interface SetRouteEqualizerPayload {
   routeId: string

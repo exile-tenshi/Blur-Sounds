@@ -35,6 +35,7 @@ internal sealed class AudioEngine : IDisposable
     private sealed class MicMixEntry
     {
         public required PausedAwareMixInput MixInput { get; init; }
+        public required EqualizerSampleProvider Equalizer { get; init; }
     }
 
     private sealed class AppMixEntry
@@ -536,7 +537,8 @@ internal sealed class AudioEngine : IDisposable
     private void AttachMicrophoneToMixer(string slotId, MicSource mic)
     {
         var block = new FullBlockSampleProvider(mic.SampleProvider);
-        var input = new PausedAwareMixInput(() => mic.IsMuted, block);
+        var equalizer = new EqualizerSampleProvider(block);
+        var input = new PausedAwareMixInput(() => mic.IsMuted, equalizer);
 
         lock (mixLock)
         {
@@ -549,7 +551,16 @@ internal sealed class AudioEngine : IDisposable
             microphoneMixEntries[slotId] = new MicMixEntry
             {
                 MixInput = input,
+                Equalizer = equalizer,
             };
+        }
+
+        var slot = SelectionNormalizer
+            .GetMicrophoneSlotSettings(selection)
+            .FirstOrDefault(item => string.Equals(item.SlotId, slotId, StringComparison.Ordinal));
+        if (slot is not null)
+        {
+            ApplyMicrophoneEqualizer(equalizer, slot);
         }
     }
 
@@ -980,7 +991,30 @@ internal sealed class AudioEngine : IDisposable
             source.SetVolume(Math.Clamp(slot.Volume, 0f, 4f));
             source.SetMuted(slot.Muted);
             ApplyNoiseSuppressionSettings(source, slot);
+            if (microphoneMixEntries.TryGetValue(slot.SlotId, out var mixEntry))
+            {
+                ApplyMicrophoneEqualizer(mixEntry.Equalizer, slot);
+            }
         }
+    }
+
+    private static void ApplyMicrophoneEqualizer(EqualizerSampleProvider equalizer, MicrophoneSlotConfig slot)
+    {
+        var eq = slot.Equalizer;
+        if (eq is null)
+        {
+            equalizer.SetEqualizer(true, 0f, 0f, 0f, 0f, 0f, 0f);
+            return;
+        }
+
+        equalizer.SetEqualizer(
+            eq.Enabled,
+            eq.Band60Db,
+            eq.Band150Db,
+            eq.Band400Db,
+            eq.Band1000Db,
+            eq.Band2400Db,
+            eq.Band15000Db);
     }
 
     private static void ApplyNoiseSuppressionSettings(MicSource source, MicrophoneSlotConfig slot)
