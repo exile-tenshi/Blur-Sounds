@@ -180,24 +180,25 @@ internal static partial class HifiCableFormatConfigurator
     private static HifiCableEndpointStatus ReadEndpointStatus(MMDevice endpoint, string registryKind)
     {
         var format = TryReadEndpointFormat(endpoint);
-        var hasRegistryStudio = HasRegistryStudioFormat(endpoint.ID, registryKind);
         var exclusiveMode = IsExclusiveModeEnabled(endpoint.ID, registryKind);
-        var formatMatches = hasRegistryStudio ||
-                            (format is not null && HifiCableFormat.IsEngineCleanFormat(format));
-        var atStudioQuality = formatMatches;
+        // Bit-perfect Hi-Fi Cable: only the live MixFormat matters. Registry blobs can
+        // claim 48 kHz while MixFormat is still 384 kHz — that combination is silent.
+        var atStudioQuality = format is not null && HifiCableFormat.IsEngineCleanFormat(format);
 
         return new HifiCableEndpointStatus
         {
             DeviceName = endpoint.FriendlyName,
-            SampleRate = format?.SampleRate ?? (hasRegistryStudio ? HifiCableFormat.EngineCleanSampleRate : 0),
-            BitsPerSample = format?.BitsPerSample ?? (hasRegistryStudio ? HifiCableFormat.HiFiEngineBitsPerSample : 0),
+            SampleRate = format?.SampleRate ?? 0,
+            BitsPerSample = format is null
+                ? 0
+                : HifiCableFormat.IsEngineCleanFormat(format)
+                    ? HifiCableFormat.HiFiEngineBitsPerSample
+                    : WaveFormatUtility.GetEffectiveBitsPerSample(format),
             ExclusiveModeEnabled = exclusiveMode,
             AtStudioQuality = atStudioQuality,
-            FormatLabel = hasRegistryStudio
-                ? HifiCableFormat.EngineCleanDescription
-                : format is null
-                    ? "unknown format"
-                    : HifiCableFormat.DescribeDeviceFormat(format),
+            FormatLabel = format is null
+                ? "unknown format"
+                : HifiCableFormat.DescribeDeviceFormat(format),
         };
     }
 
@@ -266,22 +267,30 @@ internal static partial class HifiCableFormatConfigurator
 
     private static void ConfigureEndpoint(IPolicyConfig policyConfig, MMDevice endpoint, string registryKind)
     {
-        if (IsEngineMatchedQuality(endpoint, registryKind))
+        if (string.Equals(registryKind, "Capture", StringComparison.OrdinalIgnoreCase))
         {
-            TryEnableExclusiveMode(endpoint.ID, registryKind);
-            return;
+            HifiCableListenThrough.Disable(endpoint);
+            HifiCableEndpointVolume.EnsureCaptureUnmuted(endpoint);
+        }
+        else
+        {
+            HifiCableEndpointVolume.EnsurePlaybackAudible(endpoint);
         }
 
-        if (TryApplyRegistryStudioFormat(endpoint.ID, registryKind) &&
-            (IsEngineMatchedQuality(endpoint, registryKind) || HasRegistryStudioFormat(endpoint.ID, registryKind)))
+        if (IsEngineMatchedQuality(endpoint))
         {
-            TryEnableExclusiveMode(endpoint.ID, registryKind);
+            _ = TryApplyRegistryStudioFormat(endpoint.ID, registryKind);
+            TryDisableExclusiveMode(policyConfig, endpoint.ID, registryKind);
             return;
         }
 
         Exception? lastError = null;
+
+        // Registry write first (persists Default Format), then PolicyConfig with real WAVEFORMATEX.
+        _ = TryApplyRegistryStudioFormat(endpoint.ID, registryKind);
+
         var pointers = PolicyConfigInterop
-            .CreateStudioFormatPointers(
+            .CreateRawStudioFormatPointers(
                 HifiCableFormat.EngineCleanSampleRate,
                 HifiCableFormat.HiFiEngineBitsPerSample,
                 HifiCableFormat.MaxChannels)
@@ -292,16 +301,16 @@ internal static partial class HifiCableFormatConfigurator
             foreach (var formatPointer in pointers)
             {
                 var result = policyConfig.SetDeviceFormat(endpoint.ID, formatPointer, formatPointer);
-                if (result >= 0 && IsEngineMatchedQuality(endpoint, registryKind))
+                if (result >= 0 && IsEngineMatchedQuality(endpoint))
                 {
-                    TryEnableExclusiveMode(endpoint.ID, registryKind);
+                    TryDisableExclusiveMode(policyConfig, endpoint.ID, registryKind);
                     return;
                 }
 
                 if (result < 0)
                 {
                     lastError = new InvalidOperationException(
-                        $"Set studio format on {endpoint.FriendlyName} failed (HRESULT 0x{result:X8}).");
+                        $"Set clean format on {endpoint.FriendlyName} failed (HRESULT 0x{result:X8}).");
                 }
             }
         }
@@ -313,37 +322,32 @@ internal static partial class HifiCableFormatConfigurator
             }
         }
 
-        if (TryApplyRegistryStudioFormat(endpoint.ID, registryKind) &&
-            (IsEngineMatchedQuality(endpoint, registryKind) || HasRegistryStudioFormat(endpoint.ID, registryKind)))
+        // Re-read after registry + PolicyConfig — MixFormat is the only truth.
+        if (IsEngineMatchedQuality(endpoint))
         {
-            TryEnableExclusiveMode(endpoint.ID, registryKind);
+            TryDisableExclusiveMode(policyConfig, endpoint.ID, registryKind);
             return;
         }
 
-        if (IsEngineMatchedQuality(endpoint, registryKind))
-        {
-            TryEnableExclusiveMode(endpoint.ID, registryKind);
-            return;
-        }
-
+        var live = TryReadEndpointFormat(endpoint);
+        var liveLabel = live is null ? "unknown" : HifiCableFormat.DescribeDeviceFormat(live);
         throw lastError ??
               new InvalidOperationException(
-                  $"Set clean audio format on {endpoint.FriendlyName} failed. Run Blur Sounds as administrator or set {HifiCableFormat.HiFiEngineBitsPerSample} bit, {HifiCableFormat.EngineCleanSampleRate} Hz manually in Windows Sound.");
+                  $"Set clean audio format on {endpoint.FriendlyName} failed (still {liveLabel}). " +
+                  $"Open Windows Sound → Advanced and set both Hi-Fi Cable Input and Output to " +
+                  $"{HifiCableFormat.HiFiEngineBitsPerSample} bit, {HifiCableFormat.EngineCleanSampleRate} Hz, then Refresh.");
     }
 
-    private static bool IsEngineMatchedQuality(MMDevice endpoint, string registryKind)
+    /// <summary>Live MixFormat must be 48 kHz clean — registry alone is not enough.</summary>
+    private static bool IsEngineMatchedQuality(MMDevice endpoint)
     {
-        if (HasRegistryStudioFormat(endpoint.ID, registryKind))
-        {
-            return true;
-        }
-
         try
         {
             var format = endpoint.AudioClient.MixFormat;
-            return format.SampleRate == HifiCableFormat.EngineCleanSampleRate &&
-                   format.BitsPerSample >= HifiCableFormat.HiFiEngineBitsPerSample &&
-                   format.Channels == HifiCableFormat.MaxChannels;
+            return HifiCableFormat.IsEngineCleanFormat(format) ||
+                   (format.SampleRate == HifiCableFormat.EngineCleanSampleRate &&
+                    format.Channels == HifiCableFormat.MaxChannels &&
+                    WaveFormatUtility.GetEffectiveBitsPerSample(format) >= HifiCableFormat.HiFiEngineBitsPerSample);
         }
         catch
         {
@@ -417,8 +421,9 @@ internal static partial class HifiCableFormatConfigurator
                 HifiCableStudioFormatBlob.DeviceFormatPropertyName,
                 HifiCableStudioFormatBlob.RegistryPropertyBlob,
                 RegistryValueKind.Binary);
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 1, RegistryValueKind.DWord);
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 1, RegistryValueKind.DWord);
+            // Shared mode — Discord/OBS capture Hi-Fi Cable Output without exclusive steal.
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 0, RegistryValueKind.DWord);
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 0, RegistryValueKind.DWord);
             return true;
         }
         catch
@@ -427,8 +432,26 @@ internal static partial class HifiCableFormatConfigurator
         }
     }
 
-    private static void TryEnableExclusiveMode(string endpointId, string registryKind)
+    /// <summary>
+    /// Force shared mode for Hi-Fi Cable. Discord/OBS and our Output keep-alive need shared
+    /// capture; exclusive-allowed flags in Windows Sound often leave the cable silent.
+    /// </summary>
+    private static void TryDisableExclusiveMode(IPolicyConfig policyConfig, string endpointId, string registryKind)
     {
+        // PolicyConfig share mode: 0 = shared.
+        try
+        {
+            var shared = 0;
+            _ = policyConfig.SetShareMode(endpointId, ref shared);
+        }
+        catch
+        {
+            // Older PolicyConfig hosts may reject SetShareMode.
+        }
+
+        TrySetExclusiveProperty(policyConfig, endpointId, propertyId: 5, value: 0);
+        TrySetExclusiveProperty(policyConfig, endpointId, propertyId: 6, value: 0);
+
         var guid = ExtractEndpointGuid(endpointId);
         if (guid is null)
         {
@@ -446,12 +469,34 @@ internal static partial class HifiCableFormatConfigurator
                 return;
             }
 
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 1, RegistryValueKind.DWord);
-            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 1, RegistryValueKind.DWord);
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusiveModePropertyName, 0, RegistryValueKind.DWord);
+            propertiesKey.SetValue(HifiCableStudioFormatBlob.ExclusivePriorityPropertyName, 0, RegistryValueKind.DWord);
         }
         catch
         {
-            // Exclusive-mode registry writes can require elevation.
+            // Registry writes can require elevation — PolicyConfig path above still helps.
+        }
+    }
+
+    private static void TrySetExclusiveProperty(IPolicyConfig policyConfig, string endpointId, int propertyId, uint value)
+    {
+        try
+        {
+            var key = new PolicyPropertyKey
+            {
+                FormatId = new Guid("1da5d803-d492-4edd-8c48-e04b1dcbe66a"),
+                PropertyId = propertyId,
+            };
+            var prop = new PolicyPropVariant
+            {
+                VariantType = 19, // VT_UI4
+                UIntValue = value,
+            };
+            _ = policyConfig.SetPropertyValue(endpointId, false, ref key, ref prop);
+        }
+        catch
+        {
+            // Property writes are best-effort.
         }
     }
 

@@ -2,6 +2,7 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Zero-fills short reads so downstream always receives full blocks.
+/// Hold-last was tried for crackle reduction but caused buzz/static under underrun.
 /// </summary>
 internal sealed class SampleGapFill
 {

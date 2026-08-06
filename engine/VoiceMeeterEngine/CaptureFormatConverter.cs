@@ -125,10 +125,9 @@ internal static class CaptureFormatConverter
         int destinationOffset)
     {
         var sampleCount = byteCount / 4;
-
-        for (var index = 0; index < sampleCount; index++)
+        if (sampleCount > 0)
         {
-            destination[destinationOffset + index] = BitConverter.ToSingle(source, offset + (index * 4));
+            Buffer.BlockCopy(source, offset, destination, destinationOffset * sizeof(float), sampleCount * sizeof(float));
         }
 
         return sampleCount;
