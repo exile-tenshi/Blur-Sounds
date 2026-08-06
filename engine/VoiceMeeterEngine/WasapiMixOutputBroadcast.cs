@@ -152,7 +152,7 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
                     var bindFormat = boundIsHiFi
                         ? ToWasapiOutSafeFormat(ResolveBindFormat(attemptDevice, attempt.Format))
                         : attempt.Format;
-                    var outputSource = CreateOutputSource(delegatingSource, bindFormat);
+                    var outputSource = CreateOutputSource(delegatingSource, bindFormat, isHiFi: boundIsHiFi);
                     var waveProvider = new FullBlockWaveProvider(
                         OutputWaveProviderFactory.Create(outputSource, bindFormat));
                     var latencyMilliseconds = boundIsHiFi
@@ -253,11 +253,18 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
             Math.Max(1, attemptFormat.Channels));
     }
 
-    private static ISampleProvider CreateOutputSource(ISampleProvider source, WaveFormat outputFormat)
+    private static ISampleProvider CreateOutputSource(
+        ISampleProvider source,
+        WaveFormat outputFormat,
+        bool isHiFi)
     {
-        var staged = new OutputStageSampleProvider(
-            source,
-            bufferMilliseconds: LatencyTuning.OutputStageBufferMilliseconds);
+        // Match Test cable for Hi-Fi: tone → (optional resample) → WasapiOut, no OutputStage.
+        // OutputStage buffering has left the live mix silent on some hosts while Test still passed.
+        ISampleProvider staged = isHiFi
+            ? source
+            : new OutputStageSampleProvider(
+                source,
+                bufferMilliseconds: LatencyTuning.OutputStageBufferMilliseconds);
 
         if (outputFormat.SampleRate == staged.WaveFormat.SampleRate)
         {
