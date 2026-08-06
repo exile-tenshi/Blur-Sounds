@@ -22,15 +22,15 @@ export interface NoiseSuppressionSettings {
 
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
-  strength: 72,
+  strength: 88,
   threshold: 55,
-  highPassHz: 85,
-  attack: 55,
-  release: 40,
+  highPassHz: 100,
+  attack: 58,
+  release: 44,
   noiseGateEnabled: false,
-  noiseGateThreshold: 35,
-  compressorEnabled: false,
-  compressorLevel: 30,
+  noiseGateThreshold: 40,
+  compressorEnabled: true,
+  compressorLevel: 34,
 }
 
 export function clampNoisePercent(value: number): number {

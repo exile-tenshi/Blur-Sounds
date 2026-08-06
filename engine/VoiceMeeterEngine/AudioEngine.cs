@@ -1262,8 +1262,6 @@ internal sealed class AudioEngine : IDisposable
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
             var bind = outputBroadcast?.BindingDescription;
             var bindSuffix = string.IsNullOrWhiteSpace(bind) ? string.Empty : $" ({bind})";
-            var mixPeak = mixMeter?.Peak ?? 0f;
-            var pullPeak = OutputPullMeter.Peak;
             string hifiSuffix;
             if (!UsesHifiCableInput())
             {
