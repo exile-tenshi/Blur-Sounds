@@ -35,6 +35,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float noiseGateThreshold = 35f;
     private float attack = 55f;
     private float release = 40f;
+    private bool compressorEnabled;
+    private float compressorLevel = 30f;
+    private float compressorEnvelope = MinEnvelope;
 
     public NoiseSuppressionSampleProvider(ISampleProvider source)
     {
@@ -54,6 +57,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             if (!nextEnabled)
             {
                 noiseGateEnabled = false;
+                compressorEnabled = false;
             }
 
             if (!IsProcessingActive)
@@ -75,18 +79,22 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         float nextAttack,
         float nextRelease,
         bool nextNoiseGateEnabled = false,
-        float nextNoiseGateThreshold = 35f)
+        float nextNoiseGateThreshold = 35f,
+        bool nextCompressorEnabled = false,
+        float nextCompressorLevel = 30f)
     {
         lock (gate)
         {
             _ = nextThreshold;
 
             enabled = nextEnabled;
-            noiseGateEnabled = nextEnabled && nextNoiseGateEnabled;
+            noiseGateEnabled = nextNoiseGateEnabled;
+            compressorEnabled = nextEnabled && nextCompressorEnabled;
             strength = Math.Clamp(nextStrength, 0f, 100f);
             attack = Math.Clamp(nextAttack, 0f, 100f);
             release = Math.Clamp(nextRelease, 0f, 100f);
             noiseGateThreshold = Math.Clamp(nextNoiseGateThreshold, 0f, 100f);
+            compressorLevel = Math.Clamp(nextCompressorLevel, 0f, 100f);
 
             var clampedHighPass = Math.Clamp(nextHighPassHz, 40f, 220f);
             if (Math.Abs(clampedHighPass - highPassHz) >= 0.5f)
@@ -145,6 +153,16 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 else
                 {
                     gateGain = 1f;
+                }
+
+                if (compressorEnabled)
+                {
+                    clean = ApplyCompressor(clean);
+                }
+
+                if (!float.IsFinite(clean))
+                {
+                    clean = 0f;
                 }
 
                 for (var channel = 0; channel < channels; channel++)
@@ -275,6 +293,32 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         }
     }
 
+    private float ApplyCompressor(float sample)
+    {
+        var abs = Math.Abs(sample);
+        var learn = abs > compressorEnvelope ? 0.35f : 0.05f;
+        compressorEnvelope = Math.Max(MinEnvelope, compressorEnvelope + ((abs - compressorEnvelope) * learn));
+
+        // Level 0–100 → mild ratio toward ~3:1 with soft threshold.
+        var amount = compressorLevel / 100f;
+        if (amount <= 0.001f)
+        {
+            return sample;
+        }
+
+        var threshold = 0.22f - (amount * 0.08f);
+        if (compressorEnvelope <= threshold)
+        {
+            return sample;
+        }
+
+        var over = compressorEnvelope / threshold;
+        var ratio = 1f + (amount * 2f);
+        var gain = MathF.Pow(1f / over, 1f - (1f / ratio));
+        gain = Math.Clamp(gain, 0.35f, 1f);
+        return Math.Clamp(sample * gain * (1f + (amount * 0.12f)), -1f, 1f);
+    }
+
     private void UpdateGate(float abs)
     {
         var previous = channelEnvelope;
@@ -315,6 +359,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     {
         gateGain = 1f;
         channelEnvelope = MinEnvelope;
+        compressorEnvelope = MinEnvelope;
         inputQueue.Clear();
         outputQueue.Clear();
         Array.Clear(dryFrame);
