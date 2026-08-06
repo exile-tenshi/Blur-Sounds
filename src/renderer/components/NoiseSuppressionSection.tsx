@@ -22,16 +22,48 @@ interface NoiseSuppressionSectionProps {
   onRemoveSlot?: (slotId: string) => Promise<void>
 }
 
+const FAVORITES_KEY = 'blur-sounds.clearcast-favorites'
+const FAVORITE_SLOTS = 9
+
+function loadFavorites(): Array<string | null> {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY)
+    if (!raw) {
+      return Array.from({ length: FAVORITE_SLOTS }, () => null)
+    }
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) {
+      return Array.from({ length: FAVORITE_SLOTS }, () => null)
+    }
+    return Array.from({ length: FAVORITE_SLOTS }, (_, index) =>
+      typeof parsed[index] === 'string' ? parsed[index] : null,
+    )
+  } catch {
+    return Array.from({ length: FAVORITE_SLOTS }, () => null)
+  }
+}
+
+function saveFavorites(favorites: Array<string | null>) {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites))
+}
+
+/** Map 0–100 gate knob → Sonar-style dB readout. */
+function gateThresholdToDb(percent: number): number {
+  return -80 + percent * 0.6
+}
+
+function gateDbToThreshold(db: number): number {
+  return Math.max(0, Math.min(100, Math.round((db + 80) / 0.6)))
+}
+
 function SonarToggle({
   checked,
   disabled,
   onChange,
-  label,
 }: {
   checked: boolean
   disabled?: boolean
   onChange: (checked: boolean) => void
-  label: string
 }) {
   return (
     <label className={`clearcast-toggle${checked ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}`}>
@@ -42,7 +74,6 @@ function SonarToggle({
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="clearcast-toggle-track" aria-hidden="true" />
-      <span className="clearcast-toggle-label">{label}</span>
     </label>
   )
 }
@@ -71,7 +102,6 @@ function IntensitySlider({
     <div className={`clearcast-intensity${disabled ? ' is-disabled' : ''}`}>
       <div className="clearcast-intensity-labels">
         <span>Min</span>
-        <span>Intensity</span>
         <span>Max</span>
       </div>
       <input
@@ -81,6 +111,7 @@ function IntensitySlider({
         step={1}
         value={localValue}
         disabled={disabled}
+        aria-label="ClearCast AI intensity"
         onPointerDown={() => {
           isDraggingRef.current = true
         }}
@@ -141,19 +172,21 @@ function WaveVisualizer({
 
       const mid = height / 2
       const amplitude = activeRef.current
-        ? Math.max(4, levelRef.current * (height * 0.42))
-        : 3
-      phaseRef.current += activeRef.current ? 0.18 + levelRef.current * 0.35 : 0.04
+        ? Math.max(5, levelRef.current * (height * 0.44))
+        : 2.5
+      phaseRef.current += activeRef.current ? 0.2 + levelRef.current * 0.4 : 0.03
 
       context.beginPath()
-      context.strokeStyle = activeRef.current ? '#4ade80' : '#475569'
-      context.lineWidth = 2.5
+      context.strokeStyle = activeRef.current ? '#3dd68c' : '#3f4b5a'
+      context.lineWidth = 2.4
       context.lineJoin = 'round'
+      context.shadowColor = activeRef.current ? 'rgba(61, 214, 140, 0.35)' : 'transparent'
+      context.shadowBlur = activeRef.current ? 8 : 0
 
       for (let x = 0; x < width; x += 2) {
         const wave =
-          Math.sin(x * 0.045 + phaseRef.current) * amplitude +
-          Math.sin(x * 0.11 + phaseRef.current * 1.7) * (amplitude * 0.35)
+          Math.sin(x * 0.05 + phaseRef.current) * amplitude +
+          Math.sin(x * 0.13 + phaseRef.current * 1.6) * (amplitude * 0.32)
         const y = mid + wave
         if (x === 0) {
           context.moveTo(x, y)
@@ -162,6 +195,7 @@ function WaveVisualizer({
         }
       }
       context.stroke()
+      context.shadowBlur = 0
 
       frameId = window.requestAnimationFrame(draw)
     }
@@ -170,7 +204,222 @@ function WaveVisualizer({
     return () => window.cancelAnimationFrame(frameId)
   }, [])
 
-  return <canvas ref={canvasRef} className="clearcast-wave" width={220} height={72} aria-hidden="true" />
+  return <canvas ref={canvasRef} className="clearcast-wave" width={260} height={80} aria-hidden="true" />
+}
+
+function ModuleSlider({
+  label,
+  valueLabel,
+  value,
+  min = 0,
+  max = 100,
+  step = 1,
+  disabled,
+  onChange,
+}: {
+  label: string
+  valueLabel: string
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  disabled?: boolean
+  onChange?: (value: number) => void
+}) {
+  return (
+    <label className={`clearcast-module-slider${disabled ? ' is-disabled' : ''}`}>
+      <span>
+        {label}
+        <strong>{valueLabel}</strong>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled || !onChange}
+        onChange={(event) => onChange?.(Number(event.target.value))}
+      />
+    </label>
+  )
+}
+
+async function resolveBrowserMicId(deviceName: string): Promise<string | undefined> {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return undefined
+  }
+
+  // Unlock labels in Chromium/Electron before matching by name.
+  try {
+    const probe = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    probe.getTracks().forEach((track) => track.stop())
+  } catch {
+    // Continue — labels may still be empty, match will fall back to default.
+  }
+
+  const inputs = (await navigator.mediaDevices.enumerateDevices()).filter(
+    (device) => device.kind === 'audioinput',
+  )
+  if (inputs.length === 0) {
+    return undefined
+  }
+
+  const normalized = deviceName.trim().toLowerCase()
+  const exact = inputs.find((device) => device.label.trim().toLowerCase() === normalized)
+  if (exact?.deviceId) {
+    return exact.deviceId
+  }
+
+  const partial = inputs.find(
+    (device) =>
+      device.label &&
+      (normalized.includes(device.label.trim().toLowerCase()) ||
+        device.label.trim().toLowerCase().includes(normalized.split('(')[0]?.trim() ?? '')),
+  )
+  return partial?.deviceId ?? inputs[0]?.deviceId
+}
+
+function MicTestBox({
+  deviceName,
+  disabled,
+}: {
+  deviceName: string
+  disabled?: boolean
+}) {
+  const [phase, setPhase] = useState<'idle' | 'recording' | 'ready' | 'playing'>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const objectUrlRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    return () => {
+      mediaRecorderRef.current?.stop()
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+      }
+      audioRef.current?.pause()
+    }
+  }, [])
+
+  const stopTracks = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+  }
+
+  const startRecording = async () => {
+    if (!deviceName || disabled) {
+      return
+    }
+
+    setError(null)
+    try {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+        objectUrlRef.current = null
+      }
+      audioRef.current?.pause()
+
+      const browserDeviceId = await resolveBrowserMicId(deviceName)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(browserDeviceId ? { deviceId: { ideal: browserDeviceId } } : {}),
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+        video: false,
+      })
+      streamRef.current = stream
+      chunksRef.current = []
+
+      const recorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data)
+        }
+      }
+      recorder.onstop = () => {
+        stopTracks()
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        objectUrlRef.current = URL.createObjectURL(blob)
+        setPhase('ready')
+      }
+      recorder.start()
+      setPhase('recording')
+
+      window.setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop()
+        }
+      }, 3500)
+    } catch {
+      stopTracks()
+      setPhase('idle')
+      setError('Mic access blocked')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop()
+    }
+  }
+
+  const playRecording = async () => {
+    if (!objectUrlRef.current) {
+      return
+    }
+    const audio = audioRef.current ?? new Audio()
+    audioRef.current = audio
+    audio.src = objectUrlRef.current
+    setPhase('playing')
+    try {
+      await audio.play()
+      audio.onended = () => setPhase('ready')
+    } catch {
+      setPhase('ready')
+      setError('Playback failed')
+    }
+  }
+
+  return (
+    <div className={`clearcast-test${disabled ? ' is-disabled' : ''}`}>
+      <span className="clearcast-test-label">Test</span>
+      <div className="clearcast-test-actions">
+        <button
+          type="button"
+          className={`clearcast-test-record${phase === 'recording' ? ' is-active' : ''}`}
+          disabled={disabled || !deviceName || phase === 'playing'}
+          title={phase === 'recording' ? 'Stop test recording' : 'Record a short mic test'}
+          aria-label={phase === 'recording' ? 'Stop test recording' : 'Record mic test'}
+          onClick={() => {
+            if (phase === 'recording') {
+              stopRecording()
+            } else {
+              void startRecording()
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="clearcast-test-play"
+          disabled={disabled || (phase !== 'ready' && phase !== 'playing')}
+          title="Play test recording"
+          aria-label="Play test recording"
+          onClick={() => {
+            void playRecording()
+          }}
+        />
+      </div>
+      {error ? <p className="clearcast-test-error">{error}</p> : null}
+    </div>
+  )
 }
 
 function MicNoiseCard({
@@ -195,7 +444,11 @@ function MicNoiseCard({
   const presets = presetsForMic(deviceName)
   const recommended = recommendedPresetForMic(deviceName)
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
+  const [favorites, setFavorites] = useState<Array<string | null>>(() => loadFavorites())
+  const [autoGate, setAutoGate] = useState(false)
   const liveLevel = engineActive && !slot.muted ? microphoneLevel : 0
+  const gateDb = gateThresholdToDb(settings.noiseGateThreshold)
+  const favoriteCount = favorites.filter(Boolean).length
 
   const selectedPresetId =
     activePresetId ??
@@ -203,30 +456,64 @@ function MicNoiseCard({
     presets[0]?.id ??
     ''
 
+  const applyPresetId = (presetId: string) => {
+    const preset = NOISE_PRESETS.find((item) => item.id === presetId)
+    if (!preset) {
+      return
+    }
+    setActivePresetId(preset.id)
+    setAutoGate(false)
+    void onChange(applyNoisePreset(preset))
+  }
+
+  const starCurrentPreset = () => {
+    if (!selectedPresetId) {
+      return
+    }
+    const next = [...favorites]
+    const existing = next.findIndex((id) => id === selectedPresetId)
+    if (existing >= 0) {
+      next[existing] = null
+    } else {
+      const empty = next.findIndex((id) => id == null)
+      if (empty < 0) {
+        return
+      }
+      next[empty] = selectedPresetId
+    }
+    setFavorites(next)
+    saveFavorites(next)
+  }
+
   return (
     <div className="clearcast-shell">
       <div className="clearcast-preset-bar">
         <label className="clearcast-preset-field">
           <span>Preset</span>
-          <select
-            value={selectedPresetId}
-            disabled={!slot.deviceId}
-            onChange={(event) => {
-              const preset = NOISE_PRESETS.find((item) => item.id === event.target.value)
-              if (!preset) {
-                return
-              }
-              setActivePresetId(preset.id)
-              void onChange(applyNoisePreset(preset))
-            }}
-          >
-            {presets.map((preset) => (
-              <option key={preset.id} value={preset.id}>
-                {preset.label}
-                {preset.id === recommended.id ? ' (suggested)' : ''}
-              </option>
-            ))}
-          </select>
+          <div className="clearcast-preset-select-row">
+            <select
+              value={selectedPresetId}
+              disabled={!slot.deviceId}
+              onChange={(event) => applyPresetId(event.target.value)}
+            >
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                  {preset.id === recommended.id ? ' (suggested)' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="clearcast-fav-star"
+              disabled={!slot.deviceId || !selectedPresetId}
+              title="Add preset to favorites"
+              aria-label="Favorite preset"
+              onClick={starCurrentPreset}
+            >
+              ★
+            </button>
+          </div>
         </label>
 
         <label className="clearcast-preset-field clearcast-device-field">
@@ -249,19 +536,53 @@ function MicNoiseCard({
           </select>
         </label>
 
-        <p className="clearcast-mic-kind muted">{micKindLabel(kind)}</p>
+        <div className="clearcast-favorites">
+          <span>
+            Favorites ({favoriteCount}/{FAVORITE_SLOTS})
+          </span>
+          <div className="clearcast-favorite-slots">
+            {favorites.map((presetId, index) => {
+              const preset = presetId ? NOISE_PRESETS.find((item) => item.id === presetId) : null
+              return (
+                <button
+                  key={`fav-${index}`}
+                  type="button"
+                  className={`clearcast-favorite-slot${preset ? ' is-filled' : ''}${
+                    preset && preset.id === selectedPresetId ? ' is-active' : ''
+                  }`}
+                  disabled={!preset || !slot.deviceId}
+                  title={preset ? preset.label : 'Empty favorite'}
+                  onClick={() => {
+                    if (preset) {
+                      applyPresetId(preset.id)
+                    }
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    const next = [...favorites]
+                    next[index] = null
+                    setFavorites(next)
+                    saveFavorites(next)
+                  }}
+                >
+                  {preset ? preset.label.slice(0, 1) : null}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <MicTestBox deviceName={deviceName} disabled={!slot.deviceId || !deviceName} />
       </div>
+
+      <p className="clearcast-mic-kind muted">{micKindLabel(kind)}</p>
 
       <section className={`clearcast-ai-card${settings.enabled ? ' is-on' : ''}`}>
         <div className="clearcast-ai-header">
-          <div>
-            <p className="clearcast-kicker">ClearCast AI</p>
-            <h3>AI noise cancellation</h3>
-          </div>
+          <h3>ClearCast AI noise cancellation</h3>
           <SonarToggle
             checked={settings.enabled}
             disabled={!slot.deviceId}
-            label={settings.enabled ? 'On' : 'Off'}
             onChange={(checked) => {
               setActivePresetId(null)
               if (checked) {
@@ -286,91 +607,94 @@ function MicNoiseCard({
         </div>
       </section>
 
-      <section className={`clearcast-side-card${settings.enabled ? ' is-disabled-card' : ''}`}>
-        <div className="clearcast-ai-header">
-          <div>
-            <h3>Noise reduction</h3>
-            <p className="muted">
-              {settings.enabled
-                ? 'Disabled while ClearCast AI noise cancellation is active'
-                : 'Legacy reduction — turn on ClearCast AI instead'}
-            </p>
+      <div className="clearcast-modules clearcast-modules-top">
+        <section className={`clearcast-module${settings.enabled ? ' is-disabled-card' : ''}`}>
+          <div className="clearcast-ai-header">
+            <div>
+              <h3>Noise reduction</h3>
+              {settings.enabled ? (
+                <p className="muted clearcast-module-note">
+                  Disabled while ClearCast AI noise cancellation is active
+                </p>
+              ) : (
+                <p className="muted clearcast-module-note">Turn on ClearCast AI for RNNoise cleanup</p>
+              )}
+            </div>
+            <SonarToggle checked={false} disabled onChange={() => undefined} />
           </div>
-          <SonarToggle checked={false} disabled label="Off" onChange={() => undefined} />
-        </div>
-      </section>
+          <div className="clearcast-nr-sliders">
+            <ModuleSlider label="Background" valueLabel="0.00" value={0} disabled />
+            <ModuleSlider label="Impact" valueLabel="0.00" value={0} disabled />
+          </div>
+        </section>
 
-      <div className="clearcast-modules">
         <section className="clearcast-module">
           <div className="clearcast-ai-header">
             <h3>Noise gate</h3>
             <SonarToggle
               checked={settings.noiseGateEnabled}
               disabled={!slot.deviceId}
-              label={settings.noiseGateEnabled ? 'On' : 'Off'}
               onChange={(checked) => {
                 setActivePresetId(null)
                 void onChange({ noiseGateEnabled: checked })
               }}
             />
           </div>
-          <label className={`clearcast-module-slider${settings.noiseGateEnabled ? '' : ' is-disabled'}`}>
-            <span>
-              Threshold
-              <strong>{settings.noiseGateThreshold}</strong>
-            </span>
+          <ModuleSlider
+            label="Threshold"
+            valueLabel={`${gateDb.toFixed(1)} dB`}
+            value={settings.noiseGateThreshold}
+            disabled={!settings.noiseGateEnabled || !slot.deviceId || autoGate}
+            onChange={(noiseGateThreshold) => {
+              setActivePresetId(null)
+              setAutoGate(false)
+              void onChange({ noiseGateThreshold })
+            }}
+          />
+          <label className="clearcast-auto-gate">
             <input
-              type="range"
-              min={0}
-              max={100}
-              value={settings.noiseGateThreshold}
+              type="checkbox"
+              checked={autoGate}
               disabled={!settings.noiseGateEnabled || !slot.deviceId}
               onChange={(event) => {
-                setActivePresetId(null)
-                void onChange({ noiseGateThreshold: Number(event.target.value) })
+                const next = event.target.checked
+                setAutoGate(next)
+                if (next) {
+                  const levelDb = -60 + liveLevel * 40
+                  const suggested = gateDbToThreshold(Math.max(-72, Math.min(-28, levelDb - 12)))
+                  setActivePresetId(null)
+                  void onChange({ noiseGateEnabled: true, noiseGateThreshold: suggested })
+                }
               }}
             />
+            <span>Automatically compute the threshold for the noise gate effect.</span>
           </label>
-          <p className="muted clearcast-module-note">Leave off unless you need silence between words.</p>
-        </section>
-
-        <section className="clearcast-module">
-          <div className="clearcast-ai-header">
-            <h3>Compressor</h3>
-            <SonarToggle
-              checked={settings.compressorEnabled}
-              disabled={!slot.deviceId || !settings.enabled}
-              label={settings.compressorEnabled ? 'On' : 'Off'}
-              onChange={(checked) => {
-                setActivePresetId(null)
-                void onChange({ compressorEnabled: checked })
-              }}
-            />
-          </div>
-          <label
-            className={`clearcast-module-slider${
-              settings.compressorEnabled && settings.enabled ? '' : ' is-disabled'
-            }`}
-          >
-            <span>
-              Level
-              <strong>{(settings.compressorLevel / 100).toFixed(2)}</strong>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={settings.compressorLevel}
-              disabled={!settings.compressorEnabled || !settings.enabled || !slot.deviceId}
-              onChange={(event) => {
-                setActivePresetId(null)
-                void onChange({ compressorLevel: Number(event.target.value) })
-              }}
-            />
-          </label>
-          <p className="muted clearcast-module-note">Evens voice level after AI cleanup.</p>
         </section>
       </div>
+
+      <section className="clearcast-module clearcast-compressor">
+        <div className="clearcast-ai-header">
+          <h3>Compressor</h3>
+          <SonarToggle
+            checked={settings.compressorEnabled}
+            disabled={!slot.deviceId || !settings.enabled}
+            onChange={(checked) => {
+              setActivePresetId(null)
+              void onChange({ compressorEnabled: checked })
+            }}
+          />
+        </div>
+        <ModuleSlider
+          label="Level"
+          valueLabel={(settings.compressorLevel / 100).toFixed(2)}
+          value={settings.compressorLevel}
+          disabled={!settings.compressorEnabled || !settings.enabled || !slot.deviceId}
+          onChange={(compressorLevel) => {
+            setActivePresetId(null)
+            void onChange({ compressorLevel })
+          }}
+        />
+      </section>
     </div>
   )
 }
@@ -420,17 +744,14 @@ export function NoiseSuppressionSection({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Mic</p>
-          <h2>ClearCast noise cancellation</h2>
-          <p className="section-help">
-            SteelSeries-style AI cleanup for your mic — intensity, gate, and compressor stay on this
-            page while the stream is live.
-          </p>
+          <h2>Noise suppression</h2>
         </div>
       </div>
 
       {!engineActive ? (
         <p className="notice">
-          Stream is idle — pick a preset, then press <strong>Start stream</strong>.
+          Stream is idle — pick a preset, then press <strong>Start stream</strong> to hear ClearCast on
+          the cable.
         </p>
       ) : null}
 
