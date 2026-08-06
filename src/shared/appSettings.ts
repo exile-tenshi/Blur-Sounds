@@ -18,6 +18,8 @@ export interface ClipSettings {
   sourceId?: string
   bufferingEnabled: boolean
   keybinds: string[]
+  /** Listen for “clip it blur” / “blur clip it” and trigger Clip it. */
+  voiceCommandsEnabled: boolean
 }
 
 export interface AppSettings {
@@ -34,6 +36,7 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   /** Off by default — desktop capture is expensive; user opts in from Clips. */
   bufferingEnabled: false,
   keybinds: ['F8'],
+  voiceCommandsEnabled: true,
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {

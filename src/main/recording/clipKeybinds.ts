@@ -47,4 +47,9 @@ export class ClipKeybindService {
     }
     window.webContents.send(clipChannels.subscribeTrigger)
   }
+
+  /** Same path as keybinds — used by voice commands. */
+  triggerClip(): void {
+    this.emitTrigger()
+  }
 }

@@ -54,6 +54,10 @@ function normalizeSettings(raw: unknown): AppSettings {
         ? clipInput.bufferingEnabled
         : DEFAULT_CLIP_SETTINGS.bufferingEnabled,
     keybinds: sanitizeKeybinds(clipInput.keybinds),
+    voiceCommandsEnabled:
+      typeof clipInput.voiceCommandsEnabled === 'boolean'
+        ? clipInput.voiceCommandsEnabled
+        : DEFAULT_CLIP_SETTINGS.voiceCommandsEnabled,
   }
 
   return {

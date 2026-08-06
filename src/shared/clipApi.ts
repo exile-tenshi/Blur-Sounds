@@ -30,6 +30,7 @@ export interface ClipRecordingStatus {
   lastClipPath?: string
   error?: string
   keybinds: string[]
+  voiceCommandsEnabled: boolean
 }
 
 export interface SaveClipPayload {

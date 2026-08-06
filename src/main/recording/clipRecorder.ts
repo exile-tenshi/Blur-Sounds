@@ -200,6 +200,7 @@ export class ClipRecorderService {
       lastClipPath: this.lastClipPath,
       error: this.error,
       keybinds: [...clip.keybinds],
+      voiceCommandsEnabled: clip.voiceCommandsEnabled !== false,
     }
   }
 
