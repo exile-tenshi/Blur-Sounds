@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   applyNoisePreset,
-  detectNoiseMicKind,
   micKindLabel,
   NOISE_PRESETS,
   presetsForMic,
@@ -440,7 +439,6 @@ function MicNoiseCard({
   onSelectDevice: (deviceId: string) => Promise<void>
 }) {
   const settings = normalizeNoiseSuppression(slot.noiseSuppressionSettings ?? slot.noiseSuppression)
-  const kind = detectNoiseMicKind(deviceName)
   const presets = presetsForMic(deviceName)
   const recommended = recommendedPresetForMic(deviceName)
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
@@ -595,11 +593,7 @@ function MicNoiseCard({
             disabled={!slot.deviceId}
             onChange={(checked) => {
               setActivePresetId(null)
-              if (checked) {
-                void onChange({ enabled: true })
-              } else {
-                void onChange({ enabled: false, compressorEnabled: false })
-              }
+              void onChange({ enabled: checked })
             }}
           />
         </div>
@@ -608,7 +602,7 @@ function MicNoiseCard({
           <WaveVisualizer level={liveLevel} active={settings.enabled && engineActive} />
           <IntensitySlider
             value={settings.strength}
-            disabled={!settings.enabled || !slot.deviceId}
+            disabled={!slot.deviceId}
             onChange={(strength) => {
               setActivePresetId(null)
               void onChange({ strength })
@@ -618,23 +612,51 @@ function MicNoiseCard({
       </section>
 
       <div className="clearcast-modules clearcast-modules-top">
-        <section className={`clearcast-module${settings.enabled ? ' is-disabled-card' : ''}`}>
+        <section className="clearcast-module">
           <div className="clearcast-ai-header">
             <div>
               <h3>Noise reduction</h3>
-              {settings.enabled ? (
-                <p className="muted clearcast-module-note">
-                  Disabled while ClearCast AI noise cancellation is active
-                </p>
-              ) : (
-                <p className="muted clearcast-module-note">Turn on ClearCast AI for RNNoise cleanup</p>
-              )}
+              <p className="muted clearcast-module-note">
+                Background and Impact shape classic cleanup alongside ClearCast AI
+              </p>
             </div>
-            <SonarToggle checked={false} disabled onChange={() => undefined} />
+            <SonarToggle
+              checked={settings.threshold > 0 || settings.impact > 0}
+              disabled={!slot.deviceId}
+              onChange={(checked) => {
+                setActivePresetId(null)
+                if (checked) {
+                  void onChange({
+                    threshold: settings.threshold > 0 ? settings.threshold : 55,
+                    impact: settings.impact > 0 ? settings.impact : 40,
+                  })
+                } else {
+                  void onChange({ threshold: 0, impact: 0 })
+                }
+              }}
+            />
           </div>
           <div className="clearcast-nr-sliders">
-            <ModuleSlider label="Background" valueLabel="0.00" value={0} disabled />
-            <ModuleSlider label="Impact" valueLabel="0.00" value={0} disabled />
+            <ModuleSlider
+              label="Background"
+              valueLabel={(settings.threshold / 100).toFixed(2)}
+              value={settings.threshold}
+              disabled={!slot.deviceId}
+              onChange={(threshold) => {
+                setActivePresetId(null)
+                void onChange({ threshold })
+              }}
+            />
+            <ModuleSlider
+              label="Impact"
+              valueLabel={(settings.impact / 100).toFixed(2)}
+              value={settings.impact}
+              disabled={!slot.deviceId}
+              onChange={(impact) => {
+                setActivePresetId(null)
+                void onChange({ impact })
+              }}
+            />
           </div>
         </section>
 
@@ -654,7 +676,7 @@ function MicNoiseCard({
             label="Threshold"
             valueLabel={`${gateDb.toFixed(1)} dB`}
             value={settings.noiseGateThreshold}
-            disabled={!settings.noiseGateEnabled || !slot.deviceId || autoGate}
+            disabled={!slot.deviceId || autoGate}
             onChange={(noiseGateThreshold) => {
               setActivePresetId(null)
               setAutoGate(false)
@@ -665,7 +687,7 @@ function MicNoiseCard({
             <input
               type="checkbox"
               checked={autoGate}
-              disabled={!settings.noiseGateEnabled || !slot.deviceId}
+              disabled={!slot.deviceId}
               onChange={(event) => {
                 const next = event.target.checked
                 setAutoGate(next)
@@ -673,7 +695,7 @@ function MicNoiseCard({
                   const levelDb = -60 + liveLevel * 40
                   const suggested = gateDbToThreshold(Math.max(-72, Math.min(-28, levelDb - 12)))
                   setActivePresetId(null)
-                  void onChange({ noiseGateEnabled: true, noiseGateThreshold: suggested })
+                  void onChange({ noiseGateThreshold: suggested })
                 }
               }}
             />
@@ -687,7 +709,7 @@ function MicNoiseCard({
           <h3>Compressor</h3>
           <SonarToggle
             checked={settings.compressorEnabled}
-            disabled={!slot.deviceId || !settings.enabled}
+            disabled={!slot.deviceId}
             onChange={(checked) => {
               setActivePresetId(null)
               void onChange({ compressorEnabled: checked })
@@ -698,7 +720,7 @@ function MicNoiseCard({
           label="Level"
           valueLabel={(settings.compressorLevel / 100).toFixed(2)}
           value={settings.compressorLevel}
-          disabled={!settings.compressorEnabled || !settings.enabled || !slot.deviceId}
+          disabled={!slot.deviceId}
           onChange={(compressorLevel) => {
             setActivePresetId(null)
             void onChange({ compressorLevel })
