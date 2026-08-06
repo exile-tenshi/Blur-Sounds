@@ -456,6 +456,14 @@ function MicNoiseCard({
     presets[0]?.id ??
     ''
 
+  const selectedPreset =
+    NOISE_PRESETS.find((preset) => preset.id === selectedPresetId) ?? recommended
+  /** Follow the chosen preset — not only auto-detected mic hardware. */
+  const selectedPresetKindLabel =
+    selectedPreset.kinds !== 'all' && selectedPreset.kinds.length > 0
+      ? micKindLabel(selectedPreset.kinds[0])
+      : selectedPreset.label
+
   const applyPresetId = (presetId: string) => {
     const preset = NOISE_PRESETS.find((item) => item.id === presetId)
     if (!preset) {
@@ -575,7 +583,9 @@ function MicNoiseCard({
         <MicTestBox deviceName={deviceName} disabled={!slot.deviceId || !deviceName} />
       </div>
 
-      <p className="clearcast-mic-kind muted">{micKindLabel(kind)}</p>
+      <p className="clearcast-mic-kind muted" title={selectedPreset.hint}>
+        {selectedPresetKindLabel}
+      </p>
 
       <section className={`clearcast-ai-card${settings.enabled ? ' is-on' : ''}`}>
         <div className="clearcast-ai-header">
