@@ -159,20 +159,15 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
                 UpdateImpulseDetector(Math.Abs(dry));
 
-                // Desk taps / bumps: clip harder before RNNoise so it can't swirl them.
-                var preClip = 0.95f - (impulseAmount * 0.35f);
-                dry = SoftClip(dry, preClip);
-                if (impulseAmount > 0.05f)
-                {
-                    dry *= 1f - (impulseAmount * 0.55f);
-                }
+                // Only soft-clip true overs — never auto-duck taps (Impact slider owns that).
+                dry = SoftClip(dry, 0.95f);
 
                 var clean = ProcessMonoSample(dry);
 
                 if (enabled)
                 {
                     UpdateResidual(Math.Abs(clean));
-                    clean *= residualGain;
+                    clean *= ResolveResidualGainForSample();
                 }
                 else
                 {
@@ -260,21 +255,23 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         {
             denoiser!.Denoise(processFrame.AsSpan(), finish: false);
 
-            // High crest-factor frames (desk taps) sound like a swirling spaceship through
-            // RNNoise — keep those mostly dry and ducked; speech frames stay wet.
+            // Desk taps / bumps must stay dry through RNNoise (wet = spaceship swirl).
+            // Impact slider then chooses natural level vs remove those sounds.
             var frameImpulse = MeasureFrameImpulse(dryFrame);
             var blendImpulse = Math.Max(impulseAmount, frameImpulse);
-            var frameWet = wet * (1f - (blendImpulse * 0.88f));
-            var duck = 1f - (blendImpulse * 0.5f);
+            var impactAmount = impact / 100f;
+            var frameWet = wet * (1f - blendImpulse);
+            // Impact 0 → gain 1 (sounds like the real tap). Impact 100 → near-mute.
+            var impactGain = 1f - (blendImpulse * impactAmount * 0.97f);
 
             var dryMix = 1f - frameWet;
             var makeup = 1f + ((RnnoiseMakeup - 1f) * frameWet);
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
-                var mixed = ((dryFrame[index] * dryMix) + (processFrame[index] * frameWet)) * duck * makeup;
+                var mixed = ((dryFrame[index] * dryMix) + (processFrame[index] * frameWet)) * impactGain * makeup;
                 if (float.IsNaN(mixed) || float.IsInfinity(mixed))
                 {
-                    mixed = dryFrame[index] * duck;
+                    mixed = dryFrame[index] * impactGain;
                 }
 
                 outputQueue.Enqueue(mixed);
@@ -324,8 +321,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         // Speech rises together; taps jump far above the voice follower.
         var excess = peakEnvelope - (channelEnvelope * 2.8f);
         var targetImpulse = Math.Clamp(excess / 0.18f, 0f, 1f);
-        // Impact slider makes impact detection a bit more sensitive (more duck on bumps).
-        targetImpulse = Math.Clamp(targetImpulse + ((impact / 100f) * targetImpulse * 0.25f), 0f, 1f);
         var coeff = targetImpulse > impulseAmount ? 0.45f : 0.08f;
         impulseAmount += (targetImpulse - impulseAmount) * coeff;
         impulseAmount = Math.Clamp(impulseAmount, 0f, 1f);
@@ -383,17 +378,30 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var noiseFloor = (ResidualFloorMin + ((1f - wet) * 0.18f)) * (1f - (backgroundAmount * 0.55f));
         noiseFloor = Math.Clamp(noiseFloor, 0.06f, 1f);
         var target = residualSpeechOpen ? 1f : noiseFloor;
-        // Keep residual from slamming open on anything impulse-like.
-        if (impulseAmount > 0.2f)
-        {
-            target = Math.Min(target, 0.35f + ((1f - impulseAmount) * 0.65f));
-        }
 
         var openCoeff = 0.08f;
         var closeCoeff = 0.008f + ((1f - wet) * 0.006f);
         var coeff = target > residualGain ? openCoeff : closeCoeff;
         residualGain += (target - residualGain) * coeff;
         residualGain = Math.Clamp(residualGain, 0.06f, 1f);
+    }
+
+    /// <summary>
+    /// Speech uses residual floor as usual. Impulses: Impact 0 keeps natural level;
+    /// Impact 100 applies residual cut + extra suppress so taps/keyboard disappear.
+    /// </summary>
+    private float ResolveResidualGainForSample()
+    {
+        if (impulseAmount < 0.12f)
+        {
+            return residualGain;
+        }
+
+        var impactAmount = impact / 100f;
+        // Lerp natural (1) → residual floor, then extra cut from Impact × impulse strength.
+        var blended = 1f + ((residualGain - 1f) * impactAmount);
+        blended *= 1f - (impulseAmount * impactAmount * 0.9f);
+        return Math.Clamp(blended, 0.02f, 1f);
     }
 
     private bool EnsureDenoiser()

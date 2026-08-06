@@ -26,7 +26,7 @@ export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
   strength: 88,
   threshold: 55,
-  impact: 40,
+  impact: 0,
   highPassHz: 100,
   attack: 58,
   release: 44,
