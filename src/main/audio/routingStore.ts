@@ -752,17 +752,19 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
-    // Keep-alive on Hi-Fi Cable Output is required for the VB-Audio Input→Output loop.
+    // Soft warning only — hard-stopping the engine here left users with a dead cable
+    // even when Input render was already pumping (Pass-Through / Discord open on Output).
     if (this.engineStatus.hifiOutputActive === false) {
-      const keepAliveError =
+      const keepAliveWarning =
         this.engineStatus.hifiOutputError ||
-        'Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output, leave ASIO Bridge on Pass-Through, then Start again.'
-      try {
-        await this.engine.stop()
-      } catch {
-        // Still surface the keep-alive failure below.
+        'Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output and leave ASIO Bridge on Pass-Through if Discord/OBS stay silent.'
+      if (!this.engineStatus.message?.includes('Listen to this device')) {
+        this.engineStatus = {
+          ...this.engineStatus,
+          message: keepAliveWarning,
+          hifiOutputError: keepAliveWarning,
+        }
       }
-      this.setEngineError(keepAliveError)
     }
 
     return this.emitCachedSnapshot()

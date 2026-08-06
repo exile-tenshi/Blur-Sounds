@@ -33,8 +33,8 @@ internal static class HifiCableEndpointVolume
     }
 
     /// <summary>
-    /// Keep-alive / capture side: unmute only. Forcing 100% on Hi-Fi Cable Output
-    /// makes Windows "Listen to this device" blast the mix through speakers.
+    /// Keep-alive / capture side: unmute, and nudge a near-zero level back up when
+    /// Windows Listen-through is off. Forcing 100% while Listen is on blasts speakers.
     /// </summary>
     public static void EnsureCaptureUnmuted(MMDevice device)
     {
@@ -44,6 +44,13 @@ internal static class HifiCableEndpointVolume
             if (volume.Mute)
             {
                 volume.Mute = false;
+            }
+
+            // 0% Output looks like a dead cable to Discord/OBS even when Input is writing.
+            if (!HifiCableListenThrough.IsListenEnabled(device) &&
+                volume.MasterVolumeLevelScalar < 0.05f)
+            {
+                volume.MasterVolumeLevelScalar = 1f;
             }
         }
         catch
