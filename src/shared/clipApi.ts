@@ -1,4 +1,4 @@
-import type { ClipLookbackSeconds, ClipSettings } from './appSettings.js'
+import type { ClipLookbackSeconds, ClipResolution, ClipSettings } from './appSettings.js'
 
 export type ClipSourceKind = 'screen' | 'window'
 
@@ -31,6 +31,7 @@ export interface ClipRecordingStatus {
   error?: string
   keybinds: string[]
   voiceCommandsEnabled: boolean
+  resolution: ClipResolution
 }
 
 export interface SaveClipPayload {

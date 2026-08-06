@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CLIP_LOOKBACK_OPTIONS_SECONDS,
+  CLIP_RESOLUTION_OPTIONS,
   forwardRollSeconds,
   formatLookbackLabel,
+  getClipResolutionSpec,
   totalClipSeconds,
   type ClipLookbackSeconds,
+  type ClipResolution,
 } from '../../shared/appSettings'
 import type { ClipControlApi, ClipRecordingStatus, ClipSource } from '../../shared/clipApi'
 import { clipChannels } from '../../shared/clipApi'
@@ -57,7 +60,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 10
+export const CLIPS_PICKER_BUILD = 11
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -71,7 +74,10 @@ function pickRecorderMimeType(): string {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
 }
 
-async function captureDesktopStream(_sourceId: string): Promise<MediaStream> {
+async function captureDesktopStream(
+  _sourceId: string,
+  resolution: ClipResolution = '1080p',
+): Promise<MediaStream> {
   // Keep getDisplayMedia constraints minimal — detailed width/height/frameRate objects
   // are rejected as "Invalid capture constraints" on some Electron/Chromium builds.
   // The main-process setDisplayMediaRequestHandler maps display:*/app:* to a real source.
@@ -94,18 +100,30 @@ async function captureDesktopStream(_sourceId: string): Promise<MediaStream> {
     }
   }
 
+  const spec = getClipResolutionSpec(resolution)
   for (const track of stream.getVideoTracks()) {
     const capabilities = track.getCapabilities?.() as
       | { width?: { max?: number }; height?: { max?: number }; frameRate?: { max?: number } }
       | undefined
+    const maxWidth = capabilities?.width?.max ?? spec.width
+    const maxHeight = capabilities?.height?.max ?? spec.height
+    const width = Math.min(spec.width, maxWidth)
+    const height = Math.min(spec.height, maxHeight)
     try {
       await track.applyConstraints({
-        width: { ideal: 1280, max: Math.min(1280, capabilities?.width?.max ?? 1280) },
-        height: { ideal: 720, max: Math.min(720, capabilities?.height?.max ?? 720) },
-        frameRate: { ideal: 30, max: 30 },
+        width: { ideal: width, max: width },
+        height: { ideal: height, max: height },
+        frameRate: { ideal: 30, max: 60 },
       })
     } catch {
-      // Constraints are best-effort after the stream exists.
+      try {
+        await track.applyConstraints({
+          width: { ideal: width },
+          height: { ideal: height },
+        })
+      } catch {
+        // Constraints are best-effort after the stream exists.
+      }
     }
   }
 
@@ -129,6 +147,7 @@ export function useClipRecorder() {
   const [sources, setSources] = useState<ClipSource[]>([])
   const [selectedSourceId, setSelectedSourceId] = useState('')
   const [lookbackSeconds, setLookbackSecondsState] = useState<ClipLookbackSeconds>(60)
+  const [resolution, setResolutionState] = useState<ClipResolution>('1080p')
   const [keybinds, setKeybinds] = useState<string[]>(['F8'])
   const [voiceCommandsEnabled, setVoiceCommandsEnabledState] = useState(true)
   const [bufferingEnabled, setBufferingEnabledState] = useState(false)
@@ -143,6 +162,7 @@ export function useClipRecorder() {
     outputFolder: '',
     keybinds: ['F8'],
     voiceCommandsEnabled: true,
+    resolution: '1080p',
   })
   const [error, setError] = useState<string>()
   const [isBusy, setIsBusy] = useState(false)
@@ -153,6 +173,7 @@ export function useClipRecorder() {
   const streamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<TimedChunk[]>([])
   const lookbackRef = useRef<ClipLookbackSeconds>(60)
+  const resolutionRef = useRef<ClipResolution>('1080p')
   const clippingRef = useRef(false)
   const forwardTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const clipItRef = useRef<() => Promise<void>>(async () => {})
@@ -250,6 +271,8 @@ export function useClipRecorder() {
       const clipSettings = await control.getSettings()
       setLookbackSecondsState(clipSettings.lookbackSeconds)
       lookbackRef.current = clipSettings.lookbackSeconds
+      setResolutionState(clipSettings.resolution)
+      resolutionRef.current = clipSettings.resolution
       setKeybinds(clipSettings.keybinds)
       setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
       setBufferingEnabledState(clipSettings.bufferingEnabled)
@@ -361,13 +384,15 @@ export function useClipRecorder() {
       try {
         await clipControl.ensureOutputFolder()
         await clipControl.setSettings({ sourceId })
-        const stream = await captureDesktopStream(sourceId)
+        const resolution = resolutionRef.current
+        const { videoBitsPerSecond } = getClipResolutionSpec(resolution)
+        const stream = await captureDesktopStream(sourceId, resolution)
         streamRef.current = stream
         chunksRef.current = []
 
         const recorder = new MediaRecorder(stream, {
           mimeType,
-          videoBitsPerSecond: 2_500_000,
+          videoBitsPerSecond,
           audioBitsPerSecond: 96_000,
         })
         mediaRecorderRef.current = recorder
@@ -539,6 +564,23 @@ export function useClipRecorder() {
     [clipControl, syncStatus],
   )
 
+  const setResolution = useCallback(
+    async (next: ClipResolution) => {
+      resolutionRef.current = next
+      setResolutionState(next)
+      setStatus((current) => ({ ...current, resolution: next }))
+      if (clipControl) {
+        await clipControl.setSettings({ resolution: next })
+      }
+      // Capture constraints + bitrate only apply on a fresh buffer session.
+      if (bufferingEnabled) {
+        await stopBuffering()
+        await startBuffering()
+      }
+    },
+    [bufferingEnabled, clipControl, startBuffering, stopBuffering],
+  )
+
   const setBufferingEnabled = useCallback(
     async (enabled: boolean) => {
       setBufferingEnabledState(enabled)
@@ -608,6 +650,8 @@ export function useClipRecorder() {
         ])
         setLookbackSecondsState(clipSettings.lookbackSeconds)
         lookbackRef.current = clipSettings.lookbackSeconds
+        setResolutionState(clipSettings.resolution)
+        resolutionRef.current = clipSettings.resolution
         setKeybinds(clipSettings.keybinds)
         setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
         setBufferingEnabledState(clipSettings.bufferingEnabled)
@@ -704,6 +748,9 @@ export function useClipRecorder() {
     lookbackSeconds,
     setLookbackSeconds,
     lookbackOptions: CLIP_LOOKBACK_OPTIONS_SECONDS,
+    resolution,
+    setResolution,
+    resolutionOptions: CLIP_RESOLUTION_OPTIONS,
     forwardSeconds: forwardRollSeconds(lookbackSeconds),
     totalSeconds: totalClipSeconds(lookbackSeconds),
     formatLookbackLabel,

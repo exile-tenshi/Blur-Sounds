@@ -201,6 +201,7 @@ export class ClipRecorderService {
       error: this.error,
       keybinds: [...clip.keybinds],
       voiceCommandsEnabled: clip.voiceCommandsEnabled !== false,
+      resolution: clip.resolution,
     }
   }
 

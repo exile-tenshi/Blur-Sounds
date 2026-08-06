@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react'
-import type { ClipLookbackSeconds } from '../../shared/appSettings'
+import {
+  CLIP_RESOLUTION_SPECS,
+  type ClipLookbackSeconds,
+  type ClipResolution,
+} from '../../shared/appSettings'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 import { CLIPS_PICKER_BUILD } from '../hooks/useClipRecorder'
 
@@ -11,6 +15,9 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
     lookbackSeconds,
     setLookbackSeconds,
     lookbackOptions,
+    resolution,
+    setResolution,
+    resolutionOptions,
     forwardSeconds,
     totalSeconds,
     formatLookbackLabel,
@@ -139,6 +146,28 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             <p className="muted">
               Saves last {formatLookbackLabel(lookbackSeconds)} + rolls{' '}
               {formatLookbackLabel(forwardSeconds)} forward.
+            </p>
+          </div>
+
+          <div className="clip-duration-block">
+            <p className="field-label">Clip resolution</p>
+            <div className="chip-row">
+              {resolutionOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={`chip-button${resolution === option ? ' active' : ''}`}
+                  disabled={isBusy || clipping}
+                  onClick={() => void setResolution(option as ClipResolution)}
+                >
+                  {CLIP_RESOLUTION_SPECS[option].label}
+                </button>
+              ))}
+            </div>
+            <p className="muted">
+              Capture and encode at {CLIP_RESOLUTION_SPECS[resolution].label} (
+              {CLIP_RESOLUTION_SPECS[resolution].width}×{CLIP_RESOLUTION_SPECS[resolution].height}).
+              Changing this restarts the buffer if it is running.
             </p>
           </div>
 
