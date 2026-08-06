@@ -12,9 +12,11 @@ namespace VoiceMeeterEngine;
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
     private const float MinEnvelope = 1e-6f;
-    private const float NoiseLearnRate = 0.02f;
-    private const float SpeechLearnRate = 0.4f;
-    private const float RnnoiseMakeup = 1.35f;
+    private const float NoiseLearnRate = 0.04f;
+    private const float SpeechLearnRate = 0.55f;
+    private const float RnnoiseMakeup = 1.45f;
+    /// <summary>How hard residual room tone is crushed after RNNoise (scales with intensity).</summary>
+    private const float ResidualFloorMin = 0.04f;
 
     private readonly ISampleProvider source;
     private readonly int channels;
@@ -29,10 +31,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float highPassHz = 80f;
     private float channelEnvelope = MinEnvelope;
     private float gateGain = 1f;
+    private float residualGain = 1f;
     private bool enabled;
     private bool noiseGateEnabled;
-    private float strength = 70f;
-    private float noiseGateThreshold = 35f;
+    private float strength = 88f;
+    private float noiseGateThreshold = 40f;
     private float attack = 55f;
     private float release = 40f;
     private bool compressorEnabled;
@@ -144,6 +147,18 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 }
 
                 var clean = ProcessMonoSample(dry);
+
+                // Always crush residual room tone after RNNoise when AI is on —
+                // optional Noise Gate is a harder cut; this is the ClearCast floor.
+                if (enabled)
+                {
+                    UpdateResidual(Math.Abs(clean));
+                    clean *= residualGain;
+                }
+                else
+                {
+                    residualGain = 1f;
+                }
 
                 if (noiseGateEnabled)
                 {
@@ -259,13 +274,33 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet amount. Curve reaches near-full cleanup by ~70 so presets work.
+    /// UI 0–100 → wet amount. Mid intensity is nearly full RNNoise (ClearCast-like).
+    /// 40→0.90, 60→0.96, 75→0.985, 90→0.995, 100→1.0
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        // sqrt-ish: 40→0.74, 65→0.90, 80→0.96, 100→1.0
-        return MathF.Pow(normalized, 0.45f);
+        return MathF.Pow(normalized, 0.22f);
+    }
+
+    /// <summary>
+    /// Soft expander after RNNoise: intensity pushes residual noise toward ResidualFloorMin.
+    /// </summary>
+    private void UpdateResidual(float abs)
+    {
+        var previous = channelEnvelope;
+        var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
+        channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
+
+        var wet = StrengthToWet(strength);
+        // Speech open threshold drops as intensity rises (catch quieter talk, kill more room).
+        var speechOpen = 0.055f - (wet * 0.028f);
+        var noiseFloor = ResidualFloorMin + ((1f - wet) * 0.2f);
+        var target = channelEnvelope >= speechOpen ? 1f : noiseFloor;
+        // Fast open for speech, slower close so words aren't chopped.
+        var coeff = target > residualGain ? 0.45f : 0.08f + ((1f - wet) * 0.06f);
+        residualGain += (target - residualGain) * coeff;
+        residualGain = Math.Clamp(residualGain, ResidualFloorMin, 1f);
     }
 
     private bool EnsureDenoiser()
@@ -325,13 +360,14 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
         channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
-        var thresholdLinear = MathF.Pow(10f, (-48f + (noiseGateThreshold * 0.3f)) / 20f);
-        var target = channelEnvelope >= thresholdLinear ? 1f : 0.18f;
-        var attackCoeff = 0.08f + ((100f - attack) * 0.004f);
-        var releaseCoeff = 0.015f + ((100f - release) * 0.0012f);
+        var thresholdLinear = MathF.Pow(10f, (-52f + (noiseGateThreshold * 0.28f)) / 20f);
+        // Harder close than before — optional gate can go near-mute between words.
+        var target = channelEnvelope >= thresholdLinear ? 1f : 0.06f;
+        var attackCoeff = 0.1f + ((100f - attack) * 0.0045f);
+        var releaseCoeff = 0.02f + ((100f - release) * 0.0014f);
         var coeff = target > gateGain ? attackCoeff : releaseCoeff;
         gateGain += (target - gateGain) * coeff;
-        gateGain = Math.Clamp(gateGain, 0.18f, 1f);
+        gateGain = Math.Clamp(gateGain, 0.06f, 1f);
     }
 
     private float AverageFrame(float[] buffer, int frameOffset)
@@ -358,6 +394,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private void ResetIdleState()
     {
         gateGain = 1f;
+        residualGain = 1f;
         channelEnvelope = MinEnvelope;
         compressorEnvelope = MinEnvelope;
         inputQueue.Clear();

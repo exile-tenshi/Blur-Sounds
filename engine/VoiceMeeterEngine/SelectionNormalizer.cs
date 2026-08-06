@@ -27,7 +27,7 @@ internal sealed class NoiseSuppressionSettingsConfig
     public bool Enabled { get; set; }
 
     [System.Text.Json.Serialization.JsonPropertyName("strength")]
-    public float Strength { get; set; } = 70f;
+    public float Strength { get; set; } = 88f;
 
     [System.Text.Json.Serialization.JsonPropertyName("threshold")]
     public float Threshold { get; set; } = 55f;

@@ -32,14 +32,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['vr-headset'],
     settings: {
       enabled: true,
-      strength: 88,
-      highPassHz: 100,
-      attack: 60,
-      release: 45,
+      strength: 96,
+      highPassHz: 110,
+      attack: 62,
+      release: 48,
       noiseGateEnabled: false,
-      noiseGateThreshold: 35,
+      noiseGateThreshold: 42,
       compressorEnabled: true,
-      compressorLevel: 28,
+      compressorLevel: 32,
     },
   },
   {
@@ -49,14 +49,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['gaming-headset'],
     settings: {
       enabled: true,
-      strength: 78,
-      highPassHz: 90,
-      attack: 55,
-      release: 40,
+      strength: 90,
+      highPassHz: 100,
+      attack: 58,
+      release: 44,
       noiseGateEnabled: false,
-      noiseGateThreshold: 35,
+      noiseGateThreshold: 40,
       compressorEnabled: true,
-      compressorLevel: 30,
+      compressorLevel: 34,
     },
   },
   {
@@ -66,14 +66,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['boom-arm', 'usb-condenser', 'dynamic'],
     settings: {
       enabled: true,
-      strength: 72,
-      highPassHz: 85,
-      attack: 52,
-      release: 38,
+      strength: 88,
+      highPassHz: 95,
+      attack: 56,
+      release: 42,
       noiseGateEnabled: false,
-      noiseGateThreshold: 32,
+      noiseGateThreshold: 38,
       compressorEnabled: true,
-      compressorLevel: 32,
+      compressorLevel: 34,
     },
   },
   {
@@ -83,14 +83,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['desk-stand', 'usb-condenser'],
     settings: {
       enabled: true,
-      strength: 80,
-      highPassHz: 95,
-      attack: 55,
-      release: 42,
+      strength: 92,
+      highPassHz: 105,
+      attack: 58,
+      release: 44,
       noiseGateEnabled: false,
-      noiseGateThreshold: 36,
+      noiseGateThreshold: 42,
       compressorEnabled: true,
-      compressorLevel: 34,
+      compressorLevel: 36,
     },
   },
   {
@@ -100,14 +100,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['usb-condenser'],
     settings: {
       enabled: true,
-      strength: 70,
-      highPassHz: 80,
-      attack: 50,
-      release: 35,
+      strength: 86,
+      highPassHz: 95,
+      attack: 54,
+      release: 40,
       noiseGateEnabled: false,
-      noiseGateThreshold: 30,
+      noiseGateThreshold: 36,
       compressorEnabled: true,
-      compressorLevel: 30,
+      compressorLevel: 32,
     },
   },
   {
@@ -117,14 +117,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['dynamic'],
     settings: {
       enabled: true,
-      strength: 52,
-      highPassHz: 70,
-      attack: 45,
-      release: 30,
+      strength: 72,
+      highPassHz: 80,
+      attack: 50,
+      release: 36,
       noiseGateEnabled: false,
-      noiseGateThreshold: 28,
+      noiseGateThreshold: 32,
       compressorEnabled: true,
-      compressorLevel: 26,
+      compressorLevel: 28,
     },
   },
   {
@@ -134,14 +134,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['lapel'],
     settings: {
       enabled: true,
-      strength: 75,
-      highPassHz: 100,
-      attack: 58,
-      release: 40,
+      strength: 90,
+      highPassHz: 110,
+      attack: 60,
+      release: 44,
       noiseGateEnabled: false,
-      noiseGateThreshold: 34,
+      noiseGateThreshold: 40,
       compressorEnabled: true,
-      compressorLevel: 36,
+      compressorLevel: 38,
     },
   },
   {
@@ -151,14 +151,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['laptop'],
     settings: {
       enabled: true,
-      strength: 85,
-      highPassHz: 110,
-      attack: 62,
-      release: 48,
+      strength: 96,
+      highPassHz: 120,
+      attack: 64,
+      release: 50,
       noiseGateEnabled: false,
-      noiseGateThreshold: 38,
+      noiseGateThreshold: 44,
       compressorEnabled: true,
-      compressorLevel: 38,
+      compressorLevel: 40,
     },
   },
   {
@@ -168,14 +168,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['webcam'],
     settings: {
       enabled: true,
-      strength: 82,
-      highPassHz: 105,
-      attack: 60,
-      release: 45,
+      strength: 94,
+      highPassHz: 115,
+      attack: 62,
+      release: 48,
       noiseGateEnabled: false,
-      noiseGateThreshold: 36,
+      noiseGateThreshold: 42,
       compressorEnabled: true,
-      compressorLevel: 36,
+      compressorLevel: 38,
     },
   },
   {
@@ -185,12 +185,12 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: 'all',
     settings: {
       enabled: true,
-      strength: 48,
-      highPassHz: 70,
+      strength: 62,
+      highPassHz: 80,
       noiseGateEnabled: false,
-      noiseGateThreshold: 28,
+      noiseGateThreshold: 30,
       compressorEnabled: false,
-      compressorLevel: 20,
+      compressorLevel: 22,
     },
   },
   {
@@ -201,11 +201,11 @@ export const NOISE_PRESETS: NoisePreset[] = [
     settings: {
       ...DEFAULT_NOISE_SUPPRESSION,
       enabled: true,
-      strength: 72,
-      highPassHz: 85,
+      strength: 88,
+      highPassHz: 100,
       noiseGateEnabled: false,
       compressorEnabled: true,
-      compressorLevel: 30,
+      compressorLevel: 34,
     },
   },
   {
@@ -215,14 +215,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: 'all',
     settings: {
       enabled: true,
-      strength: 84,
-      highPassHz: 95,
-      attack: 58,
-      release: 44,
+      strength: 94,
+      highPassHz: 105,
+      attack: 60,
+      release: 46,
       noiseGateEnabled: false,
-      noiseGateThreshold: 34,
+      noiseGateThreshold: 40,
       compressorEnabled: true,
-      compressorLevel: 34,
+      compressorLevel: 36,
     },
   },
   {
@@ -232,14 +232,14 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: 'all',
     settings: {
       enabled: true,
-      strength: 95,
-      highPassHz: 110,
-      attack: 65,
-      release: 50,
-      noiseGateEnabled: false,
-      noiseGateThreshold: 38,
+      strength: 100,
+      highPassHz: 120,
+      attack: 68,
+      release: 52,
+      noiseGateEnabled: true,
+      noiseGateThreshold: 44,
       compressorEnabled: true,
-      compressorLevel: 40,
+      compressorLevel: 42,
     },
   },
 ]
@@ -297,66 +297,52 @@ export function detectNoiseMicKind(deviceName: string): NoiseMicKind {
   return 'generic'
 }
 
-/** All presets, recommended mic-type first. */
-export function presetsForMic(deviceName: string): NoisePreset[] {
-  const kind = detectNoiseMicKind(deviceName)
-  return [...NOISE_PRESETS].sort((left, right) => {
-    const leftScore = presetSortScore(left, kind)
-    const rightScore = presetSortScore(right, kind)
-    if (leftScore !== rightScore) {
-      return leftScore - rightScore
-    }
-    return left.label.localeCompare(right.label)
-  })
+export function micKindLabel(kind: NoiseMicKind): string {
+  switch (kind) {
+    case 'vr-headset':
+      return 'Detected: VR headset mic'
+    case 'gaming-headset':
+      return 'Detected: gaming headset'
+    case 'boom-arm':
+      return 'Detected: boom-arm style'
+    case 'desk-stand':
+      return 'Detected: desk / stand mic'
+    case 'usb-condenser':
+      return 'Detected: USB condenser'
+    case 'dynamic':
+      return 'Detected: dynamic / XLR'
+    case 'lapel':
+      return 'Detected: lapel / lav'
+    case 'laptop':
+      return 'Detected: laptop / array mic'
+    case 'webcam':
+      return 'Detected: webcam / phone mic'
+    default:
+      return 'Mic type: general'
+  }
 }
 
-function presetSortScore(preset: NoisePreset, kind: NoiseMicKind): number {
-  if (preset.kinds !== 'all' && preset.kinds.includes(kind)) {
-    return 0
-  }
-  if (preset.id === 'balanced') {
-    return 1
-  }
-  if (preset.kinds === 'all') {
-    return 2
-  }
-  return 3
+export function presetsForMic(deviceName: string): NoisePreset[] {
+  const kind = detectNoiseMicKind(deviceName)
+  const preferred = NOISE_PRESETS.filter(
+    (preset) => preset.kinds === 'all' || preset.kinds.includes(kind),
+  )
+  return preferred.length > 0 ? preferred : NOISE_PRESETS.filter((preset) => preset.kinds === 'all')
 }
 
 export function recommendedPresetForMic(deviceName: string): NoisePreset {
   const kind = detectNoiseMicKind(deviceName)
-  return (
-    NOISE_PRESETS.find((preset) => preset.kinds !== 'all' && preset.kinds.includes(kind)) ??
-    NOISE_PRESETS.find((preset) => preset.id === 'balanced') ??
-    NOISE_PRESETS[0]
+  const match = NOISE_PRESETS.find(
+    (preset) => preset.kinds !== 'all' && preset.kinds.includes(kind) && preset.id === kind,
   )
+  if (match) {
+    return match
+  }
+
+  const streaming = NOISE_PRESETS.find((preset) => preset.id === 'streaming')
+  return streaming ?? NOISE_PRESETS.find((preset) => preset.id === 'balanced') ?? NOISE_PRESETS[0]
 }
 
 export function applyNoisePreset(preset: NoisePreset): NoiseSuppressionSettings {
   return normalizeNoiseSuppression(preset.settings)
-}
-
-export function micKindLabel(kind: NoiseMicKind): string {
-  switch (kind) {
-    case 'vr-headset':
-      return 'VR headset mic'
-    case 'gaming-headset':
-      return 'Gaming headset mic'
-    case 'boom-arm':
-      return 'Boom arm mic'
-    case 'desk-stand':
-      return 'Desk stand mic'
-    case 'usb-condenser':
-      return 'USB / condenser mic'
-    case 'dynamic':
-      return 'Dynamic / XLR mic'
-    case 'lapel':
-      return 'Lapel / lav mic'
-    case 'laptop':
-      return 'Laptop / built-in mic'
-    case 'webcam':
-      return 'Webcam / phone mic'
-    default:
-      return 'Microphone'
-  }
 }
