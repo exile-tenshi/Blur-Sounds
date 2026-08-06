@@ -38,6 +38,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 45,
       noiseGateEnabled: false,
       noiseGateThreshold: 35,
+      compressorEnabled: true,
+      compressorLevel: 28,
     },
   },
   {
@@ -53,6 +55,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 40,
       noiseGateEnabled: false,
       noiseGateThreshold: 35,
+      compressorEnabled: true,
+      compressorLevel: 30,
     },
   },
   {
@@ -68,6 +72,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 38,
       noiseGateEnabled: false,
       noiseGateThreshold: 32,
+      compressorEnabled: true,
+      compressorLevel: 32,
     },
   },
   {
@@ -83,6 +89,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 42,
       noiseGateEnabled: false,
       noiseGateThreshold: 36,
+      compressorEnabled: true,
+      compressorLevel: 34,
     },
   },
   {
@@ -98,6 +106,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 35,
       noiseGateEnabled: false,
       noiseGateThreshold: 30,
+      compressorEnabled: true,
+      compressorLevel: 30,
     },
   },
   {
@@ -113,6 +123,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 30,
       noiseGateEnabled: false,
       noiseGateThreshold: 28,
+      compressorEnabled: true,
+      compressorLevel: 26,
     },
   },
   {
@@ -128,6 +140,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 40,
       noiseGateEnabled: false,
       noiseGateThreshold: 34,
+      compressorEnabled: true,
+      compressorLevel: 36,
     },
   },
   {
@@ -143,6 +157,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 48,
       noiseGateEnabled: false,
       noiseGateThreshold: 38,
+      compressorEnabled: true,
+      compressorLevel: 38,
     },
   },
   {
@@ -158,6 +174,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 45,
       noiseGateEnabled: false,
       noiseGateThreshold: 36,
+      compressorEnabled: true,
+      compressorLevel: 36,
     },
   },
   {
@@ -171,6 +189,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       highPassHz: 70,
       noiseGateEnabled: false,
       noiseGateThreshold: 28,
+      compressorEnabled: false,
+      compressorLevel: 20,
     },
   },
   {
@@ -184,6 +204,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       strength: 72,
       highPassHz: 85,
       noiseGateEnabled: false,
+      compressorEnabled: true,
+      compressorLevel: 30,
     },
   },
   {
@@ -199,6 +221,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 44,
       noiseGateEnabled: false,
       noiseGateThreshold: 34,
+      compressorEnabled: true,
+      compressorLevel: 34,
     },
   },
   {
@@ -214,6 +238,8 @@ export const NOISE_PRESETS: NoisePreset[] = [
       release: 50,
       noiseGateEnabled: false,
       noiseGateThreshold: 38,
+      compressorEnabled: true,
+      compressorLevel: 40,
     },
   },
 ]
