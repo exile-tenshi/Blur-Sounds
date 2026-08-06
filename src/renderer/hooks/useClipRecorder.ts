@@ -8,6 +8,7 @@ import {
 } from '../../shared/appSettings'
 import type { ClipControlApi, ClipRecordingStatus, ClipSource } from '../../shared/clipApi'
 import { clipChannels } from '../../shared/clipApi'
+import { playClipChime } from '../audio/playClipChime'
 
 interface TimedChunk {
   blob: Blob
@@ -56,7 +57,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 9
+export const CLIPS_PICKER_BUILD = 10
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -499,6 +500,7 @@ export function useClipRecorder() {
     clippingRef.current = true
     setIsBusy(true)
     setError(undefined)
+    playClipChime()
     await syncStatus(
       {
         recording: true,
