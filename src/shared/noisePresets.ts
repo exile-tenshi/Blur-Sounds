@@ -300,47 +300,65 @@ export function detectNoiseMicKind(deviceName: string): NoiseMicKind {
 export function micKindLabel(kind: NoiseMicKind): string {
   switch (kind) {
     case 'vr-headset':
-      return 'Detected: VR headset mic'
+      return 'VR headset mic'
     case 'gaming-headset':
-      return 'Detected: gaming headset'
+      return 'Gaming headset mic'
     case 'boom-arm':
-      return 'Detected: boom-arm style'
+      return 'Boom arm mic'
     case 'desk-stand':
-      return 'Detected: desk / stand mic'
+      return 'Desk stand mic'
     case 'usb-condenser':
-      return 'Detected: USB condenser'
+      return 'USB / condenser mic'
     case 'dynamic':
-      return 'Detected: dynamic / XLR'
+      return 'Dynamic / XLR mic'
     case 'lapel':
-      return 'Detected: lapel / lav'
+      return 'Lapel / lav mic'
     case 'laptop':
-      return 'Detected: laptop / array mic'
+      return 'Laptop / built-in mic'
     case 'webcam':
-      return 'Detected: webcam / phone mic'
+      return 'Webcam / phone mic'
     default:
-      return 'Mic type: general'
+      return 'Microphone'
   }
 }
 
+/** All presets, recommended mic-type first. */
 export function presetsForMic(deviceName: string): NoisePreset[] {
   const kind = detectNoiseMicKind(deviceName)
-  const preferred = NOISE_PRESETS.filter(
-    (preset) => preset.kinds === 'all' || preset.kinds.includes(kind),
-  )
-  return preferred.length > 0 ? preferred : NOISE_PRESETS.filter((preset) => preset.kinds === 'all')
+  return [...NOISE_PRESETS].sort((left, right) => {
+    const leftScore = presetSortScore(left, kind)
+    const rightScore = presetSortScore(right, kind)
+    if (leftScore !== rightScore) {
+      return leftScore - rightScore
+    }
+    return left.label.localeCompare(right.label)
+  })
+}
+
+function presetSortScore(preset: NoisePreset, kind: NoiseMicKind): number {
+  if (preset.kinds !== 'all' && preset.kinds.includes(kind)) {
+    return 0
+  }
+  if (preset.id === 'streaming') {
+    return 1
+  }
+  if (preset.id === 'balanced') {
+    return 2
+  }
+  if (preset.kinds === 'all') {
+    return 3
+  }
+  return 4
 }
 
 export function recommendedPresetForMic(deviceName: string): NoisePreset {
   const kind = detectNoiseMicKind(deviceName)
-  const match = NOISE_PRESETS.find(
-    (preset) => preset.kinds !== 'all' && preset.kinds.includes(kind) && preset.id === kind,
+  return (
+    NOISE_PRESETS.find((preset) => preset.kinds !== 'all' && preset.kinds.includes(kind)) ??
+    NOISE_PRESETS.find((preset) => preset.id === 'streaming') ??
+    NOISE_PRESETS.find((preset) => preset.id === 'balanced') ??
+    NOISE_PRESETS[0]
   )
-  if (match) {
-    return match
-  }
-
-  const streaming = NOISE_PRESETS.find((preset) => preset.id === 'streaming')
-  return streaming ?? NOISE_PRESETS.find((preset) => preset.id === 'balanced') ?? NOISE_PRESETS[0]
 }
 
 export function applyNoisePreset(preset: NoisePreset): NoiseSuppressionSettings {
