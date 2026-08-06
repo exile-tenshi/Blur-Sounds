@@ -271,12 +271,50 @@ internal sealed class AudioEngine : IDisposable
     }
 
     /// <summary>
-    /// Legacy no-op. Hi-Fi Cable is Pass-Through without an Output keep-alive client
-    /// (VB-Audio manual). Discord/OBS opening Hi-Fi Cable Output is enough.
+    /// VB-Audio Hi-Fi Cable loops Input→Output while Output capture is open (same as Test cable).
+    /// Restart the keep-alive if it drops mid-stream.
     /// </summary>
     public void EnsureHifiOutputKeepAlive()
     {
-        // Intentionally empty — see HifiCableOutputActivator.
+        if (!UsesHifiCableInput())
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            if (!string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(state, "starting", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        if (hifiOutputActivator?.IsActive == true)
+        {
+            return;
+        }
+
+        try
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+            if (hifiOutputActivator.IsActive)
+            {
+                lock (gate)
+                {
+                    message = "Streaming mix to Hi-Fi Cable Input. Output keep-alive restored.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (gate)
+            {
+                message =
+                    $"Hi-Fi Cable Output keep-alive failed ({ex.Message}). Listeners on Output may hear silence.";
+            }
+        }
     }
 
     public EngineTelemetry GetTelemetry()
@@ -1157,12 +1195,31 @@ internal sealed class AudioEngine : IDisposable
 
         EnsureMixerInputsAttached();
 
-        // Hi-Fi Cable is Pass-Through — do not open an Output keep-alive capture client.
-        // Matching formats + Discord/OBS on Hi-Fi Cable Output is what delivers audio.
+        // Same as Test cable: open Hi-Fi Cable Output capture so Input→Output is live.
+        // Soft-fail — still Play() to Input even if keep-alive cannot start.
+        string? hifiOutputNote = null;
         if (UsesHifiCableInput())
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
-            hifiOutputActivator.Start();
+            try
+            {
+                hifiOutputActivator.Start();
+            }
+            catch (Exception ex)
+            {
+                hifiOutputNote =
+                    $"Output keep-alive failed ({ex.Message}). Discord/OBS may stay silent.";
+            }
+
+            if (hifiOutputActivator.IsActive != true)
+            {
+                hifiOutputNote = hifiOutputActivator.LastError ??
+                    "Output keep-alive did not start — enable Recording → Hi-Fi Cable Output.";
+            }
+            else if (!string.IsNullOrWhiteSpace(hifiOutputActivator.ListenThroughWarning))
+            {
+                hifiOutputNote = hifiOutputActivator.ListenThroughWarning;
+            }
         }
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
@@ -1174,28 +1231,6 @@ internal sealed class AudioEngine : IDisposable
             {
                 message = $"{message} · {routeMessage}";
             }
-        }
-
-        // Still unmute Output levels (no capture client) so Discord isn't stuck at 0%.
-        try
-        {
-            using var enumerator = new MMDeviceEnumerator();
-            foreach (var endpoint in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
-            {
-                using (endpoint)
-                {
-                    if (HifiCableFormat.IsHifiCableDevice(endpoint.FriendlyName) &&
-                        endpoint.FriendlyName.Contains("Output", StringComparison.OrdinalIgnoreCase))
-                    {
-                        HifiCableEndpointVolume.EnsureCaptureUnmuted(endpoint);
-                        HifiCableListenThrough.Disable(endpoint);
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // Best-effort — Start still proceeds.
         }
 
         foreach (var source in microphoneSources.Values)
@@ -1227,11 +1262,28 @@ internal sealed class AudioEngine : IDisposable
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
             var bind = outputBroadcast?.BindingDescription;
             var bindSuffix = string.IsNullOrWhiteSpace(bind) ? string.Empty : $" ({bind})";
-            var hifiSuffix = UsesHifiCableInput()
-                ? pumpOk
-                    ? " Set Discord/OBS input to Hi-Fi Cable Output."
-                    : " Cable Input pump did not start — try Setup → Test cable, then Apply clean audio settings."
-                : string.Empty;
+            var mixPeak = mixMeter?.Peak ?? 0f;
+            var pullPeak = OutputPullMeter.Peak;
+            string hifiSuffix;
+            if (!UsesHifiCableInput())
+            {
+                hifiSuffix = string.Empty;
+            }
+            else if (!string.IsNullOrWhiteSpace(hifiOutputNote))
+            {
+                hifiSuffix = $" {hifiOutputNote}";
+            }
+            else if (!pumpOk)
+            {
+                hifiSuffix =
+                    " Cable Input pump did not start — try Setup → Test cable, then Apply clean audio settings.";
+            }
+            else
+            {
+                hifiSuffix =
+                    " Output keep-alive on (same as Test cable). Set Discord/OBS to Hi-Fi Cable Output.";
+            }
+
             var targetLabel = UsesHifiCableInput() ? "Hi-Fi Cable Input" : "input";
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to {targetLabel}.{routeSuffix}{bindSuffix}{hifiSuffix}"
