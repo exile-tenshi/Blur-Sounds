@@ -7,6 +7,7 @@ import { registerAudioIpc } from './ipc/audioIpc.js'
 import { registerClipIpc } from './ipc/clipIpc.js'
 import { registerSettingsIpc } from './ipc/settingsIpc.js'
 import { ClipKeybindService } from './recording/clipKeybinds.js'
+import { ClipVoiceCommandService } from './recording/clipVoiceCommands.js'
 import { SettingsStore } from './settings/settingsStore.js'
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
@@ -19,6 +20,7 @@ const appIconPath = app.isPackaged
 
 let audioStore: RoutingStore | undefined
 let clipKeybinds: ClipKeybindService | undefined
+let clipVoiceCommands: ClipVoiceCommandService | undefined
 
 mkdirSync(appDataRoot, { recursive: true })
 mkdirSync(sessionDataRoot, { recursive: true })
@@ -28,6 +30,8 @@ app.setPath('sessionData', sessionDataRoot)
 app.setName('Blur Sounds')
 
 function shutdownAudioStore(): void {
+  clipVoiceCommands?.stop()
+  clipVoiceCommands = undefined
   clipKeybinds?.unregisterAll()
   clipKeybinds = undefined
 
@@ -63,9 +67,10 @@ async function createMainWindow(): Promise<void> {
 
   const settings = new SettingsStore()
   clipKeybinds = new ClipKeybindService(settings)
+  clipVoiceCommands = new ClipVoiceCommandService(settings, clipKeybinds)
   registerSettingsIpc(mainWindow, settings)
   audioStore = registerAudioIpc(mainWindow)
-  registerClipIpc(mainWindow, settings, clipKeybinds)
+  registerClipIpc(mainWindow, settings, clipKeybinds, clipVoiceCommands)
 
   mainWindow.on('closed', () => {
     shutdownAudioStore()
@@ -101,5 +106,6 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
+  clipVoiceCommands?.stop()
   clipKeybinds?.unregisterAll()
 })

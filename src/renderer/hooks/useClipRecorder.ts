@@ -56,7 +56,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 8
+export const CLIPS_PICKER_BUILD = 9
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -129,6 +129,7 @@ export function useClipRecorder() {
   const [selectedSourceId, setSelectedSourceId] = useState('')
   const [lookbackSeconds, setLookbackSecondsState] = useState<ClipLookbackSeconds>(60)
   const [keybinds, setKeybinds] = useState<string[]>(['F8'])
+  const [voiceCommandsEnabled, setVoiceCommandsEnabledState] = useState(true)
   const [bufferingEnabled, setBufferingEnabledState] = useState(false)
   const [status, setStatus] = useState<ClipRecordingStatus>({
     recording: false,
@@ -140,6 +141,7 @@ export function useClipRecorder() {
     forwardSeconds: 15,
     outputFolder: '',
     keybinds: ['F8'],
+    voiceCommandsEnabled: true,
   })
   const [error, setError] = useState<string>()
   const [isBusy, setIsBusy] = useState(false)
@@ -248,6 +250,7 @@ export function useClipRecorder() {
       setLookbackSecondsState(clipSettings.lookbackSeconds)
       lookbackRef.current = clipSettings.lookbackSeconds
       setKeybinds(clipSettings.keybinds)
+      setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
       setBufferingEnabledState(clipSettings.bufferingEnabled)
 
       // Screens + live games/apps (process list). No desktopCapturer freeze on open.
@@ -549,6 +552,16 @@ export function useClipRecorder() {
     [clipControl, startBuffering, stopBuffering],
   )
 
+  const setVoiceCommandsEnabled = useCallback(
+    async (enabled: boolean) => {
+      setVoiceCommandsEnabledState(enabled)
+      if (clipControl) {
+        await clipControl.setSettings({ voiceCommandsEnabled: enabled })
+      }
+    },
+    [clipControl],
+  )
+
   const selectSource = useCallback(
     async (sourceId: string) => {
       setSelectedSourceId(sourceId)
@@ -594,6 +607,7 @@ export function useClipRecorder() {
         setLookbackSecondsState(clipSettings.lookbackSeconds)
         lookbackRef.current = clipSettings.lookbackSeconds
         setKeybinds(clipSettings.keybinds)
+        setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
         setBufferingEnabledState(clipSettings.bufferingEnabled)
         setSelectedSourceId(clipSettings.sourceId ?? '')
         setStatus({ ...nextStatus, outputFolder: folder })
@@ -695,6 +709,8 @@ export function useClipRecorder() {
     addKeybindFromCapture,
     removeKeybind,
     listeningForKeybind,
+    voiceCommandsEnabled,
+    setVoiceCommandsEnabled,
     bufferingEnabled,
     setBufferingEnabled,
     status,

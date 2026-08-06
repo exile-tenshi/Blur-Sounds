@@ -18,6 +18,8 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
     addKeybindFromCapture,
     removeKeybind,
     listeningForKeybind,
+    voiceCommandsEnabled,
+    setVoiceCommandsEnabled,
     bufferingEnabled,
     setBufferingEnabled,
     status,
@@ -220,6 +222,22 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
               ))}
             </ul>
           </div>
+
+          <label className="eq-toggle noise-toggle">
+            <input
+              type="checkbox"
+              checked={voiceCommandsEnabled}
+              disabled={clipping}
+              onChange={(event) => void setVoiceCommandsEnabled(event.target.checked)}
+            />
+            <span className="eq-toggle-track" />
+            <span>Voice clip commands</span>
+          </label>
+          <p className="muted">
+            Say <strong>clip it blur</strong> or <strong>blur clip it</strong> to save with your
+            current lookback preset (same as Clip it / keybind). Uses Windows speech on your default
+            mic — needs an English speech pack installed.
+          </p>
 
           <p className="muted clip-folder">
             Save folder: {status.outputFolder || 'Desktop/Blur Sounds Clips'}

@@ -5,19 +5,23 @@ import type { SaveClipPayload } from '../../shared/clipApi.js'
 import type { ClipSettings } from '../../shared/appSettings.js'
 import { ClipRecorderService } from '../recording/clipRecorder.js'
 import { ClipKeybindService } from '../recording/clipKeybinds.js'
+import { ClipVoiceCommandService } from '../recording/clipVoiceCommands.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 export function registerClipIpc(
   mainWindow: BrowserWindow,
   settings: SettingsStore,
   keybinds: ClipKeybindService,
+  voiceCommands?: ClipVoiceCommandService,
 ): ClipRecorderService {
   const recorder = new ClipRecorderService(settings)
   keybinds.setMainWindow(mainWindow)
   keybinds.refresh()
+  voiceCommands?.refresh()
 
   settings.subscribe(() => {
     keybinds.refresh()
+    voiceCommands?.refresh()
   })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -93,6 +97,7 @@ export function registerClipIpc(
   ipcMain.handle(clipChannels.setSettings, (_event, patch: Partial<ClipSettings>) => {
     const next = settings.set({ clip: patch })
     keybinds.refresh()
+    voiceCommands?.refresh()
     return next.clip
   })
   ipcMain.handle(clipChannels.addKeybind, (_event, accelerator: string) => {
