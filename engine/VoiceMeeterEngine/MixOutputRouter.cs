@@ -60,6 +60,15 @@ internal sealed class MixOutputRouter : IMixOutputBroadcast
         activeOutput?.Play();
     }
 
+    /// <summary>
+    /// Hi-Fi only: if the bound pump pulled no bytes after Play, rebind on the other backend.
+    /// </summary>
+    public bool TryRecoverSilentPump(int settleMilliseconds = 450)
+    {
+        return activeOutput is WasapiMixOutputBroadcast wasapi &&
+               wasapi.TryRecoverSilentPump(settleMilliseconds);
+    }
+
     public void Stop()
     {
         activeOutput?.Stop();

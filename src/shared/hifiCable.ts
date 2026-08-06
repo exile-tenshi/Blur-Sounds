@@ -246,6 +246,17 @@ export function describeHifiFormatStartBlocker(result: {
   const playbackOk = result.playbackStatus?.atStudioQuality === true
   const recordingOk = result.recordingStatus?.atStudioQuality === true
 
+  const exclusiveOn =
+    result.playbackStatus?.exclusiveModeEnabled === true ||
+    result.recordingStatus?.exclusiveModeEnabled === true
+  if (exclusiveOn) {
+    return (
+      'Hi-Fi Cable still has exclusive mode enabled. In Windows Sound → Advanced on both ' +
+      'Hi-Fi Cable Input and Output, uncheck Allow applications exclusive control, then ' +
+      'click Apply clean audio settings and Start again.'
+    )
+  }
+
   // Ideal: both sides report clean 48 kHz MixFormat.
   if (playbackOk && recordingOk) {
     return undefined

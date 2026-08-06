@@ -752,21 +752,6 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
-    // Soft warning only — hard-stopping the engine here left users with a dead cable
-    // even when Input render was already pumping (Pass-Through / Discord open on Output).
-    if (this.engineStatus.hifiOutputActive === false) {
-      const keepAliveWarning =
-        this.engineStatus.hifiOutputError ||
-        'Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output and leave ASIO Bridge on Pass-Through if Discord/OBS stay silent.'
-      if (!this.engineStatus.message?.includes('Listen to this device')) {
-        this.engineStatus = {
-          ...this.engineStatus,
-          message: keepAliveWarning,
-          hifiOutputError: keepAliveWarning,
-        }
-      }
-    }
-
     return this.emitCachedSnapshot()
   }
 
