@@ -6,8 +6,8 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Streams the live mix to a Windows playback endpoint (Hi-Fi Cable Input, Voicemeeter input, etc.).
-/// Hi-Fi Cable prefers NAudio WasapiOut with IEEE float (custom WASAPI render stays silent on some
-/// hosts). Packed PCM24 is never fed to WasapiOut — that path caused extreme bitrattling.
+/// Hi-Fi Cable prefers NAudio WasapiOut with IEEE float (custom render can stay silent on some hosts).
+/// Packed PCM24 is never fed to WasapiOut. After Play, a silent pump can fail over to WASAPI render.
 /// </summary>
 internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
 {
@@ -17,6 +17,10 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
     private MMDevice? boundDevice;
     private Action? playAction;
     private Action? stopAction;
+    private string? boundDeviceId;
+    private string boundDeviceName = string.Empty;
+    private bool boundIsHiFi;
+    private bool preferWasapiOut = true;
 
     public WasapiMixOutputBroadcast(Func<ISampleProvider> sourceFactory, WaveFormat sourceFormat)
     {
@@ -30,134 +34,53 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
 
     public void Bind(MMDevice device)
     {
-        DisposeOutputs();
-        OutputPullMeter.Reset();
+        boundDeviceId = device.ID;
+        boundDeviceName = device.FriendlyName;
+        boundIsHiFi = HifiCableFormat.IsHifiCableDevice(boundDeviceName);
+        preferWasapiOut = boundIsHiFi;
+        BindInternal();
+    }
 
-        var delegatingSource = new DelegateSampleProvider(sourceFormat, sourceFactory);
-        var deviceName = device.FriendlyName;
-        var deviceId = device.ID;
-        var isHiFiTarget = HifiCableFormat.IsHifiCableDevice(deviceName);
-        var qualityHint = HifiCableOutputFormat.GetSetupQualityHint(deviceName);
-        var attempts = HifiCableOutputBindPlanner.GetAttempts(device, deviceName);
-
-        Exception? lastError = null;
-        using var enumerator = new MMDeviceEnumerator();
-
-        foreach (var attempt in attempts)
+    /// <summary>
+    /// After Play(), if the render pump pulled no bytes, flip backend and play again.
+    /// </summary>
+    public bool TryRecoverSilentPump(int settleMilliseconds = 450)
+    {
+        if (!boundIsHiFi || string.IsNullOrWhiteSpace(boundDeviceId))
         {
-            MMDevice? attemptDevice = null;
+            return OutputPullMeter.BytesPulled > 0;
+        }
+
+        var before = OutputPullMeter.BytesPulled;
+        Thread.Sleep(Math.Max(100, settleMilliseconds));
+        if (OutputPullMeter.BytesPulled > before)
+        {
+            return true;
+        }
+
+        preferWasapiOut = !preferWasapiOut;
+        try
+        {
+            BindInternal();
+            playAction?.Invoke();
+        }
+        catch
+        {
+            preferWasapiOut = !preferWasapiOut;
             try
             {
-                // Fresh MMDevice per attempt — NAudio caches AudioClient on MMDevice and a
-                // failed Initialize leaves that cache unusable for retries.
-                attemptDevice = enumerator.GetDevice(deviceId);
-                if (isHiFiTarget)
-                {
-                    HifiCableEndpointVolume.EnsurePlaybackAudible(attemptDevice);
-                }
-
-                var bindFormat = isHiFiTarget
-                    ? ToWasapiOutSafeFormat(ResolveBindFormat(attemptDevice, attempt.Format, isHiFiTarget: true))
-                    : attempt.Format;
-                var outputSource = CreateOutputSource(delegatingSource, bindFormat);
-                var waveProvider = new FullBlockWaveProvider(
-                    OutputWaveProviderFactory.Create(outputSource, bindFormat));
-                var latencyMilliseconds = isHiFiTarget
-                    ? LatencyTuning.HiFiOutputLatencyMilliseconds
-                    : LatencyTuning.OutputLatencyMilliseconds;
-
-                if (isHiFiTarget)
-                {
-                    // WasapiOut + float is the reliable Cable Input pump on this product.
-                    // Custom WasapiRenderBroadcast Initialize can succeed while Play stays silent.
-                    var wasapiOut = new WasapiOutBroadcast();
-                    wasapiOut.Configure(
-                        attemptDevice,
-                        waveProvider,
-                        latencyMilliseconds,
-                        useEventSync: false);
-                    outputs.Add(wasapiOut);
-                    playAction = wasapiOut.Play;
-                    stopAction = wasapiOut.Stop;
-                    BindingDescription =
-                        $"Hi-Fi Cable {deviceName} · WasapiOut · {DescribeAttemptFormat(bindFormat)}";
-                }
-                else
-                {
-                    var render = new WasapiRenderBroadcast();
-                    render.Configure(
-                        attemptDevice,
-                        attempt.ShareMode,
-                        useEventSync: attempt.UseEventSync,
-                        latencyMilliseconds,
-                        waveProvider,
-                        attempt.AllowAutoConvert);
-                    outputs.Add(render);
-                    playAction = render.Play;
-                    stopAction = render.Stop;
-                    BindingDescription =
-                        $"WASAPI {deviceName} · {DescribeAttemptFormat(bindFormat)}";
-                }
-
-                boundDevice = attemptDevice;
-                attemptDevice = null;
-                AudioDiagnostics.SetOutputBinding(BindingDescription, bindFormat);
-                return;
+                BindInternal();
+                playAction?.Invoke();
             }
-            catch (Exception ex)
+            catch
             {
-                lastError = ex;
-                DisposeOutputs();
-                attemptDevice?.Dispose();
+                return false;
             }
         }
 
-        // Last resort for Hi-Fi: custom WASAPI render if every WasapiOut attempt failed.
-        if (isHiFiTarget)
-        {
-            foreach (var attempt in attempts)
-            {
-                MMDevice? attemptDevice = null;
-                try
-                {
-                    attemptDevice = enumerator.GetDevice(deviceId);
-                    HifiCableEndpointVolume.EnsurePlaybackAudible(attemptDevice);
-                    var bindFormat = ResolveBindFormat(attemptDevice, attempt.Format, isHiFiTarget: true);
-                    var outputSource = CreateOutputSource(delegatingSource, bindFormat);
-                    var waveProvider = new FullBlockWaveProvider(
-                        OutputWaveProviderFactory.Create(outputSource, bindFormat));
-                    var render = new WasapiRenderBroadcast();
-                    render.Configure(
-                        attemptDevice,
-                        attempt.ShareMode,
-                        useEventSync: false,
-                        LatencyTuning.HiFiOutputLatencyMilliseconds,
-                        waveProvider,
-                        attempt.AllowAutoConvert);
-                    outputs.Add(render);
-                    playAction = render.Play;
-                    stopAction = render.Stop;
-                    boundDevice = attemptDevice;
-                    attemptDevice = null;
-                    BindingDescription =
-                        $"Hi-Fi Cable {deviceName} · WASAPI · {DescribeAttemptFormat(bindFormat)}";
-                    AudioDiagnostics.SetOutputBinding(BindingDescription, bindFormat);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    lastError = ex;
-                    DisposeOutputs();
-                    attemptDevice?.Dispose();
-                }
-            }
-        }
-
-        throw CreateBindException(
-            deviceName,
-            isHiFiTarget,
-            qualityHint,
-            lastError ?? new InvalidOperationException("No bind attempts were generated."));
+        before = OutputPullMeter.BytesPulled;
+        Thread.Sleep(Math.Max(100, settleMilliseconds));
+        return OutputPullMeter.BytesPulled > before;
     }
 
     public void Play()
@@ -175,13 +98,123 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
         DisposeOutputs();
     }
 
-    private static WaveFormat ResolveBindFormat(MMDevice device, WaveFormat attemptFormat, bool isHiFiTarget)
+    private void BindInternal()
     {
-        if (!isHiFiTarget)
+        DisposeOutputs();
+        OutputPullMeter.Reset();
+
+        if (string.IsNullOrWhiteSpace(boundDeviceId))
         {
-            return attemptFormat;
+            throw new InvalidOperationException("No playback device selected for bind.");
         }
 
+        var delegatingSource = new DelegateSampleProvider(sourceFormat, sourceFactory);
+        var qualityHint = HifiCableOutputFormat.GetSetupQualityHint(boundDeviceName);
+        Exception? lastError = null;
+        using var enumerator = new MMDeviceEnumerator();
+
+        MMDevice probeDevice;
+        try
+        {
+            probeDevice = enumerator.GetDevice(boundDeviceId);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Playback device disappeared: {boundDeviceName}", ex);
+        }
+
+        IReadOnlyList<WasapiBindAttempt> attempts;
+        try
+        {
+            attempts = HifiCableOutputBindPlanner.GetAttempts(probeDevice, boundDeviceName);
+        }
+        finally
+        {
+            probeDevice.Dispose();
+        }
+
+        // First pass: preferred backend. Second pass: alternate (Hi-Fi only).
+        foreach (var useWasapiOut in boundIsHiFi
+                     ? (preferWasapiOut ? new[] { true, false } : new[] { false, true })
+                     : new[] { false })
+        {
+            foreach (var attempt in attempts)
+            {
+                MMDevice? attemptDevice = null;
+                try
+                {
+                    attemptDevice = enumerator.GetDevice(boundDeviceId);
+                    if (boundIsHiFi)
+                    {
+                        HifiCableEndpointVolume.EnsurePlaybackAudible(attemptDevice);
+                    }
+
+                    var bindFormat = boundIsHiFi
+                        ? ToWasapiOutSafeFormat(ResolveBindFormat(attemptDevice, attempt.Format))
+                        : attempt.Format;
+                    var outputSource = CreateOutputSource(delegatingSource, bindFormat);
+                    var waveProvider = new FullBlockWaveProvider(
+                        OutputWaveProviderFactory.Create(outputSource, bindFormat));
+                    var latencyMilliseconds = boundIsHiFi
+                        ? LatencyTuning.HiFiOutputLatencyMilliseconds
+                        : LatencyTuning.OutputLatencyMilliseconds;
+
+                    if (useWasapiOut)
+                    {
+                        var wasapiOut = new WasapiOutBroadcast();
+                        wasapiOut.Configure(
+                            attemptDevice,
+                            waveProvider,
+                            latencyMilliseconds,
+                            useEventSync: false);
+                        outputs.Add(wasapiOut);
+                        playAction = wasapiOut.Play;
+                        stopAction = wasapiOut.Stop;
+                        BindingDescription =
+                            $"Hi-Fi Cable {boundDeviceName} · WasapiOut · {DescribeAttemptFormat(bindFormat)}";
+                    }
+                    else
+                    {
+                        var render = new WasapiRenderBroadcast();
+                        render.Configure(
+                            attemptDevice,
+                            attempt.ShareMode,
+                            useEventSync: false,
+                            latencyMilliseconds,
+                            waveProvider,
+                            attempt.AllowAutoConvert);
+                        outputs.Add(render);
+                        playAction = render.Play;
+                        stopAction = render.Stop;
+                        BindingDescription = boundIsHiFi
+                            ? $"Hi-Fi Cable {boundDeviceName} · WASAPI · {DescribeAttemptFormat(bindFormat)}"
+                            : $"WASAPI {boundDeviceName} · {DescribeAttemptFormat(bindFormat)}";
+                    }
+
+                    boundDevice = attemptDevice;
+                    attemptDevice = null;
+                    preferWasapiOut = useWasapiOut;
+                    AudioDiagnostics.SetOutputBinding(BindingDescription, bindFormat);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    DisposeOutputs();
+                    attemptDevice?.Dispose();
+                }
+            }
+        }
+
+        throw CreateBindException(
+            boundDeviceName,
+            boundIsHiFi,
+            qualityHint,
+            lastError ?? new InvalidOperationException("No bind attempts were generated."));
+    }
+
+    private static WaveFormat ResolveBindFormat(MMDevice device, WaveFormat attemptFormat)
+    {
         try
         {
             var mixFormat = device.AudioClient.MixFormat;
@@ -191,18 +224,23 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
             {
                 return WaveFormat.CreateIeeeFloatWaveFormat(mixFormat.SampleRate, mixFormat.Channels);
             }
+
+            // Prefer the live MixFormat rate as float — bit-perfect Hi-Fi stays audible.
+            if (mixFormat.SampleRate > 0)
+            {
+                return WaveFormat.CreateIeeeFloatWaveFormat(
+                    mixFormat.SampleRate,
+                    Math.Max(1, mixFormat.Channels));
+            }
         }
         catch
         {
-            // Fall through to attempt format.
+            // Fall through.
         }
 
         return ToWasapiOutSafeFormat(attemptFormat);
     }
 
-    /// <summary>
-    /// WasapiOut must receive IEEE float. Packed 24-bit PCM Extensible is rewritten as float.
-    /// </summary>
     private static WaveFormat ToWasapiOutSafeFormat(WaveFormat attemptFormat)
     {
         if (WaveFormatUtility.IsFloatFormat(attemptFormat))
