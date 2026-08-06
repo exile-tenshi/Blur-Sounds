@@ -27,42 +27,39 @@ internal static class HifiCableOutputBindPlanner
             return attempts;
         }
 
-        var mixRate = 0;
+        WaveFormat? mixFormat = null;
         try
         {
-            mixRate = device.AudioClient.MixFormat.SampleRate;
+            mixFormat = device.AudioClient.MixFormat;
         }
         catch
         {
-            // MixFormat unavailable — fall through to 48 kHz attempts.
+            // MixFormat unavailable — fall through to engine formats.
         }
 
-        // Prefer engine-native IEEE float first (matches shared-mode MixFormat on most hosts).
-        // WasapiOut + packed PCM24 Extensible (3-byte container) is a known extreme-bitrattling path:
-        // NAudio Init uses AutoConvert without a DMO resampler, and WaveFormatExtensible(24-bit)
-        // is non-standard vs Windows 24-in-32 MixFormat.
-        if (mixRate == HifiStreamingPolicy.EngineMixSampleRate || mixRate == 0)
+        // Match MixFormat first (shared mode is cleanest this way).
+        if (mixFormat is not null && WaveFormatUtility.IsFloatFormat(mixFormat))
         {
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, false, true);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmPacked, false, true);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, false, false);
-            return attempts;
+            var mixFloat = WaveFormat.CreateIeeeFloatWaveFormat(
+                mixFormat.SampleRate,
+                Math.Max(1, mixFormat.Channels));
+            AddAttempt(attempts, AudioClientShareMode.Shared, mixFloat, false, false);
+            AddAttempt(attempts, AudioClientShareMode.Shared, mixFloat, true, false);
+            AddAttempt(attempts, AudioClientShareMode.Shared, mixFloat, false, true);
         }
 
-        if (mixRate == HifiStreamingPolicy.DeviceSampleRate)
-        {
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, true, false);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, true);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, false, true);
-            AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmPacked, false, true);
-        }
-
+        // Engine-native 48 kHz float — no upsampling when the cable is at clean 48 kHz.
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, false);
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
+
+        // Fallback if the cable is still at 384 kHz studio rate.
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, false);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioFloat, false, true);
+
+        // PCM only with AutoConvert as last resorts (WasapiRender can handle these correctly).
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, false, true);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, false, true);
 
         return attempts;
     }
