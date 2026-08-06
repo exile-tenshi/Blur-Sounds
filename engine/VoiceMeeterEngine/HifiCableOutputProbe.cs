@@ -49,7 +49,7 @@ internal static class HifiCableOutputProbe
         Exception? lastError = null;
         foreach (var attempt in attempts)
         {
-            WasapiRenderBroadcast? render = null;
+            WasapiOutBroadcast? output = null;
             WasapiCapture? capture = null;
             MMDevice? attemptPlayback = null;
             var capturedPeak = 0f;
@@ -57,6 +57,10 @@ internal static class HifiCableOutputProbe
             {
                 attemptPlayback = enumerator.GetDevice(playback.ID);
                 HifiCableEndpointVolume.EnsurePlaybackAudible(attemptPlayback);
+                if (recording is not null)
+                {
+                    HifiCableEndpointVolume.EnsureCaptureUnmuted(recording);
+                }
 
                 var bindFormat = WaveFormatUtility.IsFloatFormat(attempt.Format)
                     ? attempt.Format
@@ -70,14 +74,12 @@ internal static class HifiCableOutputProbe
 
                 var waveProvider = new PeakReportingWaveProvider(
                     OutputWaveProviderFactory.Create(outputSource, bindFormat));
-                render = new WasapiRenderBroadcast();
-                render.Configure(
+                output = new WasapiOutBroadcast();
+                output.Configure(
                     attemptPlayback,
-                    attempt.ShareMode,
-                    useEventSync: false,
-                    LatencyTuning.HiFiOutputLatencyMilliseconds,
                     waveProvider,
-                    attempt.AllowAutoConvert);
+                    LatencyTuning.HiFiOutputLatencyMilliseconds,
+                    useEventSync: false);
                 attemptPlayback = null;
 
                 if (recording is not null)
@@ -100,7 +102,7 @@ internal static class HifiCableOutputProbe
                 }
 
                 OutputPullMeter.Reset();
-                render.Play();
+                output.Play();
                 var recordMeterPeak = 0f;
                 var deadline = DateTime.UtcNow.AddMilliseconds(durationMilliseconds);
                 while (DateTime.UtcNow < deadline)
@@ -121,11 +123,11 @@ internal static class HifiCableOutputProbe
                 }
 
                 var peak = OutputPullMeter.Peak;
-                render.Stop();
+                output.Stop();
                 capture?.StopRecording();
 
                 report.AppendLine(
-                    $"OK WASAPI {DescribeFormat(bindFormat)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
+                    $"OK WasapiOut {DescribeFormat(bindFormat)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
 
                 if (peak > 0.001f && (capturedPeak > 0.001f || recordMeterPeak > 0.001f))
                 {
@@ -135,12 +137,12 @@ internal static class HifiCableOutputProbe
             catch (Exception ex)
             {
                 lastError = ex;
-                report.AppendLine($"FAIL WASAPI {DescribeFormat(attempt.Format)}: {ex.Message}");
+                report.AppendLine($"FAIL WasapiOut {DescribeFormat(attempt.Format)}: {ex.Message}");
             }
             finally
             {
                 capture?.Dispose();
-                render?.Dispose();
+                output?.Dispose();
                 attemptPlayback?.Dispose();
             }
         }
