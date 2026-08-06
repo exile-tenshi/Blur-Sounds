@@ -632,7 +632,8 @@ function MicNoiseCard({
             <div>
               <h3>Noise reduction</h3>
               <p className="muted clearcast-module-note">
-                Background and Impact shape classic cleanup alongside ClearCast AI
+                Background = fans/room. Impact = desk taps, bumps, keyboard — 0 keeps them
+                natural, higher removes them.
               </p>
             </div>
             <SonarToggle
@@ -643,7 +644,7 @@ function MicNoiseCard({
                 if (checked) {
                   void onChange({
                     threshold: settings.threshold > 0 ? settings.threshold : 55,
-                    impact: settings.impact > 0 ? settings.impact : 40,
+                    impact: settings.impact,
                   })
                 } else {
                   void onChange({ threshold: 0, impact: 0 })
@@ -672,6 +673,9 @@ function MicNoiseCard({
                 void onChange({ impact })
               }}
             />
+            <p className="muted clearcast-module-note">
+              Set Impact to 0 to hear real taps; raise it to strip desk / keyboard hits.
+            </p>
           </div>
         </section>
 
@@ -799,9 +803,12 @@ export function NoiseSuppressionSection({
     void onEnsureDevice(preferred.id).then(async (slotId) => {
       if (slotId) {
         await onChange(slotId, applyNoisePreset(preset))
+        if (preset.equalizer) {
+          await onSetEqualizer(slotId, normalizeMicEqualizer(preset.equalizer))
+        }
       }
     })
-  }, [autoTrackedDefault, microphoneDevices, onChange, onEnsureDevice, trackedSlots.length])
+  }, [autoTrackedDefault, microphoneDevices, onChange, onEnsureDevice, onSetEqualizer, trackedSlots.length])
 
   return (
     <section className="panel noise-editor sonar-noise">
