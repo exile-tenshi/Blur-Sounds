@@ -1,4 +1,4 @@
-import { DEFAULT_INPUT_GAIN } from './audioConstants.js'
+import { DEFAULT_INPUT_GAIN, normalizeMicEqualizer } from './audioConstants.js'
 import { normalizeNoiseSuppression } from './noiseSuppression.js'
 import type { DeviceSelection, MicrophoneSlot } from './audioTypes.js'
 
@@ -16,6 +16,7 @@ export function createMicrophoneSlot(partial?: Partial<MicrophoneSlot>): Microph
     volume: partial?.volume ?? DEFAULT_INPUT_GAIN,
     noiseSuppression: noiseSuppressionSettings.enabled,
     noiseSuppressionSettings,
+    equalizer: normalizeMicEqualizer(partial?.equalizer),
   }
 }
 
@@ -36,6 +37,7 @@ export function normalizeMicrophoneSlots(selection: DeviceSelection): Microphone
         volume: slot.volume ?? DEFAULT_INPUT_GAIN,
         noiseSuppression: noiseSuppressionSettings.enabled,
         noiseSuppressionSettings,
+        equalizer: normalizeMicEqualizer(slot.equalizer),
       }
     })
   }
@@ -92,6 +94,9 @@ export function updateMicrophoneSlot(
       ...merged,
       noiseSuppression: noiseSuppressionSettings.enabled,
       noiseSuppressionSettings,
+      equalizer: normalizeMicEqualizer(
+        patch.equalizer !== undefined ? patch.equalizer : slot.equalizer,
+      ),
     }
   })
 }

@@ -12,7 +12,7 @@ import type {
   MicrophoneSlot,
   RoutedInput,
 } from '../../shared/audioTypes.js'
-import { readRouteEqualizer } from '../../shared/audioConstants.js'
+import { readRouteEqualizer, normalizeMicEqualizer } from '../../shared/audioConstants.js'
 import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots.js'
 
 interface EngineTelemetryEvent {
@@ -553,6 +553,7 @@ function toEngineMicrophones(slots: MicrophoneSlot[]): MicrophoneSlot[] {
     volume: slot.volume ?? 1,
     noiseSuppression: slot.noiseSuppressionSettings?.enabled ?? slot.noiseSuppression ?? false,
     noiseSuppressionSettings: slot.noiseSuppressionSettings,
+    equalizer: normalizeMicEqualizer(slot.equalizer),
   }))
 }
 

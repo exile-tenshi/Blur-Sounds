@@ -10,6 +10,7 @@ import {
   equalizerSettingsToPayload,
   routeEqualizersEqual,
   type EqBandKey,
+  type EqPreset,
   type RouteEqualizerSettings,
 } from '../../shared/audioConstants'
 import {
@@ -28,6 +29,14 @@ interface GraphicalEqualizerProps {
   value: RouteEqualizerSettings
   disabled?: boolean
   title?: string
+  /** Override band input labels (e.g. Sonar Sub bass…Highs). */
+  bandLabels?: readonly string[]
+  /** Optional region headers above the graph (SUB BASS…HIGHS). */
+  regionLabels?: readonly string[]
+  /** Preset list — defaults to music EQ_PRESETS; mic page passes MIC_EQ_PRESETS. */
+  presets?: EqPreset[]
+  /** When true, bands/presets stay editable even if the EQ toggle is off. */
+  alwaysEditable?: boolean
   onChange: (value: RouteEqualizerSettings) => void
 }
 
@@ -142,6 +151,10 @@ function GraphicalEqualizerInner({
   value,
   disabled = false,
   title = 'Equalizer',
+  bandLabels = EQ_BAND_LABELS,
+  regionLabels,
+  presets = EQ_PRESETS,
+  alwaysEditable = false,
   onChange,
 }: GraphicalEqualizerProps) {
   const [settings, setSettings] = useState(value)
@@ -193,7 +206,7 @@ function GraphicalEqualizerInner({
   const bandValues = useMemo(() => getBandValues(settings), [settings])
   const curvePath = useMemo(() => buildSmoothCurvePath(bandValues), [bandValues])
   const fillPath = useMemo(() => buildFilledCurvePath(bandValues), [bandValues])
-  const isInteractive = !disabled && settings.enabled
+  const isInteractive = !disabled && (alwaysEditable || settings.enabled)
 
   const commit = useCallback(
     (next: RouteEqualizerSettings) => {
@@ -218,13 +231,13 @@ function GraphicalEqualizerInner({
   )
 
   const applyPreset = (nextPresetId: string) => {
-    const preset = EQ_PRESETS.find((item) => item.id === nextPresetId)
+    const preset = presets.find((item) => item.id === nextPresetId)
     if (!preset) {
       return
     }
 
     setPresetId(nextPresetId)
-    commit(preset.settings)
+    commit({ ...preset.settings, enabled: settingsRef.current.enabled || preset.settings.enabled })
   }
 
   const reset = () => {
@@ -288,7 +301,7 @@ function GraphicalEqualizerInner({
                 onChange={(event) => applyPreset(event.target.value)}
               >
                 {presetId === 'custom' ? <option value="custom">Custom</option> : null}
-                {EQ_PRESETS.map((preset) => (
+                {presets.map((preset) => (
                   <option key={preset.id} value={preset.id}>
                     {preset.name}
                   </option>
@@ -300,6 +313,14 @@ function GraphicalEqualizerInner({
             </button>
           </div>
         </div>
+
+        {regionLabels && regionLabels.length > 0 ? (
+          <div className="eq-region-labels" aria-hidden="true">
+            {regionLabels.map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+          </div>
+        ) : null}
 
         <div className="graphical-equalizer-stage">
         <svg
@@ -359,7 +380,7 @@ function GraphicalEqualizerInner({
             <EqBandField
               key={bandKey}
               bandKey={bandKey}
-              label={EQ_BAND_LABELS[index]}
+              label={bandLabels[index] ?? EQ_BAND_LABELS[index]}
               value={settings[bandKey]}
               disabled={!isInteractive}
               focused={focusedBand === bandKey}
@@ -399,6 +420,10 @@ function equalizerPropsEqual(
     previous.disabled === next.disabled &&
     previous.title === next.title &&
     previous.onChange === next.onChange &&
+    previous.alwaysEditable === next.alwaysEditable &&
+    previous.presets === next.presets &&
+    previous.bandLabels === next.bandLabels &&
+    previous.regionLabels === next.regionLabels &&
     routeEqualizersEqual(previous.value, next.value)
   )
 }

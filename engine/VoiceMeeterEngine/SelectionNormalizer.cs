@@ -19,6 +19,33 @@ internal sealed class MicrophoneSlotConfig
 
     [System.Text.Json.Serialization.JsonPropertyName("noiseSuppressionSettings")]
     public NoiseSuppressionSettingsConfig? NoiseSuppressionSettings { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("equalizer")]
+    public MicEqualizerConfig? Equalizer { get; set; }
+}
+
+internal sealed class MicEqualizerConfig
+{
+    [System.Text.Json.Serialization.JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    [System.Text.Json.Serialization.JsonPropertyName("band60Db")]
+    public float Band60Db { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("band150Db")]
+    public float Band150Db { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("band400Db")]
+    public float Band400Db { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("band1000Db")]
+    public float Band1000Db { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("band2400Db")]
+    public float Band2400Db { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("band15000Db")]
+    public float Band15000Db { get; set; }
 }
 
 internal sealed class NoiseSuppressionSettingsConfig

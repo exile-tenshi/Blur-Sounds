@@ -21,6 +21,25 @@ export type EqBandKey = (typeof EQ_BAND_KEYS)[number]
 
 export const EQ_BAND_LABELS = ['60Hz', '150Hz', '400Hz', '1KHz', '2.4KHz', '15KHz'] as const
 
+/** Sonar-style region names for the mic equalizer. */
+export const MIC_EQ_BAND_LABELS = [
+  'Sub bass',
+  'Bass',
+  'Low mids',
+  'Mids',
+  'Upper mids',
+  'Highs',
+] as const
+
+export const MIC_EQ_REGION_LABELS = [
+  'SUB BASS',
+  'BASS',
+  'LOW MIDS',
+  'MID RANGE',
+  'UPPER MIDS',
+  'HIGHS',
+] as const
+
 export interface RouteEqualizerSettings {
   enabled: boolean
   band60Db: number
@@ -39,6 +58,12 @@ export const DEFAULT_ROUTE_EQUALIZER: RouteEqualizerSettings = {
   band1000Db: DEFAULT_EQ_DB,
   band2400Db: DEFAULT_EQ_DB,
   band15000Db: DEFAULT_EQ_DB,
+}
+
+/** Flat mic EQ default — on, no boost/cut (matches Sonar starting point). */
+export const DEFAULT_MIC_EQUALIZER: RouteEqualizerSettings = {
+  ...DEFAULT_ROUTE_EQUALIZER,
+  enabled: true,
 }
 
 export interface EqPreset {
@@ -106,6 +131,85 @@ export const EQ_PRESETS: EqPreset[] = [
     band15000Db: 6,
   }),
 ]
+
+/** Voice-oriented EQ presets for the ClearCast / mic page (Sonar-style). */
+export const MIC_EQ_PRESETS: EqPreset[] = [
+  { id: 'flat', name: 'Flat', settings: { ...DEFAULT_MIC_EQUALIZER } },
+  preset('voice-clarity', 'Voice clarity', {
+    band60Db: -4,
+    band150Db: -2,
+    band400Db: 1,
+    band1000Db: 3,
+    band2400Db: 4,
+    band15000Db: 2,
+  }),
+  preset('broadcast', 'Broadcast', {
+    band60Db: -6,
+    band150Db: -2,
+    band400Db: 2,
+    band1000Db: 4,
+    band2400Db: 3,
+    band15000Db: 1,
+  }),
+  preset('warm', 'Warm', {
+    band60Db: 2,
+    band150Db: 3,
+    band400Db: 1,
+    band1000Db: 0,
+    band2400Db: -1,
+    band15000Db: -2,
+  }),
+  preset('bright', 'Bright', {
+    band60Db: -3,
+    band150Db: -1,
+    band400Db: 0,
+    band1000Db: 2,
+    band2400Db: 4,
+    band15000Db: 5,
+  }),
+  preset('rumble-cut', 'Rumble cut', {
+    band60Db: -8,
+    band150Db: -4,
+    band400Db: 0,
+    band1000Db: 1,
+    band2400Db: 2,
+    band15000Db: 1,
+  }),
+  preset('headset', 'Headset', {
+    band60Db: -5,
+    band150Db: -1,
+    band400Db: 2,
+    band1000Db: 3,
+    band2400Db: 2,
+    band15000Db: 0,
+  }),
+  preset('boom-arm', 'Boom arm', {
+    band60Db: -4,
+    band150Db: -1,
+    band400Db: 1,
+    band1000Db: 3,
+    band2400Db: 3,
+    band15000Db: 2,
+  }),
+]
+
+export function normalizeMicEqualizer(
+  value?: Partial<RouteEqualizerSettings> | null,
+): RouteEqualizerSettings {
+  if (!value) {
+    return { ...DEFAULT_MIC_EQUALIZER }
+  }
+
+  return equalizerSettingsToPayload({
+    enabled: value.enabled ?? DEFAULT_MIC_EQUALIZER.enabled,
+    band60Db: value.band60Db ?? DEFAULT_EQ_DB,
+    band150Db: value.band150Db ?? DEFAULT_EQ_DB,
+    band400Db: value.band400Db ?? DEFAULT_EQ_DB,
+    band1000Db: value.band1000Db ?? DEFAULT_EQ_DB,
+    band2400Db: value.band2400Db ?? DEFAULT_EQ_DB,
+    band15000Db: value.band15000Db ?? DEFAULT_EQ_DB,
+  })
+}
 
 export function clampInputGain(volume: number): number {
   if (!Number.isFinite(volume)) {
