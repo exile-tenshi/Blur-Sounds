@@ -7,14 +7,18 @@ namespace VoiceMeeterEngine;
 
 /// <summary>
 /// Neural mic noise cancellation via RNNoise. Fixed ~10 ms frame delay, 1:1 samples.
-/// High-pass + wet mix + hysteresis residual floor; peak-limit only on overs
-/// so extended speech stays clean (no tanh grit / residual flutter static).
+/// High-pass + wet mix + hysteresis residual floor; peak-limit only on overs.
+/// Impulsive desk taps stay mostly dry + ducked so RNNoise doesn't turn them
+/// into a whooshy “spaceship” swirl while normal speech stays wet/clean.
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
     private const float MinEnvelope = 1e-6f;
     private const float NoiseLearnRate = 0.02f;
-    private const float SpeechLearnRate = 0.28f;
+    /// <summary>Slower than peak so desk taps don't charge the “speech open” path.</summary>
+    private const float SpeechLearnRate = 0.10f;
+    private const float PeakAttackRate = 0.55f;
+    private const float PeakReleaseRate = 0.055f;
     /// <summary>Light makeup only — high makeup made mic taps blast.</summary>
     private const float RnnoiseMakeup = 1.08f;
     /// <summary>Residual room floor when quiet (not near-mute — that pumped on taps).</summary>
@@ -35,6 +39,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private BiQuadFilter? highPass;
     private float highPassHz = 80f;
     private float channelEnvelope = MinEnvelope;
+    private float peakEnvelope = MinEnvelope;
+    private float impulseAmount;
     private float gateGain = 1f;
     private float residualGain = 1f;
     private bool residualSpeechOpen;
@@ -151,8 +157,15 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                     dry = highPass.Transform(dry);
                 }
 
-                // Tame pathological input spikes before RNNoise (mic taps / bumps).
-                dry = SoftClip(dry, 0.95f);
+                UpdateImpulseDetector(Math.Abs(dry));
+
+                // Desk taps / bumps: clip harder before RNNoise so it can't swirl them.
+                var preClip = 0.95f - (impulseAmount * 0.35f);
+                dry = SoftClip(dry, preClip);
+                if (impulseAmount > 0.05f)
+                {
+                    dry *= 1f - (impulseAmount * 0.55f);
+                }
 
                 var clean = ProcessMonoSample(dry);
 
@@ -247,18 +260,24 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         {
             denoiser!.Denoise(processFrame.AsSpan(), finish: false);
 
-            var dryMix = 1f - wet;
-            var makeup = 1f + ((RnnoiseMakeup - 1f) * wet);
+            // High crest-factor frames (desk taps) sound like a swirling spaceship through
+            // RNNoise — keep those mostly dry and ducked; speech frames stay wet.
+            var frameImpulse = MeasureFrameImpulse(dryFrame);
+            var blendImpulse = Math.Max(impulseAmount, frameImpulse);
+            var frameWet = wet * (1f - (blendImpulse * 0.88f));
+            var duck = 1f - (blendImpulse * 0.5f);
+
+            var dryMix = 1f - frameWet;
+            var makeup = 1f + ((RnnoiseMakeup - 1f) * frameWet);
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
-                var mixed = (dryFrame[index] * dryMix) + (processFrame[index] * wet);
+                var mixed = ((dryFrame[index] * dryMix) + (processFrame[index] * frameWet)) * duck * makeup;
                 if (float.IsNaN(mixed) || float.IsInfinity(mixed))
                 {
-                    mixed = dryFrame[index];
+                    mixed = dryFrame[index] * duck;
                 }
 
-                // Pass voice linearly — SoftLimit after residual handles true overs only.
-                outputQueue.Enqueue(mixed * makeup);
+                outputQueue.Enqueue(mixed);
             }
         }
         catch
@@ -292,23 +311,66 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
+    /// Dual envelope: slow “voice” vs fast peak. Desk taps spike peak ≫ voice → impulse.
+    /// </summary>
+    private void UpdateImpulseDetector(float abs)
+    {
+        var peakLearn = abs > peakEnvelope ? PeakAttackRate : PeakReleaseRate;
+        peakEnvelope = Math.Max(MinEnvelope, peakEnvelope + ((abs - peakEnvelope) * peakLearn));
+
+        var voiceLearn = abs > channelEnvelope ? SpeechLearnRate : NoiseLearnRate;
+        channelEnvelope = Math.Max(MinEnvelope, channelEnvelope + ((abs - channelEnvelope) * voiceLearn));
+
+        // Speech rises together; taps jump far above the voice follower.
+        var excess = peakEnvelope - (channelEnvelope * 2.8f);
+        var targetImpulse = Math.Clamp(excess / 0.18f, 0f, 1f);
+        // Impact slider makes impact detection a bit more sensitive (more duck on bumps).
+        targetImpulse = Math.Clamp(targetImpulse + ((impact / 100f) * targetImpulse * 0.25f), 0f, 1f);
+        var coeff = targetImpulse > impulseAmount ? 0.45f : 0.08f;
+        impulseAmount += (targetImpulse - impulseAmount) * coeff;
+        impulseAmount = Math.Clamp(impulseAmount, 0f, 1f);
+    }
+
+    private static float MeasureFrameImpulse(float[] frame)
+    {
+        var peak = 0f;
+        var sumSq = 0f;
+        for (var index = 0; index < frame.Length; index++)
+        {
+            var abs = Math.Abs(frame[index]);
+            if (abs > peak)
+            {
+                peak = abs;
+            }
+
+            sumSq += abs * abs;
+        }
+
+        var rms = MathF.Sqrt(sumSq / Math.Max(1, frame.Length));
+        if (peak < 0.04f || rms < MinEnvelope)
+        {
+            return 0f;
+        }
+
+        var crest = peak / Math.Max(rms, MinEnvelope);
+        // Speech crest is moderate; desk taps / bumps are much peakier.
+        return Math.Clamp((crest - 7.5f) / 14f, 0f, 1f);
+    }
+
+    /// <summary>
     /// Residual floor with speech hysteresis — stays open through quiet consonants
-    /// so extended talk doesn't flutter into static.
+    /// so extended talk doesn't flutter into static. Impulses do not open the path.
     /// </summary>
     private void UpdateResidual(float abs)
     {
-        var previous = channelEnvelope;
-        var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
-        channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
-
+        _ = abs;
         var wet = StrengthToWet(strength);
         var backgroundAmount = background / 100f;
-        var impactAmount = impact / 100f;
-        // Open easily on speech; close only after a deeper quiet gap (hysteresis).
-        // Impact pulls the open threshold down so sudden noises open cleanup faster.
-        var openThreshold = (0.028f - (wet * 0.006f)) * (1f - (impactAmount * 0.35f));
-        var closeThreshold = (0.012f - (wet * 0.003f)) * (1f - (impactAmount * 0.2f));
-        if (!residualSpeechOpen && channelEnvelope >= openThreshold)
+        // Open on sustained voice envelope only — taps already charged peakEnvelope,
+        // but channelEnvelope (slow) must rise for residual to open.
+        var openThreshold = 0.030f - (wet * 0.006f);
+        var closeThreshold = 0.012f - (wet * 0.003f);
+        if (!residualSpeechOpen && channelEnvelope >= openThreshold && impulseAmount < 0.35f)
         {
             residualSpeechOpen = true;
         }
@@ -321,8 +383,13 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var noiseFloor = (ResidualFloorMin + ((1f - wet) * 0.18f)) * (1f - (backgroundAmount * 0.55f));
         noiseFloor = Math.Clamp(noiseFloor, 0.06f, 1f);
         var target = residualSpeechOpen ? 1f : noiseFloor;
-        // Fast-ish open (Impact speeds open), very slow close — continuous speech stays open.
-        var openCoeff = 0.10f + (impactAmount * 0.08f);
+        // Keep residual from slamming open on anything impulse-like.
+        if (impulseAmount > 0.2f)
+        {
+            target = Math.Min(target, 0.35f + ((1f - impulseAmount) * 0.65f));
+        }
+
+        var openCoeff = 0.08f;
         var closeCoeff = 0.008f + ((1f - wet) * 0.006f);
         var coeff = target > residualGain ? openCoeff : closeCoeff;
         residualGain += (target - residualGain) * coeff;
@@ -474,6 +541,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         residualGain = 1f;
         residualSpeechOpen = false;
         channelEnvelope = MinEnvelope;
+        peakEnvelope = MinEnvelope;
+        impulseAmount = 0f;
         compressorEnvelope = MinEnvelope;
         limiterEnvelope = MinEnvelope;
         inputQueue.Clear();
