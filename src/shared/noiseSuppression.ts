@@ -2,8 +2,10 @@ export interface NoiseSuppressionSettings {
   enabled: boolean
   /** 0–100: ClearCast AI intensity (Min → Max) */
   strength: number
-  /** Legacy soft-expander knob — unused by RNNoise, kept for saved settings compat */
+  /** 0–100: classic Noise reduction → Background (Sonar-style) */
   threshold: number
+  /** 0–100: classic Noise reduction → Impact (Sonar-style) */
+  impact: number
   /** High-pass cut in Hz before RNNoise (rumble / fan thump) */
   highPassHz: number
   /** 0–100: optional hard-gate open speed */
@@ -24,6 +26,7 @@ export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
   strength: 88,
   threshold: 55,
+  impact: 40,
   highPassHz: 100,
   attack: 58,
   release: 44,
@@ -62,6 +65,7 @@ export function normalizeNoiseSuppression(
     enabled,
     strength: clampNoisePercent(partial.strength ?? DEFAULT_NOISE_SUPPRESSION.strength),
     threshold: clampNoisePercent(partial.threshold ?? DEFAULT_NOISE_SUPPRESSION.threshold),
+    impact: clampNoisePercent(partial.impact ?? DEFAULT_NOISE_SUPPRESSION.impact),
     highPassHz: clampHighPassHz(partial.highPassHz ?? DEFAULT_NOISE_SUPPRESSION.highPassHz),
     attack: clampNoisePercent(partial.attack ?? DEFAULT_NOISE_SUPPRESSION.attack),
     release: clampNoisePercent(partial.release ?? DEFAULT_NOISE_SUPPRESSION.release),
@@ -69,7 +73,7 @@ export function normalizeNoiseSuppression(
     noiseGateThreshold: clampNoisePercent(
       partial.noiseGateThreshold ?? DEFAULT_NOISE_SUPPRESSION.noiseGateThreshold,
     ),
-    compressorEnabled: enabled && Boolean(partial.compressorEnabled),
+    compressorEnabled: Boolean(partial.compressorEnabled),
     compressorLevel: clampNoisePercent(
       partial.compressorLevel ?? DEFAULT_NOISE_SUPPRESSION.compressorLevel,
     ),

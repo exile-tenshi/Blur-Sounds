@@ -42,6 +42,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private bool enabled;
     private bool noiseGateEnabled;
     private float strength = 88f;
+    private float background = 55f;
+    private float impact = 40f;
     private float noiseGateThreshold = 40f;
     private float attack = 55f;
     private float release = 40f;
@@ -64,11 +66,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         lock (gate)
         {
             enabled = nextEnabled;
-            if (!nextEnabled)
-            {
-                noiseGateEnabled = false;
-                compressorEnabled = false;
-            }
 
             if (!IsProcessingActive)
             {
@@ -85,6 +82,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         bool nextEnabled,
         float nextStrength,
         float nextThreshold,
+        float nextImpact,
         float nextHighPassHz,
         float nextAttack,
         float nextRelease,
@@ -95,12 +93,12 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     {
         lock (gate)
         {
-            _ = nextThreshold;
-
             enabled = nextEnabled;
             noiseGateEnabled = nextNoiseGateEnabled;
-            compressorEnabled = nextEnabled && nextCompressorEnabled;
+            compressorEnabled = nextCompressorEnabled;
             strength = Math.Clamp(nextStrength, 0f, 100f);
+            background = Math.Clamp(nextThreshold, 0f, 100f);
+            impact = Math.Clamp(nextImpact, 0f, 100f);
             attack = Math.Clamp(nextAttack, 0f, 100f);
             release = Math.Clamp(nextRelease, 0f, 100f);
             noiseGateThreshold = Math.Clamp(nextNoiseGateThreshold, 0f, 100f);
@@ -126,7 +124,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
     public bool IsEnabled => enabled;
 
-    private bool IsProcessingActive => enabled || noiseGateEnabled;
+    private bool IsProcessingActive => enabled || noiseGateEnabled || compressorEnabled;
 
     public int Read(float[] buffer, int offset, int count)
     {
@@ -304,9 +302,12 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
         var wet = StrengthToWet(strength);
+        var backgroundAmount = background / 100f;
+        var impactAmount = impact / 100f;
         // Open easily on speech; close only after a deeper quiet gap (hysteresis).
-        var openThreshold = 0.028f - (wet * 0.006f);
-        var closeThreshold = 0.012f - (wet * 0.003f);
+        // Impact pulls the open threshold down so sudden noises open cleanup faster.
+        var openThreshold = (0.028f - (wet * 0.006f)) * (1f - (impactAmount * 0.35f));
+        var closeThreshold = (0.012f - (wet * 0.003f)) * (1f - (impactAmount * 0.2f));
         if (!residualSpeechOpen && channelEnvelope >= openThreshold)
         {
             residualSpeechOpen = true;
@@ -316,14 +317,16 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             residualSpeechOpen = false;
         }
 
-        var noiseFloor = ResidualFloorMin + ((1f - wet) * 0.18f);
+        // Background deepens the quiet-floor cut (more Background → quieter residual).
+        var noiseFloor = (ResidualFloorMin + ((1f - wet) * 0.18f)) * (1f - (backgroundAmount * 0.55f));
+        noiseFloor = Math.Clamp(noiseFloor, 0.06f, 1f);
         var target = residualSpeechOpen ? 1f : noiseFloor;
-        // Fast-ish open, very slow close — continuous speech stays at unity gain.
-        var coeff = target > residualGain
-            ? 0.10f
-            : 0.008f + ((1f - wet) * 0.006f);
+        // Fast-ish open (Impact speeds open), very slow close — continuous speech stays open.
+        var openCoeff = 0.10f + (impactAmount * 0.08f);
+        var closeCoeff = 0.008f + ((1f - wet) * 0.006f);
+        var coeff = target > residualGain ? openCoeff : closeCoeff;
         residualGain += (target - residualGain) * coeff;
-        residualGain = Math.Clamp(residualGain, ResidualFloorMin, 1f);
+        residualGain = Math.Clamp(residualGain, 0.06f, 1f);
     }
 
     private bool EnsureDenoiser()
