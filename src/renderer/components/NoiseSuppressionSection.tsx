@@ -3,13 +3,13 @@ import {
   applyNoisePreset,
   detectNoiseMicKind,
   micKindLabel,
+  NOISE_PRESETS,
   presetsForMic,
   recommendedPresetForMic,
 } from '../../shared/noisePresets'
 import { normalizeNoiseSuppression, type NoiseSuppressionSettings } from '../../shared/noiseSuppression'
 import type { AudioDevice, MicrophoneSlot } from '../../shared/audioTypes'
 import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots'
-import { LevelMeter } from './LevelMeter'
 
 interface NoiseSuppressionSectionProps {
   selectionMicrophones: MicrophoneSlot[] | undefined
@@ -22,13 +22,36 @@ interface NoiseSuppressionSectionProps {
   onRemoveSlot?: (slotId: string) => Promise<void>
 }
 
-function PercentSlider({
+function SonarToggle({
+  checked,
+  disabled,
+  onChange,
   label,
+}: {
+  checked: boolean
+  disabled?: boolean
+  onChange: (checked: boolean) => void
+  label: string
+}) {
+  return (
+    <label className={`clearcast-toggle${checked ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="clearcast-toggle-track" aria-hidden="true" />
+      <span className="clearcast-toggle-label">{label}</span>
+    </label>
+  )
+}
+
+function IntensitySlider({
   value,
   disabled,
   onChange,
 }: {
-  label: string
   value: number
   disabled?: boolean
   onChange: (value: number) => void
@@ -44,17 +67,13 @@ function PercentSlider({
     }
   }, [value])
 
-  const commitValue = (nextValue: number) => {
-    localValueRef.current = nextValue
-    onChange(nextValue)
-  }
-
   return (
-    <label className={`ns-slider sonar-strength${disabled ? ' disabled' : ''}`}>
-      <span>
-        {label}
-        <strong>{localValue}</strong>
-      </span>
+    <div className={`clearcast-intensity${disabled ? ' is-disabled' : ''}`}>
+      <div className="clearcast-intensity-labels">
+        <span>Min</span>
+        <span>Intensity</span>
+        <span>Max</span>
+      </div>
       <input
         type="range"
         min={0}
@@ -67,11 +86,11 @@ function PercentSlider({
         }}
         onPointerUp={() => {
           isDraggingRef.current = false
-          commitValue(localValueRef.current)
+          onChange(localValueRef.current)
         }}
         onPointerCancel={() => {
           isDraggingRef.current = false
-          commitValue(localValueRef.current)
+          onChange(localValueRef.current)
         }}
         onChange={(event) => {
           const nextValue = Number(event.target.value)
@@ -79,15 +98,85 @@ function PercentSlider({
           setLocalValue(nextValue)
         }}
       />
-    </label>
+    </div>
   )
+}
+
+function WaveVisualizer({
+  level,
+  active,
+}: {
+  level: number
+  active: boolean
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const levelRef = useRef(level)
+  const phaseRef = useRef(0)
+  const activeRef = useRef(active)
+
+  useEffect(() => {
+    levelRef.current = level
+  }, [level])
+
+  useEffect(() => {
+    activeRef.current = active
+  }, [active])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      return
+    }
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      return
+    }
+
+    let frameId = 0
+    const draw = () => {
+      const width = canvas.width
+      const height = canvas.height
+      context.clearRect(0, 0, width, height)
+
+      const mid = height / 2
+      const amplitude = activeRef.current
+        ? Math.max(4, levelRef.current * (height * 0.42))
+        : 3
+      phaseRef.current += activeRef.current ? 0.18 + levelRef.current * 0.35 : 0.04
+
+      context.beginPath()
+      context.strokeStyle = activeRef.current ? '#4ade80' : '#475569'
+      context.lineWidth = 2.5
+      context.lineJoin = 'round'
+
+      for (let x = 0; x < width; x += 2) {
+        const wave =
+          Math.sin(x * 0.045 + phaseRef.current) * amplitude +
+          Math.sin(x * 0.11 + phaseRef.current * 1.7) * (amplitude * 0.35)
+        const y = mid + wave
+        if (x === 0) {
+          context.moveTo(x, y)
+        } else {
+          context.lineTo(x, y)
+        }
+      }
+      context.stroke()
+
+      frameId = window.requestAnimationFrame(draw)
+    }
+
+    frameId = window.requestAnimationFrame(draw)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [])
+
+  return <canvas ref={canvasRef} className="clearcast-wave" width={220} height={72} aria-hidden="true" />
 }
 
 function MicNoiseCard({
   slot,
   deviceName,
   devices,
-  inUse,
   microphoneLevel,
   engineActive,
   onChange,
@@ -96,7 +185,6 @@ function MicNoiseCard({
   slot: MicrophoneSlot
   deviceName: string
   devices: AudioDevice[]
-  inUse: boolean
   microphoneLevel: number
   engineActive: boolean
   onChange: (settings: Partial<NoiseSuppressionSettings>) => Promise<void>
@@ -106,148 +194,184 @@ function MicNoiseCard({
   const kind = detectNoiseMicKind(deviceName)
   const presets = presetsForMic(deviceName)
   const recommended = recommendedPresetForMic(deviceName)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
+  const liveLevel = engineActive && !slot.muted ? microphoneLevel : 0
+
+  const selectedPresetId =
+    activePresetId ??
+    presets.find((preset) => preset.id === recommended.id)?.id ??
+    presets[0]?.id ??
+    ''
 
   return (
-    <article className={`noise-mic-card sonar-card${settings.enabled ? ' ns-on' : ''}${inUse ? ' in-use' : ''}`}>
-      <div className="sonar-card-top">
-        <div className="sonar-card-identity">
-          <p className="eyebrow">{micKindLabel(kind)}</p>
-          <h3>{deviceName || 'Select a microphone'}</h3>
-          <p className="muted">
-            RNNoise neural cleanup
-            {settings.enabled ? ' · on' : ' · off'}
-            {settings.noiseGateEnabled ? ' · gate' : ''}
-          </p>
-        </div>
-        <label className="eq-toggle noise-toggle sonar-power">
-          <input
-            type="checkbox"
-            checked={settings.enabled}
+    <div className="clearcast-shell">
+      <div className="clearcast-preset-bar">
+        <label className="clearcast-preset-field">
+          <span>Preset</span>
+          <select
+            value={selectedPresetId}
             disabled={!slot.deviceId}
             onChange={(event) => {
+              const preset = NOISE_PRESETS.find((item) => item.id === event.target.value)
+              if (!preset) {
+                return
+              }
+              setActivePresetId(preset.id)
+              void onChange(applyNoisePreset(preset))
+            }}
+          >
+            {presets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+                {preset.id === recommended.id ? ' (suggested)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="clearcast-preset-field clearcast-device-field">
+          <span>Microphone</span>
+          <select
+            value={slot.deviceId ?? ''}
+            onChange={(event) => {
               setActivePresetId(null)
-              if (event.target.checked) {
+              void onSelectDevice(event.target.value)
+            }}
+          >
+            <option value="">Select a microphone…</option>
+            {devices.map((device) => (
+              <option key={device.id} value={device.id} disabled={!device.isAvailable}>
+                {device.name}
+                {device.isDefault ? ' (default)' : ''}
+                {!device.isAvailable ? ' (offline)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <p className="clearcast-mic-kind muted">{micKindLabel(kind)}</p>
+      </div>
+
+      <section className={`clearcast-ai-card${settings.enabled ? ' is-on' : ''}`}>
+        <div className="clearcast-ai-header">
+          <div>
+            <p className="clearcast-kicker">ClearCast AI</p>
+            <h3>AI noise cancellation</h3>
+          </div>
+          <SonarToggle
+            checked={settings.enabled}
+            disabled={!slot.deviceId}
+            label={settings.enabled ? 'On' : 'Off'}
+            onChange={(checked) => {
+              setActivePresetId(null)
+              if (checked) {
                 void onChange({ enabled: true })
               } else {
-                // Full bypass — gate must also turn off or audio still ducks in/out.
-                void onChange({ enabled: false, noiseGateEnabled: false })
+                void onChange({ enabled: false, compressorEnabled: false })
               }
             }}
           />
-          <span className="eq-toggle-track" />
-          <span>{settings.enabled ? 'On' : 'Off'}</span>
-        </label>
-      </div>
+        </div>
 
-      <label className="field-label" htmlFor={`ns-device-${slot.id}`}>
-        Device
-      </label>
-      <select
-        id={`ns-device-${slot.id}`}
-        value={slot.deviceId ?? ''}
-        onChange={(event) => {
-          setActivePresetId(null)
-          void onSelectDevice(event.target.value)
-        }}
-      >
-        <option value="">Select a microphone…</option>
-        {devices.map((device) => (
-          <option key={device.id} value={device.id} disabled={!device.isAvailable}>
-            {device.name}
-            {device.isDefault ? ' (default)' : ''}
-            {!device.isAvailable ? ' (offline)' : ''}
-          </option>
-        ))}
-      </select>
-
-      <div className="sonar-meter-row">
-        <LevelMeter
-          level={engineActive && !slot.muted ? microphoneLevel : 0}
-          label={`${deviceName || 'Microphone'} level`}
-          idleLabel={
-            !engineActive ? 'Start stream' : slot.muted ? 'Paused' : !slot.deviceId ? 'Pick mic' : undefined
-          }
-        />
-      </div>
-
-      <PercentSlider
-        label="Strength"
-        value={settings.strength}
-        disabled={!settings.enabled || !slot.deviceId}
-        onChange={(strength) => {
-          setActivePresetId(null)
-          void onChange({ strength })
-        }}
-      />
-
-      <div className="noise-preset-row sonar-presets">
-        {presets.map((preset) => {
-          const isRecommended = preset.id === recommended.id
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              title={preset.hint}
-              className={`chip-button${activePresetId === preset.id ? ' active' : ''}${
-                isRecommended ? ' recommended' : ''
-              }`}
-              disabled={!slot.deviceId}
-              onClick={() => {
-                setActivePresetId(preset.id)
-                void onChange(applyNoisePreset(preset))
-              }}
-            >
-              {preset.label}
-            </button>
-          )
-        })}
-      </div>
-      <p className="muted sonar-preset-hint">
-        {presets.find((preset) => preset.id === activePresetId)?.hint ??
-          `Suggested for this mic: ${recommended.label}. Pick desk stand, boom arm, headset, VR, and more.`}
-      </p>
-
-      <button
-        type="button"
-        className="secondary-button sonar-advanced-toggle"
-        onClick={() => setShowAdvanced((value) => !value)}
-      >
-        {showAdvanced ? 'Hide gate' : 'Noise gate'}
-      </button>
-
-      {showAdvanced ? (
-        <div className="noise-gate-block">
-          <label className="eq-toggle noise-toggle">
-            <input
-              type="checkbox"
-              checked={settings.noiseGateEnabled}
-              disabled={!slot.deviceId}
-              onChange={(event) => {
-                setActivePresetId(null)
-                void onChange({ noiseGateEnabled: event.target.checked })
-              }}
-            />
-            <span className="eq-toggle-track" />
-            <span>Hard mute when silent</span>
-          </label>
-          <PercentSlider
-            label="Gate threshold"
-            value={settings.noiseGateThreshold}
-            disabled={!settings.noiseGateEnabled || !slot.deviceId}
-            onChange={(noiseGateThreshold) => {
+        <div className="clearcast-ai-body">
+          <WaveVisualizer level={liveLevel} active={settings.enabled && engineActive} />
+          <IntensitySlider
+            value={settings.strength}
+            disabled={!settings.enabled || !slot.deviceId}
+            onChange={(strength) => {
               setActivePresetId(null)
-              void onChange({ noiseGateThreshold })
+              void onChange({ strength })
             }}
           />
-          <p className="muted">
-            Optional and usually off — a hard mute ducks the start of words. Prefer a stronger
-            preset / strength instead.
-          </p>
         </div>
-      ) : null}
-    </article>
+      </section>
+
+      <section className={`clearcast-side-card${settings.enabled ? ' is-disabled-card' : ''}`}>
+        <div className="clearcast-ai-header">
+          <div>
+            <h3>Noise reduction</h3>
+            <p className="muted">
+              {settings.enabled
+                ? 'Disabled while ClearCast AI noise cancellation is active'
+                : 'Legacy reduction — turn on ClearCast AI instead'}
+            </p>
+          </div>
+          <SonarToggle checked={false} disabled label="Off" onChange={() => undefined} />
+        </div>
+      </section>
+
+      <div className="clearcast-modules">
+        <section className="clearcast-module">
+          <div className="clearcast-ai-header">
+            <h3>Noise gate</h3>
+            <SonarToggle
+              checked={settings.noiseGateEnabled}
+              disabled={!slot.deviceId}
+              label={settings.noiseGateEnabled ? 'On' : 'Off'}
+              onChange={(checked) => {
+                setActivePresetId(null)
+                void onChange({ noiseGateEnabled: checked })
+              }}
+            />
+          </div>
+          <label className={`clearcast-module-slider${settings.noiseGateEnabled ? '' : ' is-disabled'}`}>
+            <span>
+              Threshold
+              <strong>{settings.noiseGateThreshold}</strong>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={settings.noiseGateThreshold}
+              disabled={!settings.noiseGateEnabled || !slot.deviceId}
+              onChange={(event) => {
+                setActivePresetId(null)
+                void onChange({ noiseGateThreshold: Number(event.target.value) })
+              }}
+            />
+          </label>
+          <p className="muted clearcast-module-note">Leave off unless you need silence between words.</p>
+        </section>
+
+        <section className="clearcast-module">
+          <div className="clearcast-ai-header">
+            <h3>Compressor</h3>
+            <SonarToggle
+              checked={settings.compressorEnabled}
+              disabled={!slot.deviceId || !settings.enabled}
+              label={settings.compressorEnabled ? 'On' : 'Off'}
+              onChange={(checked) => {
+                setActivePresetId(null)
+                void onChange({ compressorEnabled: checked })
+              }}
+            />
+          </div>
+          <label
+            className={`clearcast-module-slider${
+              settings.compressorEnabled && settings.enabled ? '' : ' is-disabled'
+            }`}
+          >
+            <span>
+              Level
+              <strong>{(settings.compressorLevel / 100).toFixed(2)}</strong>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={settings.compressorLevel}
+              disabled={!settings.compressorEnabled || !settings.enabled || !slot.deviceId}
+              onChange={(event) => {
+                setActivePresetId(null)
+                void onChange({ compressorLevel: Number(event.target.value) })
+              }}
+            />
+          </label>
+          <p className="muted clearcast-module-note">Evens voice level after AI cleanup.</p>
+        </section>
+      </div>
+    </div>
   )
 }
 
@@ -295,11 +419,11 @@ export function NoiseSuppressionSection({
     <section className="panel noise-editor sonar-noise">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Noise</p>
-          <h2>Noise cancellation</h2>
+          <p className="eyebrow">Mic</p>
+          <h2>ClearCast noise cancellation</h2>
           <p className="section-help">
-            Neural cleanup tuned per mic type (VR headsets, gaming headsets, USB, broadcast). Off means
-            fully bypassed — no processing.
+            SteelSeries-style AI cleanup for your mic — intensity, gate, and compressor stay on this
+            page while the stream is live.
           </p>
         </div>
       </div>
@@ -321,7 +445,6 @@ export function NoiseSuppressionSection({
               (primarySlot.deviceId ? 'Unknown microphone' : '')
             }
             devices={microphoneDevices}
-            inUse={Boolean(primarySlot.deviceId) && engineActive && !primarySlot.muted}
             microphoneLevel={microphoneLevel}
             engineActive={engineActive}
             onChange={(settings) => onChange(primarySlot.id, settings)}
