@@ -542,20 +542,9 @@ export class RoutingStore {
       }),
     }
 
-    // Re-bind mics when the engine is live so NS applies to a real capture source,
-    // not only volume state on an unbound slot.
-    if (this.isEngineActive()) {
-      try {
-        await this.ensureEngineRunning()
-      } catch (error) {
-        this.setEngineError(
-          error instanceof Error ? error.message : 'Unable to apply noise suppression.',
-        )
-      }
-    } else {
-      this.scheduleMixSync()
-    }
-
+    // Same path as volume/EQ. A full engine sync here re-bound outputs and
+    // app loopback on every Background tick, which glitched the whole mix.
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 

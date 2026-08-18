@@ -237,6 +237,23 @@ function ModuleSlider({
   disabled?: boolean
   onChange?: (value: number) => void
 }) {
+  const [localValue, setLocalValue] = useState(value)
+  const localValueRef = useRef(value)
+  const isDraggingRef = useRef(false)
+
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      setLocalValue(value)
+      localValueRef.current = value
+    }
+  }, [value])
+
+  const commit = (nextValue: number) => {
+    localValueRef.current = nextValue
+    setLocalValue(nextValue)
+    onChange?.(nextValue)
+  }
+
   return (
     <label className={`clearcast-module-slider${disabled ? ' is-disabled' : ''}`}>
       <span>
@@ -248,9 +265,22 @@ function ModuleSlider({
         min={min}
         max={max}
         step={step}
-        value={value}
+        value={localValue}
         disabled={disabled || !onChange}
-        onChange={(event) => onChange?.(Number(event.target.value))}
+        onPointerDown={() => {
+          isDraggingRef.current = true
+        }}
+        onPointerUp={() => {
+          isDraggingRef.current = false
+          commit(localValueRef.current)
+        }}
+        onPointerCancel={() => {
+          isDraggingRef.current = false
+          commit(localValueRef.current)
+        }}
+        onChange={(event) => {
+          commit(Number(event.target.value))
+        }}
       />
     </label>
   )
@@ -635,8 +665,9 @@ function MicNoiseCard({
             <div>
               <h3>Noise reduction</h3>
               <p className="muted clearcast-module-note">
-                Background 0 keeps a clear, natural room sound when you are not talking. 100 is
-                silence — no leftover swirl. Impact = desk taps / keyboard.
+                Background only changes leftover noise after you stop talking. It does not
+                rewrite your voice. 0 = natural room. 100 = silence. Impact = desk taps /
+                keyboard.
               </p>
             </div>
             <SonarToggle
@@ -677,8 +708,9 @@ function MicNoiseCard({
               }}
             />
             <p className="muted clearcast-module-note">
-              Background 0 = hear the real room. Background 100 = no background noise. Impact 0
-              keeps real taps; raise it to strip desk / keyboard hits.
+              Background 0 = hear the real room when idle. Background 100 = no leftover noise
+              when idle. Talking stays on ClearCast. Impact 0 keeps real taps; raise it to
+              strip desk / keyboard hits.
             </p>
           </div>
         </section>
