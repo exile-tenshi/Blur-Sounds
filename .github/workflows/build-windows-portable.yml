@@ -1,0 +1,66 @@
+name: Build Windows portable
+
+on:
+  push:
+    branches:
+      - cursor/clip-recordings-noise-suppression-e967
+      - main
+  workflow_dispatch:
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Publish engine and Vite app
+        run: npm run build
+
+      - name: Verify rebuilt noise engine
+        shell: pwsh
+        run: |
+          $dll = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.dll'
+          if (-not (Test-Path $dll)) {
+            throw "Engine DLL was not published: $dll"
+          }
+          $marker = Select-String -Path $dll -Pattern 'Never sum dry \+ RNNoise' -Quiet
+          if (-not $marker) {
+            throw 'VoiceMeeterEngine.dll is missing the Background exclusive-path marker. Engine rebuild failed.'
+          }
+          Write-Host 'Engine marker OK: Never sum dry + RNNoise'
+
+      - name: Package portable Windows app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win dir --config.directories.output=release/portable
+
+      - name: Zip portable app
+        shell: pwsh
+        run: |
+          $src = Join-Path $PWD 'release\portable\win-unpacked'
+          $zip = Join-Path $PWD 'release\Blur-Sounds-portable.zip'
+          if (-not (Test-Path (Join-Path $src 'Blur Sounds.exe'))) {
+            throw "Portable exe was not found in $src"
+          }
+          Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip -Force
+          Write-Host "Wrote $zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blur-Sounds-portable
+          path: release/Blur-Sounds-portable.zip
+          if-no-files-found: error
+          retention-days: 14
