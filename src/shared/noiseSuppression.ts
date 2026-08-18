@@ -25,7 +25,7 @@ export interface NoiseSuppressionSettings {
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
   strength: 88,
-  threshold: 55,
+  threshold: 72,
   impact: 0,
   highPassHz: 100,
   attack: 58,
