@@ -400,3 +400,25 @@ export function recommendedPresetForMic(deviceName: string): NoisePreset {
 export function applyNoisePreset(preset: NoisePreset): NoiseSuppressionSettings {
   return normalizeNoiseSuppression(preset.settings)
 }
+
+function noiseSettingsMatch(left: NoiseSuppressionSettings, right: NoiseSuppressionSettings): boolean {
+  return (
+    left.enabled === right.enabled &&
+    left.strength === right.strength &&
+    left.threshold === right.threshold &&
+    left.impact === right.impact &&
+    left.highPassHz === right.highPassHz &&
+    left.attack === right.attack &&
+    left.release === right.release &&
+    left.noiseGateEnabled === right.noiseGateEnabled &&
+    left.noiseGateThreshold === right.noiseGateThreshold &&
+    left.compressorEnabled === right.compressorEnabled &&
+    left.compressorLevel === right.compressorLevel
+  )
+}
+
+/** Resolve the ClearCast preset that matches saved settings, or custom after edits. */
+export function matchNoisePresetId(settings: NoiseSuppressionSettings): string {
+  const match = NOISE_PRESETS.find((preset) => noiseSettingsMatch(settings, applyNoisePreset(preset)))
+  return match?.id ?? 'custom'
+}

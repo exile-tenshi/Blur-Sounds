@@ -327,18 +327,25 @@ const AppShell = memo(function AppShell() {
           </>
         ) : null}
 
-        {activeSection === 'noise' ? (
-          <NoiseSuppressionSection
-            selectionMicrophones={snapshot.selection.microphones}
-            microphoneDevices={microphoneDevices}
-            microphoneLevel={snapshot.engine.microphoneLevel}
-            engineActive={isEngineActive}
-            onEnsureDevice={ensureMicrophoneDevice}
-            onChange={(slotId, settings) => setMicrophoneNoiseSuppression(slotId, settings)}
-            onSelectDeviceForSlot={selectMicrophoneSlot}
-            onSetEqualizer={setMicrophoneEqualizer}
-            onRemoveSlot={removeMicrophoneSlotFromSelection}
-          />
+        {/* Stay mounted so EQ/ClearCast preset UI does not remount as Flat/suggested on tab change. */}
+        {!isInitialLoading ? (
+          <div
+            className={activeSection === 'noise' ? undefined : 'section-hidden'}
+            aria-hidden={activeSection !== 'noise'}
+          >
+            <NoiseSuppressionSection
+              selectionMicrophones={snapshot.selection.microphones}
+              microphoneDevices={microphoneDevices}
+              microphoneLevel={snapshot.engine.microphoneLevel}
+              engineActive={isEngineActive}
+              isActive={activeSection === 'noise'}
+              onEnsureDevice={ensureMicrophoneDevice}
+              onChange={(slotId, settings) => setMicrophoneNoiseSuppression(slotId, settings)}
+              onSelectDeviceForSlot={selectMicrophoneSlot}
+              onSetEqualizer={setMicrophoneEqualizer}
+              onRemoveSlot={removeMicrophoneSlotFromSelection}
+            />
+          </div>
         ) : null}
 
         {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}

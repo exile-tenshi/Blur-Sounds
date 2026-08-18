@@ -9,6 +9,7 @@ import {
 } from '../../shared/audioConstants'
 import {
   applyNoisePreset,
+  matchNoisePresetId,
   micKindLabel,
   NOISE_PRESETS,
   presetsForMic,
@@ -24,6 +25,7 @@ interface NoiseSuppressionSectionProps {
   microphoneDevices: AudioDevice[]
   microphoneLevel: number
   engineActive: boolean
+  isActive?: boolean
   onEnsureDevice: (deviceId: string) => Promise<string | undefined>
   onChange: (slotId: string, settings: Partial<NoiseSuppressionSettings>) => Promise<void>
   onSelectDeviceForSlot: (slotId: string, deviceId: string) => Promise<void>
@@ -460,19 +462,17 @@ function MicNoiseCard({
   const gateDb = gateThresholdToDb(settings.noiseGateThreshold)
   const favoriteCount = favorites.filter(Boolean).length
 
-  const selectedPresetId =
-    activePresetId ??
-    presets.find((preset) => preset.id === recommended.id)?.id ??
-    presets[0]?.id ??
-    ''
-
+  const matchedPresetId = matchNoisePresetId(settings)
+  const selectedPresetId = activePresetId ?? matchedPresetId
   const selectedPreset =
     NOISE_PRESETS.find((preset) => preset.id === selectedPresetId) ?? recommended
   /** Follow the chosen preset — not only auto-detected mic hardware. */
   const selectedPresetKindLabel =
-    selectedPreset.kinds !== 'all' && selectedPreset.kinds.length > 0
-      ? micKindLabel(selectedPreset.kinds[0])
-      : selectedPreset.label
+    selectedPresetId === 'custom'
+      ? 'Custom'
+      : selectedPreset.kinds !== 'all' && selectedPreset.kinds.length > 0
+        ? micKindLabel(selectedPreset.kinds[0])
+        : selectedPreset.label
 
   const applyPresetId = (presetId: string) => {
     const preset = NOISE_PRESETS.find((item) => item.id === presetId)
@@ -488,7 +488,7 @@ function MicNoiseCard({
   }
 
   const starCurrentPreset = () => {
-    if (!selectedPresetId) {
+    if (!selectedPresetId || selectedPresetId === 'custom') {
       return
     }
     const next = [...favorites]
@@ -523,11 +523,14 @@ function MicNoiseCard({
                   {preset.id === recommended.id ? ' (suggested)' : ''}
                 </option>
               ))}
+              {selectedPresetId === 'custom' ? (
+                <option value="custom">Custom</option>
+              ) : null}
             </select>
             <button
               type="button"
               className="clearcast-fav-star"
-              disabled={!slot.deviceId || !selectedPresetId}
+              disabled={!slot.deviceId || !selectedPresetId || selectedPresetId === 'custom'}
               title="Add preset to favorites"
               aria-label="Favorite preset"
               onClick={starCurrentPreset}
@@ -772,6 +775,7 @@ export function NoiseSuppressionSection({
   microphoneDevices,
   microphoneLevel,
   engineActive,
+  isActive = true,
   onEnsureDevice,
   onChange,
   onSelectDeviceForSlot,
@@ -786,7 +790,7 @@ export function NoiseSuppressionSection({
   const [autoTrackedDefault, setAutoTrackedDefault] = useState(false)
 
   useEffect(() => {
-    if (autoTrackedDefault || trackedSlots.length > 0 || microphoneDevices.length === 0) {
+    if (!isActive || autoTrackedDefault || trackedSlots.length > 0 || microphoneDevices.length === 0) {
       return
     }
 
@@ -809,7 +813,15 @@ export function NoiseSuppressionSection({
         }
       }
     })
-  }, [autoTrackedDefault, microphoneDevices, onChange, onEnsureDevice, onSetEqualizer, trackedSlots.length])
+  }, [
+    autoTrackedDefault,
+    isActive,
+    microphoneDevices,
+    onChange,
+    onEnsureDevice,
+    onSetEqualizer,
+    trackedSlots.length,
+  ])
 
   return (
     <section className="panel noise-editor sonar-noise">

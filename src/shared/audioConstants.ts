@@ -282,6 +282,16 @@ export function equalizerSettingsToPayload(settings: RouteEqualizerSettings): Ro
   }
 }
 
+export function matchEqPresetId(
+  settings: RouteEqualizerSettings,
+  presets: readonly EqPreset[],
+): string {
+  const match = presets.find((preset) =>
+    EQ_BAND_KEYS.every((key) => clampEqDb(preset.settings[key]) === clampEqDb(settings[key])),
+  )
+  return match?.id ?? 'custom'
+}
+
 export function routeEqualizersEqual(
   left: RouteEqualizerSettings,
   right: RouteEqualizerSettings,
