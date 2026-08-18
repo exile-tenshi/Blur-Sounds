@@ -38,9 +38,12 @@ Start-Process -FilePath (Join-Path `$PSScriptRoot 'portable\win-unpacked\Blur So
     Write-Host 'Stopping leftover Blur Sounds processes so Desktop copy is not locked...'
     & (Join-Path $PSScriptRoot 'stop-blur-sounds.ps1')
 
+    $freshFolder = Join-Path ([Environment]::GetFolderPath('Desktop')) 'BlurSoundsApp'
     New-Item -ItemType Directory -Force -Path $desktopFolder | Out-Null
     New-Item -ItemType Directory -Force -Path $clipsFolder | Out-Null
+    New-Item -ItemType Directory -Force -Path $freshFolder | Out-Null
     Copy-Item -Path (Join-Path $portableRoot 'win-unpacked\*') -Destination $desktopFolder -Recurse -Force
+    Copy-Item -Path (Join-Path $portableRoot 'win-unpacked\*') -Destination $freshFolder -Recurse -Force
 
     $desktopLauncher = Join-Path $desktopFolder 'Run Blur Sounds.bat'
     @"
