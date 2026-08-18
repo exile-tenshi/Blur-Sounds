@@ -43,6 +43,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float gateGain = 1f;
     private float residualGain = 1f;
     private bool residualSpeechOpen;
+    private int quietHoldSamples;
     private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
@@ -239,8 +240,14 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 return mixed;
             }
 
-            // Speech stays on the RNNoise mix (voice quality). Quiet frames use dry room
+            // Speech stays on the RNNoise mix (voice quality). Background never chops
+            // talking — hangover before dry room or silence. Quiet frames use dry room
             // or silence from Background — never ducked RNNoise (that is the spaceship hiss).
+            if (residualGain >= 0.999f)
+            {
+                return mixed;
+            }
+
             var speech = residualGain;
             var quiet = QuietRoomGain();
             return (mixed * speech) + (dryOut * (1f - speech) * quiet);
@@ -382,24 +389,37 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
     /// <summary>
     /// Speech hysteresis for the dry-room / silence crossfade. Impulses do not open the path.
+    /// Hangover so Background cannot chop syllables or duck the whole voice.
     /// </summary>
     private void UpdateResidual()
     {
         var wet = StrengthToWet(strength);
-        var openThreshold = 0.022f - (wet * 0.004f);
-        var closeThreshold = 0.010f - (wet * 0.002f);
-        if (!residualSpeechOpen && channelEnvelope >= openThreshold)
+        var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
+        var hangoverSamples = Math.Max(1, (int)(sampleRate * 0.22f));
+        var openThreshold = 0.018f - (wet * 0.003f);
+        var closeThreshold = 0.007f - (wet * 0.0015f);
+
+        if (channelEnvelope >= openThreshold)
         {
             residualSpeechOpen = true;
+            quietHoldSamples = 0;
         }
         else if (residualSpeechOpen && channelEnvelope < closeThreshold)
         {
-            residualSpeechOpen = false;
+            quietHoldSamples++;
+            if (quietHoldSamples >= hangoverSamples)
+            {
+                residualSpeechOpen = false;
+            }
+        }
+        else
+        {
+            quietHoldSamples = 0;
         }
 
         var target = residualSpeechOpen ? 1f : 0f;
-        var openCoeff = 0.08f;
-        var closeCoeff = 0.010f + ((1f - wet) * 0.006f);
+        var openCoeff = 1f / Math.Max(2f, sampleRate * 0.008f);
+        var closeCoeff = 1f / Math.Max(2f, sampleRate * 0.12f);
         var coeff = target > residualGain ? openCoeff : closeCoeff;
         residualGain += (target - residualGain) * coeff;
         residualGain = Math.Clamp(residualGain, 0f, 1f);
@@ -559,6 +579,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         gateGain = 1f;
         residualGain = 1f;
         residualSpeechOpen = false;
+        quietHoldSamples = 0;
         channelEnvelope = MinEnvelope;
         peakEnvelope = MinEnvelope;
         impulseAmount = 0f;
