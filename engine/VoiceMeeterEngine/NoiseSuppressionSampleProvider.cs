@@ -15,10 +15,10 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 {
     private const float MinEnvelope = 1e-6f;
     private const float NoiseLearnRate = 0.02f;
-    /// <summary>Slower than peak so desk taps don't charge the “speech open” path.</summary>
-    private const float SpeechLearnRate = 0.10f;
+    /// <summary>Voice envelope — fast enough that talk isn't treated as a desk tap.</summary>
+    private const float SpeechLearnRate = 0.22f;
     private const float PeakAttackRate = 0.55f;
-    private const float PeakReleaseRate = 0.055f;
+    private const float PeakReleaseRate = 0.08f;
     /// <summary>Light makeup only — high makeup made mic taps blast.</summary>
     private const float RnnoiseMakeup = 1.08f;
     /// <summary>Residual room floor when quiet (not near-mute — that pumped on taps).</summary>
@@ -49,7 +49,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private bool noiseGateEnabled;
     private float strength = 88f;
     private float background = 55f;
-    private float impact = 40f;
+    private float impact = 0f;
     private float noiseGateThreshold = 40f;
     private float attack = 55f;
     private float release = 40f;
@@ -152,18 +152,15 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             {
                 var frameOffset = offset + (frame * channels);
                 var dry = AverageFrame(buffer, frameOffset);
-                UpdateImpulseDetector(Math.Abs(dry));
 
-                // High-pass rings on desk taps (“vroom”). Keep filter state updated but
-                // use the unfiltered sample while an impulse is active.
+                // Always high-pass when NS is on — skipping it left chest/rumble in and
+                // locked the impulse detector on speech.
                 if (enabled && highPass is not null)
                 {
-                    var filtered = highPass.Transform(dry);
-                    if (impulseAmount < 0.22f)
-                    {
-                        dry = filtered;
-                    }
+                    dry = highPass.Transform(dry);
                 }
+
+                UpdateImpulseDetector(Math.Abs(dry));
 
                 // Only soft-clip true overs — never auto-duck taps (Impact slider owns that).
                 dry = SoftClip(dry, 0.95f);
@@ -180,26 +177,22 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                     residualGain = 1f;
                 }
 
-                if (noiseGateEnabled && impulseAmount < 0.22f)
+                if (noiseGateEnabled)
                 {
                     UpdateGate(Math.Abs(clean));
                     clean *= gateGain;
                 }
-                else if (!noiseGateEnabled)
+                else
                 {
                     gateGain = 1f;
                 }
 
-                // Compressor on taps adds a whooshy pump — skip while impulse is held.
-                if (compressorEnabled && impulseAmount < 0.22f)
+                if (compressorEnabled)
                 {
                     clean = ApplyCompressor(clean);
                 }
 
-                if (impulseAmount < 0.22f)
-                {
-                    clean = SoftLimit(clean);
-                }
+                clean = SoftLimit(clean);
 
                 if (!float.IsFinite(clean))
                 {
@@ -262,25 +255,25 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
         Array.Copy(dryFrame, processFrame, Native.FRAME_SIZE);
 
-        // If this frame is a desk tap / bump, never run RNNoise on it — even a little wet
-        // mixes as a spaceship “vrooom” overlay on top of the real tap.
         var frameImpulse = MeasureFrameImpulse(dryFrame);
         var blendImpulse = Math.Max(impulseAmount, frameImpulse);
-        if (blendImpulse > 0.18f)
-        {
-            // Hold the dry window through the tap’s resonant decay.
-            impulseAmount = Math.Max(impulseAmount, blendImpulse);
-            var impactGain = 1f - (blendImpulse * (impact / 100f) * 0.97f);
-            for (var index = 0; index < Native.FRAME_SIZE; index++)
-            {
-                outputQueue.Enqueue(dryFrame[index] * impactGain);
-            }
-
-            return;
-        }
+        // Strong desk taps only — speech plosives must still go through RNNoise.
+        var isDeskTap = blendImpulse > 0.62f;
 
         try
         {
+            if (isDeskTap)
+            {
+                // Fully dry: even a little RNNoise wet = “vrooom” overlay on the real tap.
+                var impactGain = 1f - (blendImpulse * (impact / 100f) * 0.97f);
+                for (var index = 0; index < Native.FRAME_SIZE; index++)
+                {
+                    outputQueue.Enqueue(dryFrame[index] * impactGain);
+                }
+
+                return;
+            }
+
             denoiser!.Denoise(processFrame.AsSpan(), finish: false);
 
             var dryMix = 1f - wet;
@@ -317,13 +310,14 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet. Strong cleanup without living at full-wet (RNNoise grit).
-    /// 50→0.78, 70→0.88, 85→0.94, 100→1.0
+    /// UI 0–100 → wet. Leave some dry so voice stays present.
+    /// 50→0.71, 70→0.82, 85→0.91, 100→1.0
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        return MathF.Pow(normalized, 0.42f);
+        // 50→0.71, 70→0.82, 85→0.91, 100→1.0 — leave some dry so voice stays present.
+        return MathF.Pow(normalized, 0.50f);
     }
 
     /// <summary>
@@ -338,10 +332,10 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         channelEnvelope = Math.Max(MinEnvelope, channelEnvelope + ((abs - channelEnvelope) * voiceLearn));
 
         // Speech rises together; taps jump far above the voice follower.
-        var excess = peakEnvelope - (channelEnvelope * 2.8f);
-        var targetImpulse = Math.Clamp(excess / 0.16f, 0f, 1f);
-        // Fast open, slow release — hold dry through the tap’s decay so no wet overlay sneaks in.
-        var coeff = targetImpulse > impulseAmount ? 0.65f : 0.012f;
+        var excess = peakEnvelope - (channelEnvelope * 3.6f);
+        var targetImpulse = Math.Clamp(excess / 0.22f, 0f, 1f);
+        // Fast open on real taps; release fast enough that talk isn't latched as a tap.
+        var coeff = targetImpulse > impulseAmount ? 0.45f : 0.08f;
         impulseAmount += (targetImpulse - impulseAmount) * coeff;
         impulseAmount = Math.Clamp(impulseAmount, 0f, 1f);
     }
@@ -362,14 +356,14 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         }
 
         var rms = MathF.Sqrt(sumSq / Math.Max(1, frame.Length));
-        if (peak < 0.03f || rms < MinEnvelope)
+        if (peak < 0.06f || rms < MinEnvelope)
         {
             return 0f;
         }
 
         var crest = peak / Math.Max(rms, MinEnvelope);
-        // Speech crest is moderate; desk taps / bumps are much peakier.
-        return Math.Clamp((crest - 6.0f) / 12f, 0f, 1f);
+        // Desk taps are much peakier than speech (typically crest > ~10).
+        return Math.Clamp((crest - 9.5f) / 12f, 0f, 1f);
     }
 
     /// <summary>
@@ -383,9 +377,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var backgroundAmount = background / 100f;
         // Open on sustained voice envelope only — taps already charged peakEnvelope,
         // but channelEnvelope (slow) must rise for residual to open.
-        var openThreshold = 0.030f - (wet * 0.006f);
-        var closeThreshold = 0.012f - (wet * 0.003f);
-        if (!residualSpeechOpen && channelEnvelope >= openThreshold && impulseAmount < 0.35f)
+        var openThreshold = 0.022f - (wet * 0.004f);
+        var closeThreshold = 0.010f - (wet * 0.002f);
+        if (!residualSpeechOpen && channelEnvelope >= openThreshold)
         {
             residualSpeechOpen = true;
         }
@@ -412,13 +406,18 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     /// </summary>
     private float ResolveResidualGainForSample()
     {
-        if (impulseAmount < 0.12f)
+        // Only duck true desk-tap frames, and only when Impact is turned up.
+        if (impulseAmount < 0.55f)
         {
             return residualGain;
         }
 
         var impactAmount = impact / 100f;
-        // Lerp natural (1) → residual floor, then extra cut from Impact × impulse strength.
+        if (impactAmount <= 0.001f)
+        {
+            return 1f;
+        }
+
         var blended = 1f + ((residualGain - 1f) * impactAmount);
         blended *= 1f - (impulseAmount * impactAmount * 0.9f);
         return Math.Clamp(blended, 0.02f, 1f);
