@@ -41,9 +41,10 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float peakEnvelope = MinEnvelope;
     private float impulseAmount;
     private float gateGain = 1f;
-    private float residualGain = 1f;
     private bool residualSpeechOpen;
     private int quietHoldSamples;
+    private bool idlePath;
+    private float pathGain = 1f;
     private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
@@ -99,6 +100,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     {
         lock (gate)
         {
+            var wasActive = IsProcessingActive;
             enabled = nextEnabled;
             noiseGateEnabled = nextNoiseGateEnabled;
             compressorEnabled = nextCompressorEnabled;
@@ -117,11 +119,12 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 RebuildHighPass();
             }
 
-            if (!IsProcessingActive)
+            var nowActive = IsProcessingActive;
+            if (wasActive && !nowActive)
             {
                 ResetIdleState();
             }
-            else
+            else if (nowActive)
             {
                 EnsureDenoiser();
             }
@@ -171,7 +174,10 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 }
                 else
                 {
-                    residualGain = 1f;
+                    residualSpeechOpen = true;
+                    quietHoldSamples = 0;
+                    idlePath = false;
+                    pathGain = 1f;
                 }
 
                 var clean = ProcessMonoSample(dry);
@@ -240,17 +246,10 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 return mixed;
             }
 
-            // Speech stays on the RNNoise mix (voice quality). Background never chops
-            // talking — hangover before dry room or silence. Quiet frames use dry room
-            // or silence from Background — never ducked RNNoise (that is the spaceship hiss).
-            if (residualGain >= 0.999f)
-            {
-                return mixed;
-            }
-
-            var speech = residualGain;
-            var quiet = QuietRoomGain();
-            return (mixed * speech) + (dryOut * (1f - speech) * quiet);
+            // Never sum dry + RNNoise — that comb-filters into “complete ass”
+            // after a few Background moves. Talking stays on mixed; idle is dry room
+            // or silence. Duck, switch path, then rise.
+            return SelectBackgroundPath(mixed, dryOut);
         }
 
         return 0f;
@@ -416,13 +415,36 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         {
             quietHoldSamples = 0;
         }
+    }
 
-        var target = residualSpeechOpen ? 1f : 0f;
-        var openCoeff = 1f / Math.Max(2f, sampleRate * 0.008f);
-        var closeCoeff = 1f / Math.Max(2f, sampleRate * 0.12f);
-        var coeff = target > residualGain ? openCoeff : closeCoeff;
-        residualGain += (target - residualGain) * coeff;
-        residualGain = Math.Clamp(residualGain, 0f, 1f);
+    /// <summary>
+    /// Exclusive path: mixed while talking, dry*Background when idle. Never sum both.
+    /// </summary>
+    private float SelectBackgroundPath(float mixed, float dryOut)
+    {
+        var wantIdle = !residualSpeechOpen;
+        var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
+        var duckCoeff = 1f / Math.Max(2f, sampleRate * 0.004f);
+        var riseCoeff = 1f / Math.Max(2f, sampleRate * 0.008f);
+
+        if (idlePath != wantIdle)
+        {
+            pathGain += (0f - pathGain) * duckCoeff;
+            if (pathGain <= 0.03f)
+            {
+                idlePath = wantIdle;
+                pathGain = 0f;
+            }
+        }
+        else
+        {
+            var target = idlePath ? QuietRoomGain() : 1f;
+            pathGain += (target - pathGain) * riseCoeff;
+            pathGain = Math.Clamp(pathGain, 0f, 1f);
+        }
+
+        var sample = idlePath ? dryOut : mixed;
+        return sample * pathGain;
     }
 
     /// <summary>
@@ -577,9 +599,10 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private void ResetIdleState()
     {
         gateGain = 1f;
-        residualGain = 1f;
         residualSpeechOpen = false;
         quietHoldSamples = 0;
+        idlePath = true;
+        pathGain = 1f;
         channelEnvelope = MinEnvelope;
         peakEnvelope = MinEnvelope;
         impulseAmount = 0f;

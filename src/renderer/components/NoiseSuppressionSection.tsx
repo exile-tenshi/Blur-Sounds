@@ -221,6 +221,7 @@ function WaveVisualizer({
 function ModuleSlider({
   label,
   valueLabel,
+  formatValue,
   value,
   min = 0,
   max = 100,
@@ -230,6 +231,7 @@ function ModuleSlider({
 }: {
   label: string
   valueLabel: string
+  formatValue?: (value: number) => string
   value: number
   min?: number
   max?: number
@@ -248,17 +250,11 @@ function ModuleSlider({
     }
   }, [value])
 
-  const commit = (nextValue: number) => {
-    localValueRef.current = nextValue
-    setLocalValue(nextValue)
-    onChange?.(nextValue)
-  }
-
   return (
     <label className={`clearcast-module-slider${disabled ? ' is-disabled' : ''}`}>
       <span>
         {label}
-        <strong>{valueLabel}</strong>
+        <strong>{formatValue ? formatValue(localValue) : valueLabel}</strong>
       </span>
       <input
         type="range"
@@ -272,14 +268,16 @@ function ModuleSlider({
         }}
         onPointerUp={() => {
           isDraggingRef.current = false
-          commit(localValueRef.current)
+          onChange?.(localValueRef.current)
         }}
         onPointerCancel={() => {
           isDraggingRef.current = false
-          commit(localValueRef.current)
+          onChange?.(localValueRef.current)
         }}
         onChange={(event) => {
-          commit(Number(event.target.value))
+          const nextValue = Number(event.target.value)
+          localValueRef.current = nextValue
+          setLocalValue(nextValue)
         }}
       />
     </label>
@@ -690,6 +688,7 @@ function MicNoiseCard({
             <ModuleSlider
               label="Background"
               valueLabel={(settings.threshold / 100).toFixed(2)}
+              formatValue={(threshold) => (threshold / 100).toFixed(2)}
               value={settings.threshold}
               disabled={!slot.deviceId}
               onChange={(threshold) => {
@@ -700,6 +699,7 @@ function MicNoiseCard({
             <ModuleSlider
               label="Impact"
               valueLabel={(settings.impact / 100).toFixed(2)}
+              formatValue={(impact) => (impact / 100).toFixed(2)}
               value={settings.impact}
               disabled={!slot.deviceId}
               onChange={(impact) => {
