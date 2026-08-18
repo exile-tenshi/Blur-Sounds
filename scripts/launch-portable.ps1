@@ -50,6 +50,30 @@ function Start-BlurSoundsExe([string]$path) {
     cmd.exe /c "start `"`" `"$path`""
 }
 
+function Start-DevElectron {
+    $electron = Join-Path $root 'node_modules\electron\dist\electron.exe'
+    $main = Join-Path $root 'dist-electron\index.js'
+    if (-not (Test-Path -LiteralPath $electron)) {
+        throw "Packaged Blur Sounds.exe is blocked by Windows, and node_modules\\electron is missing. Run npm.cmd install, then npm.cmd run dev."
+    }
+
+    if (-not (Test-Path -LiteralPath $main)) {
+        Write-Host 'dist-electron is missing. Starting vite/electron with npm run dev...'
+        Push-Location $root
+        try {
+            npm.cmd run dev
+        }
+        finally {
+            Pop-Location
+        }
+        return
+    }
+
+    Write-Host "Windows blocked the packaged exe. Starting Electron from the source tree instead:"
+    Write-Host "  $electron"
+    Start-Process -FilePath $electron -WorkingDirectory $root -ArgumentList '.'
+}
+
 Write-Host 'Stopping leftover Blur Sounds processes...'
 & (Join-Path $PSScriptRoot 'stop-blur-sounds.ps1')
 
@@ -61,10 +85,20 @@ elseif (Test-LaunchableExe $desktopExe) {
     $source = $desktopFolder
 }
 
-if (-not $source) {
-    throw "Blur Sounds.exe was not found. Run npm.cmd run portable first."
+if ($source) {
+    Write-Host "Copying unblocked app to $freshFolder (not Desktop / OneDrive)..."
+    Copy-UnblockedApp $source $freshFolder
+    try {
+        Start-BlurSoundsExe $freshExe
+        Start-Sleep -Seconds 2
+        if (Get-Process -Name 'Blur Sounds' -ErrorAction SilentlyContinue) {
+            return
+        }
+        Write-Host 'Packaged exe did not stay running (Windows likely blocked it).'
+    }
+    catch {
+        Write-Host "Packaged exe launch failed: $($_.Exception.Message)"
+    }
 }
 
-Write-Host "Copying unblocked app to $freshFolder (not Desktop / OneDrive)..."
-Copy-UnblockedApp $source $freshFolder
-Start-BlurSoundsExe $freshExe
+Start-DevElectron
