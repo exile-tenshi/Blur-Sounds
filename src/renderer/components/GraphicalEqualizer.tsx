@@ -8,6 +8,7 @@ import {
   EQ_PRESETS,
   clampEqDb,
   equalizerSettingsToPayload,
+  matchEqPresetId,
   routeEqualizersEqual,
   type EqBandKey,
   type EqPreset,
@@ -159,7 +160,6 @@ function GraphicalEqualizerInner({
 }: GraphicalEqualizerProps) {
   const [settings, setSettings] = useState(value)
   const settingsRef = useRef(value)
-  const [presetId, setPresetId] = useState('flat')
   const [focusedBand, setFocusedBand] = useState<EqBandKey | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const gradientId = useId().replace(/:/g, '')
@@ -207,6 +207,7 @@ function GraphicalEqualizerInner({
   const curvePath = useMemo(() => buildSmoothCurvePath(bandValues), [bandValues])
   const fillPath = useMemo(() => buildFilledCurvePath(bandValues), [bandValues])
   const isInteractive = !disabled && (alwaysEditable || settings.enabled)
+  const presetId = matchEqPresetId(settings, presets)
 
   const commit = useCallback(
     (next: RouteEqualizerSettings) => {
@@ -221,7 +222,6 @@ function GraphicalEqualizerInner({
 
   const commitBand = useCallback(
     (bandKey: EqBandKey, db: number) => {
-      setPresetId('custom')
       commit({
         ...settingsRef.current,
         [bandKey]: db,
@@ -236,12 +236,10 @@ function GraphicalEqualizerInner({
       return
     }
 
-    setPresetId(nextPresetId)
     commit({ ...preset.settings, enabled: settingsRef.current.enabled || preset.settings.enabled })
   }
 
   const reset = () => {
-    setPresetId('flat')
     commit({ ...DEFAULT_ROUTE_EQUALIZER, enabled: settings.enabled })
   }
 
