@@ -182,8 +182,8 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             <span>Run buffer in background</span>
           </label>
           <p className="muted">
-            Keep this off unless you need Clip it. Background capture uses GPU/CPU — leave it off
-            for normal chatting/mixing.
+            Starts with the app so Clip it and “clip it blur” are ready. Turn it off if you want to
+            save GPU/CPU while only mixing.
           </p>
 
           <div className="button-row">

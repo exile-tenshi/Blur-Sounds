@@ -43,14 +43,15 @@ function normalizeSettings(raw: unknown): AppSettings {
 
   const savedVersion =
     typeof input.settingsVersion === 'number' ? input.settingsVersion : 0
-  // v2 turns off always-on desktop capture that was freezing machines.
-  const forceBufferOff = savedVersion < 2
+  // v2 forced capture off. v3 turns the clip buffer on at launch so voice/Clip it
+  // work immediately. After v3, keep the user's toggle.
+  const forceBufferOn = savedVersion < 3
 
   const clip: ClipSettings = {
     lookbackSeconds: normalizeClipLookback(clipInput.lookbackSeconds),
     sourceId: typeof clipInput.sourceId === 'string' ? clipInput.sourceId : undefined,
-    bufferingEnabled: forceBufferOff
-      ? false
+    bufferingEnabled: forceBufferOn
+      ? true
       : typeof clipInput.bufferingEnabled === 'boolean'
         ? clipInput.bufferingEnabled
         : DEFAULT_CLIP_SETTINGS.bufferingEnabled,
@@ -76,12 +77,13 @@ export class SettingsStore {
   constructor() {
     const loaded = this.load()
     this.settings = loaded
-    // Persist migrated defaults (e.g. buffering forced off in v2).
+    // Persist migrated defaults (e.g. clip buffer on in v3).
     this.persist()
   }
 
   get(): AppSettings {
     return {
+      settingsVersion: this.settings.settingsVersion ?? APP_SETTINGS_VERSION,
       activeSection: this.settings.activeSection,
       clip: { ...this.settings.clip, keybinds: [...this.settings.clip.keybinds] },
     }
@@ -93,6 +95,7 @@ export class SettingsStore {
       ...(patch.clip ?? {}),
     }
     this.settings = normalizeSettings({
+      settingsVersion: this.settings.settingsVersion ?? APP_SETTINGS_VERSION,
       activeSection: patch.activeSection ?? this.settings.activeSection,
       clip: nextClip,
     })
