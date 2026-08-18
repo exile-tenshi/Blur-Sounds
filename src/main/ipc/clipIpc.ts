@@ -1,11 +1,12 @@
 import type { BrowserWindow, DesktopCapturerSource } from 'electron'
 import { ipcMain, session } from 'electron'
 import { clipChannels } from '../../shared/clipApi.js'
-import type { SaveClipPayload } from '../../shared/clipApi.js'
+import type { SaveClipPayload, ClipOverlayPayload } from '../../shared/clipApi.js'
 import type { ClipSettings } from '../../shared/appSettings.js'
 import { ClipRecorderService } from '../recording/clipRecorder.js'
 import { ClipKeybindService } from '../recording/clipKeybinds.js'
 import { ClipVoiceCommandService } from '../recording/clipVoiceCommands.js'
+import { showClipOverlay } from '../recording/clipOverlay.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 export function registerClipIpc(
@@ -84,19 +85,29 @@ export function registerClipIpc(
     }
   })
 
+  const withVoiceStatus = () => {
+    const status = recorder.getStatus()
+    return {
+      ...status,
+      voiceListener: voiceCommands?.getState() ?? (status.voiceCommandsEnabled ? 'starting' : 'off'),
+      voiceListenerError: voiceCommands?.getError(),
+    }
+  }
+
   ipcMain.handle(
     clipChannels.listSources,
     (_event, options?: { includeWindows?: boolean }) => recorder.listSources(options),
   )
-  ipcMain.handle(clipChannels.getStatus, () => recorder.getStatus())
+  ipcMain.handle(clipChannels.getStatus, () => withVoiceStatus())
   ipcMain.handle(clipChannels.ensureOutputFolder, () => recorder.ensureOutputFolder())
   ipcMain.handle(clipChannels.openOutputFolder, () => recorder.openOutputFolder())
   ipcMain.handle(clipChannels.saveClip, (_event, payload: SaveClipPayload) =>
     recorder.saveClip(payload),
   )
-  ipcMain.handle(clipChannels.notifyRecordingState, (_event, payload) =>
-    recorder.setRecordingState(payload),
-  )
+  ipcMain.handle(clipChannels.notifyRecordingState, (_event, payload) => {
+    recorder.setRecordingState(payload)
+    return withVoiceStatus()
+  })
   ipcMain.handle(clipChannels.getSettings, () => settings.get().clip)
   ipcMain.handle(clipChannels.setSettings, (_event, patch: Partial<ClipSettings>) => {
     const next = settings.set({ clip: patch })
@@ -127,10 +138,11 @@ export function registerClipIpc(
     keybinds.refresh()
     return next.clip
   })
+  ipcMain.handle(clipChannels.showOverlay, (_event, payload: ClipOverlayPayload) => {
+    showClipOverlay(payload)
+  })
   ipcMain.handle(clipChannels.triggerClip, () => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(clipChannels.subscribeTrigger)
-    }
+    keybinds.triggerClip('ui')
     return recorder.getStatus()
   })
 

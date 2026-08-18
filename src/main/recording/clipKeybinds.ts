@@ -1,6 +1,7 @@
 import { globalShortcut, type BrowserWindow } from 'electron'
 import { clipChannels } from '../../shared/clipApi.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
+import { showClipOverlay } from './clipOverlay.js'
 
 export class ClipKeybindService {
   private mainWindow?: BrowserWindow
@@ -18,7 +19,7 @@ export class ClipKeybindService {
     for (const accelerator of keybinds) {
       try {
         const ok = globalShortcut.register(accelerator, () => {
-          this.emitTrigger()
+          this.triggerClip('keybind')
         })
         if (ok) {
           this.registered.push(accelerator)
@@ -40,16 +41,22 @@ export class ClipKeybindService {
     this.registered = []
   }
 
-  private emitTrigger(): void {
+  /** Same path for keybinds and voice commands. */
+  triggerClip(source: 'keybind' | 'voice' | 'ui' = 'keybind'): void {
+    const heard = source === 'voice' ? 'Heard “clip it blur”' : 'Clip it'
+    showClipOverlay({
+      title: heard,
+      body: 'Saving your lookback buffer…',
+      kind: 'heard',
+      holdMs: 2200,
+    })
     const window = this.mainWindow
     if (!window || window.isDestroyed()) {
       return
     }
+    if (!window.isFocused()) {
+      window.flashFrame(true)
+    }
     window.webContents.send(clipChannels.subscribeTrigger)
-  }
-
-  /** Same path as keybinds — used by voice commands. */
-  triggerClip(): void {
-    this.emitTrigger()
   }
 }

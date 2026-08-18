@@ -263,9 +263,21 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             <span>Voice clip commands</span>
           </label>
           <p className="muted">
-            Say <strong>clip it blur</strong> or <strong>blur clip it</strong> to save with your
-            current lookback preset (same as Clip it / keybind). Uses Windows speech on your default
-            mic — needs an English speech pack installed.
+            Say <strong>clip it blur</strong> or <strong>blur clip it</strong>. A toast pops up on
+            the top-right when Blur hears you. Windows speech uses your <strong>default recording
+            mic</strong> (not Hi-Fi Cable) and needs an English speech pack.
+          </p>
+          <p className="muted">
+            Voice listener:{' '}
+            {status.voiceListener === 'ready'
+              ? 'listening'
+              : status.voiceListener === 'error'
+                ? `failed${status.voiceListenerError ? ` — ${status.voiceListenerError}` : ''}`
+                : status.voiceListener === 'starting'
+                  ? 'starting…'
+                  : voiceCommandsEnabled
+                    ? 'starting…'
+                    : 'off'}
           </p>
 
           <p className="muted clip-folder">
