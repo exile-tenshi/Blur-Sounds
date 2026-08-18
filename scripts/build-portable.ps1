@@ -13,7 +13,7 @@ try {
         throw "npm run build failed with exit code $LASTEXITCODE"
     }
 
-    npx electron-builder --win dir --config.directories.output="$portableRoot"
+    npx electron-builder --win dir --publish never --config.directories.output="$portableRoot"
     if ($LASTEXITCODE -ne 0) {
         throw "electron-builder failed with exit code $LASTEXITCODE"
     }
