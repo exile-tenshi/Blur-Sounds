@@ -37,16 +37,20 @@ export function registerClipIpc(
     callback(false)
   })
 
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    return (
+      permission === 'media' ||
+      permission === 'display-capture' ||
+      permission === 'fullscreen' ||
+      permission === 'clipboard-sanitized-write'
+    )
+  })
+
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const grant = (source: DesktopCapturerSource) => {
-      const isScreen = source.id.startsWith('screen:')
-      // System loopback is reliable with screen capture; window + loopback is
-      // rejected as "Invalid capture constraints" on some Electron builds.
-      callback(
-        isScreen
-          ? { video: source, audio: 'loopback' }
-          : { video: source },
-      )
+      // Video-only. Screen + loopback audio is rejected as "Could not start video source"
+      // on several Windows/Electron builds. Clip audio is optional; the mix is Hi-Fi Cable.
+      callback({ video: source })
     }
 
     try {
