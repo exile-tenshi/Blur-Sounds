@@ -21,6 +21,9 @@ internal sealed class AudioEngine : IDisposable
     private MixPullMeterSampleProvider? mixMeter;
     private MixOutputRouter? outputBroadcast;
     private HifiCableOutputActivator? hifiOutputActivator;
+    private readonly HifiCableListenMonitor hifiListenMonitor = new();
+    private bool hifiListenWanted;
+    private CancellationTokenSource? listenToneCts;
     private readonly Dictionary<string, MicSource> microphoneSources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MicMixEntry> microphoneMixEntries = new(StringComparer.Ordinal);
     private DeviceSelection selection = new();
@@ -142,13 +145,13 @@ internal sealed class AudioEngine : IDisposable
 
     public Task StopAsync()
     {
+        CancelListenTone();
+
         lock (gate)
         {
             outputBroadcast?.Stop();
             outputBroadcast?.Dispose();
             outputBroadcast = null;
-            hifiOutputActivator?.Dispose();
-            hifiOutputActivator = null;
             foreach (var source in microphoneSources.Values)
             {
                 source.Stop();
@@ -157,6 +160,17 @@ internal sealed class AudioEngine : IDisposable
             state = "stopped";
             message = "Engine stopped.";
             boundInputSelectionId = null;
+        }
+
+        if (hifiListenWanted)
+        {
+            RestartHifiKeepAliveForListen();
+        }
+        else
+        {
+            hifiListenMonitor.Stop();
+            hifiOutputActivator?.Dispose();
+            hifiOutputActivator = null;
         }
 
         return Task.CompletedTask;
@@ -203,6 +217,7 @@ internal sealed class AudioEngine : IDisposable
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
             hifiOutputActivator.Start();
+            AttachHifiListenIfWanted();
         }
 
         foreach (var source in microphoneSources.Values)
@@ -300,6 +315,7 @@ internal sealed class AudioEngine : IDisposable
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
             hifiOutputActivator.Start();
+            AttachHifiListenIfWanted();
             if (hifiOutputActivator.IsActive)
             {
                 lock (gate)
@@ -316,6 +332,148 @@ internal sealed class AudioEngine : IDisposable
                     $"Hi-Fi Cable Output keep-alive failed ({ex.Message}). Listeners on Output may hear silence.";
             }
         }
+    }
+
+    public void SetHifiListen(bool enabled)
+    {
+        CancelListenTone();
+        hifiListenWanted = enabled;
+
+        if (!enabled)
+        {
+            hifiListenMonitor.Stop();
+            bool streaming;
+            lock (gate)
+            {
+                streaming = state is "running" or "starting";
+                if (!streaming)
+                {
+                    message = "Hi-Fi Cable listen stopped.";
+                }
+            }
+
+            if (!streaming)
+            {
+                hifiOutputActivator?.Dispose();
+                hifiOutputActivator = null;
+            }
+
+            return;
+        }
+
+        try
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            if (hifiOutputActivator.IsActive != true)
+            {
+                hifiOutputActivator.Start();
+            }
+
+            AttachHifiListenIfWanted();
+
+            bool streaming;
+            lock (gate)
+            {
+                streaming = state is "running" or "starting";
+                if (!hifiListenMonitor.IsActive)
+                {
+                    hifiListenWanted = false;
+                    message = hifiListenMonitor.LastError ?? "Unable to listen to Hi-Fi Cable Output.";
+                }
+                else if (!streaming)
+                {
+                    message =
+                        $"Listening to Hi-Fi Cable Output on {hifiListenMonitor.PlaybackDeviceName}. " +
+                        "Playing a test tone through the cable — you should hear it in your speakers/headphones. " +
+                        "Start stream to hear your mic and apps the same way Discord does.";
+                }
+            }
+
+            if (!hifiListenMonitor.IsActive && !streaming)
+            {
+                hifiListenMonitor.Stop();
+                hifiOutputActivator?.Dispose();
+                hifiOutputActivator = null;
+            }
+
+            if (hifiListenMonitor.IsActive && !streaming)
+            {
+                StartListenTestTone();
+            }
+        }
+        catch (Exception ex)
+        {
+            hifiListenWanted = false;
+            hifiListenMonitor.Stop();
+            lock (gate)
+            {
+                message = $"Unable to listen to Hi-Fi Cable Output: {ex.Message}";
+            }
+        }
+    }
+
+    private void AttachHifiListenIfWanted()
+    {
+        if (!hifiListenWanted || hifiOutputActivator is null)
+        {
+            return;
+        }
+
+        hifiListenMonitor.Start(hifiOutputActivator);
+    }
+
+    private void RestartHifiKeepAliveForListen()
+    {
+        hifiOutputActivator?.Dispose();
+        hifiOutputActivator = new HifiCableOutputActivator();
+        hifiOutputActivator.Start();
+        AttachHifiListenIfWanted();
+        if (hifiListenMonitor.IsActive)
+        {
+            lock (gate)
+            {
+                message =
+                    $"Listening to Hi-Fi Cable Output on {hifiListenMonitor.PlaybackDeviceName}.";
+            }
+        }
+    }
+
+    private void StartListenTestTone()
+    {
+        CancelListenTone();
+        listenToneCts = new CancellationTokenSource();
+        var token = listenToneCts.Token;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                HifiCableListenTone.Play(2500, token);
+            }
+            catch
+            {
+                // Tone is optional confirmation; listen still plays whatever is on the cable.
+            }
+        }, token);
+    }
+
+    private void CancelListenTone()
+    {
+        var previous = Interlocked.Exchange(ref listenToneCts, null);
+        if (previous is null)
+        {
+            return;
+        }
+
+        try
+        {
+            previous.Cancel();
+        }
+        catch
+        {
+            // Ignore cancel races.
+        }
+
+        previous.Dispose();
     }
 
     public EngineTelemetry GetTelemetry()
@@ -379,6 +537,10 @@ internal sealed class AudioEngine : IDisposable
                 ? hifiOutputActivator.LastError ?? "Hi-Fi Cable Output keep-alive is not running."
                 : null
                 : null,
+            HifiListenActive = hifiListenMonitor.IsActive,
+            HifiListenDeviceName = hifiListenMonitor.PlaybackDeviceName,
+            HifiListenError = hifiListenMonitor.LastError,
+            HifiListenLevel = hifiListenMonitor.Peak,
             OutputLevel = ComputeMixedOutputLevel(),
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
@@ -1198,6 +1360,11 @@ internal sealed class AudioEngine : IDisposable
 
     public void Dispose()
     {
+        hifiListenWanted = false;
+        CancelListenTone();
+        hifiListenMonitor.Dispose();
+        hifiOutputActivator?.Dispose();
+        hifiOutputActivator = null;
         outputBroadcast?.Dispose();
         foreach (var source in microphoneSources.Values)
         {
@@ -1217,6 +1384,8 @@ internal sealed class AudioEngine : IDisposable
 
     private void StartSources()
     {
+        CancelListenTone();
+
         lock (gate)
         {
             if (outputBroadcast is null)
@@ -1246,6 +1415,8 @@ internal sealed class AudioEngine : IDisposable
                 hifiOutputNote =
                     $"Output keep-alive failed ({ex.Message}). Discord/OBS may stay silent.";
             }
+
+            AttachHifiListenIfWanted();
 
             if (hifiOutputActivator.IsActive != true)
             {

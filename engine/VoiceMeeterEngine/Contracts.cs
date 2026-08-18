@@ -18,6 +18,9 @@ internal sealed class EnginePayload
 
     [JsonPropertyName("routes")]
     public List<RouteConfig> Routes { get; set; } = [];
+
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
 }
 
 internal sealed class DeviceSelection
@@ -117,6 +120,18 @@ internal sealed class EngineTelemetry
 
     [JsonPropertyName("hifiOutputError")]
     public string? HifiOutputError { get; set; }
+
+    [JsonPropertyName("hifiListenActive")]
+    public bool HifiListenActive { get; set; }
+
+    [JsonPropertyName("hifiListenDeviceName")]
+    public string? HifiListenDeviceName { get; set; }
+
+    [JsonPropertyName("hifiListenError")]
+    public string? HifiListenError { get; set; }
+
+    [JsonPropertyName("hifiListenLevel")]
+    public float HifiListenLevel { get; set; }
 
     [JsonPropertyName("outputLevel")]
     public float OutputLevel { get; set; }

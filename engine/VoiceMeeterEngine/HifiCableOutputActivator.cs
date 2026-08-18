@@ -50,6 +50,19 @@ internal sealed class HifiCableOutputActivator : IDisposable
         }
     }
 
+    public WaveFormat? CaptureWaveFormat
+    {
+        get
+        {
+            lock (gate)
+            {
+                return capture?.WaveFormat;
+            }
+        }
+    }
+
+    public event EventHandler<WaveInEventArgs>? SamplesAvailable;
+
     public void Start()
     {
         Stop();
@@ -181,9 +194,10 @@ internal sealed class HifiCableOutputActivator : IDisposable
         }
     }
 
-    private static void OnDataAvailable(object? sender, WaveInEventArgs args)
+    private void OnDataAvailable(object? sender, WaveInEventArgs args)
     {
-        // Discard samples; this client only keeps the virtual cable output path open.
+        // Keep-alive still discards for the mix path; Listen taps this event to play Cable Output.
+        SamplesAvailable?.Invoke(sender, args);
     }
 
     private void TearDownCandidate(MicWasapiCapture candidate)

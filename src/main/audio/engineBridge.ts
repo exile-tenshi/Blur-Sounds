@@ -263,6 +263,14 @@ export class NativeEngineBridge {
     })
   }
 
+  async setHifiListen(enabled: boolean): Promise<void> {
+    return this.enqueueEngineOperation(async () => {
+      await this.ensureHelper()
+      this.sendCommand('setHifiListen', { selection: {}, routes: [], enabled })
+      await this.waitForHifiListen(enabled, 8000)
+    })
+  }
+
   dispose(): void {
     if (this.helper && !this.helper.killed) {
       this.helper.kill()
@@ -368,6 +376,46 @@ export class NativeEngineBridge {
           unsubscribe()
           reject(new Error(status.message ?? 'Audio engine failed to start.'))
         }
+      })
+    })
+  }
+
+  private waitForHifiListen(enabled: boolean, timeoutMs: number): Promise<void> {
+    const matches = (status: EngineStatus) =>
+      enabled
+        ? status.hifiListenActive === true || Boolean(status.hifiListenError)
+        : status.hifiListenActive !== true
+
+    return new Promise((resolve, reject) => {
+      let unsubscribe = () => {}
+      let skippedCurrent = false
+
+      const timeout = setTimeout(() => {
+        unsubscribe()
+        reject(
+          new Error(
+            this.status.hifiListenError ??
+              this.status.message ??
+              (enabled
+                ? 'Timed out while starting Hi-Fi Cable listen.'
+                : 'Timed out while stopping Hi-Fi Cable listen.'),
+          ),
+        )
+      }, timeoutMs)
+
+      unsubscribe = this.subscribe((status) => {
+        if (!skippedCurrent) {
+          skippedCurrent = true
+          return
+        }
+
+        if (!matches(status)) {
+          return
+        }
+
+        clearTimeout(timeout)
+        unsubscribe()
+        resolve()
       })
     })
   }

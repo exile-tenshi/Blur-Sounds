@@ -690,6 +690,7 @@ export class RoutingStore {
   /** Plays a test tone into Hi-Fi Cable Input and reports whether Output hears it. */
   async probeHifiCable(): Promise<string> {
     try {
+      await this.engine.setHifiListen(false)
       if (this.isEngineActive()) {
         await this.engine.stop()
       }
@@ -715,6 +716,18 @@ export class RoutingStore {
       this.emitCachedSnapshot()
       return message
     }
+  }
+
+  async setHifiListen(enabled: boolean): Promise<AudioSnapshot> {
+    try {
+      await this.engine.setHifiListen(enabled)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to listen to Hi-Fi Cable Output.'
+      this.setEngineError(message)
+    }
+
+    return this.emitCachedSnapshot()
   }
 
   async startEngine(): Promise<AudioSnapshot> {

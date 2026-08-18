@@ -144,6 +144,11 @@ export interface EngineStatus {
   /** True when Hi-Fi Cable Output keep-alive capture is open (Input→Output loop). */
   hifiOutputActive?: boolean
   hifiOutputError?: string
+  /** True when Setup → Listen is playing Cable Output on speakers/headphones. */
+  hifiListenActive?: boolean
+  hifiListenDeviceName?: string
+  hifiListenError?: string
+  hifiListenLevel?: number
   outputLevel: number
   /** Peak of bytes actually written to the Output/WASAPI render client. */
   outputPullLevel?: number
@@ -221,4 +226,5 @@ export interface SetRouteAssignmentPayload {
 export interface EngineCommandPayload {
   selection: DeviceSelection
   routes: RoutedInput[]
+  enabled?: boolean
 }

@@ -103,7 +103,11 @@ internal static class Program
                         await engine.RebindOutputIfRunningAsync();
                         break;
                     case "probeHifiOutput":
+                        engine.SetHifiListen(false);
                         await PublishProbeAsync(HifiCableOutputProbe.Run());
+                        break;
+                    case "setHifiListen":
+                        engine.SetHifiListen(command.Payload.Enabled);
                         break;
                 }
 

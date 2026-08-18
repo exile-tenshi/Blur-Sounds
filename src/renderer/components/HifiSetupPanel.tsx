@@ -1,4 +1,4 @@
-import type { AudioDevice, DeviceSelection, HifiCableInfo } from '../../shared/audioTypes'
+import type { AudioDevice, DeviceSelection, EngineStatus, HifiCableInfo } from '../../shared/audioTypes'
 import { groupPlaybackDevices, groupRecordingDevices } from '../../shared/deviceGroups'
 import {
   formatHifiCableDisabledMessage,
@@ -14,8 +14,11 @@ interface HifiSetupPanelProps {
   playbackDevices: AudioDevice[]
   recordingDevices: AudioDevice[]
   hifiCable: HifiCableInfo
+  engine: EngineStatus
+  streamActive: boolean
   onApplyStudioSettings: () => void
   onProbeHifiCable: () => Promise<string>
+  onSetHifiListen: (enabled: boolean) => Promise<void>
   onOpenPlaybackSettings: () => void
   onOpenRecordingSettings: () => void
   onSelectInput: (deviceId: string) => Promise<void>
@@ -27,8 +30,11 @@ export function HifiSetupPanel({
   playbackDevices,
   recordingDevices,
   hifiCable,
+  engine,
+  streamActive,
   onApplyStudioSettings,
   onProbeHifiCable,
+  onSetHifiListen,
   onOpenPlaybackSettings,
   onOpenRecordingSettings,
   onSelectInput,
@@ -40,6 +46,8 @@ export function HifiSetupPanel({
   const selectedRecording = findDevice(recordingGroups, selection.recordingDeviceId)
   const cableDefaults = getHifiCableSelectionDefaults([...playbackDevices, ...recordingDevices])
   const setupSteps = getHifiCableSetupSteps()
+  const listenActive = engine.hifiListenActive === true
+  const listenLevel = Math.max(0, Math.min(1, engine.hifiListenLevel ?? 0))
 
   return (
     <section className="panel routing-section hifi-setup-panel">
@@ -111,6 +119,42 @@ export function HifiSetupPanel({
           </label>
         </div>
 
+        <div className={`hifi-listen-card${listenActive ? ' is-live' : ''}`}>
+          <div className="hifi-listen-copy">
+            <strong>Listen to Hi-Fi Cable</strong>
+            <p className="muted">
+              Hear what Discord hears from Hi-Fi Cable Output on your speakers or headphones. This is
+              not Windows “Listen to this device” — that stays off. Use headphones if you also capture
+              desktop audio.
+            </p>
+            {listenActive ? (
+              <p className="hifi-listen-status">
+                Playing Cable Output on <span>{engine.hifiListenDeviceName ?? 'your speakers'}</span>
+                {streamActive
+                  ? ' · talk or play music to hear the live mix'
+                  : ' · a test tone plays if the stream is idle'}
+              </p>
+            ) : null}
+            {engine.hifiListenError ? (
+              <p className="hifi-listen-error">{engine.hifiListenError}</p>
+            ) : null}
+            {listenActive ? (
+              <div className="hifi-listen-meter" aria-hidden="true">
+                <span style={{ width: `${Math.round(listenLevel * 100)}%` }} />
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className={listenActive ? 'primary-button' : 'secondary-button'}
+            onClick={() => {
+              void onSetHifiListen(!listenActive)
+            }}
+          >
+            {listenActive ? 'Stop listening' : 'Listen to Hi-Fi Cable'}
+          </button>
+        </div>
+
         <div className="button-row hifi-settings-buttons">
           <a
             className="secondary-button dependency-download"
@@ -145,10 +189,11 @@ export function HifiSetupPanel({
         <strong>Hi-Fi Cable setup</strong>
         <p className="muted">
           Click <strong>Apply clean audio settings</strong> so Input and Output both use{' '}
-          <strong>{HIFI_CABLE_QUALITY.label}</strong> in shared mode. The mix goes to Discord/OBS via{' '}
-          <strong>Hi-Fi Cable Output</strong> — it should not play through your headset. If you hear
-          yourself/apps locally, uncheck <strong>Listen to this device</strong> on Hi-Fi Cable Output,
-          set ASIO Bridge to Pass-Through, and turn Discord input monitoring off.
+          <strong>{HIFI_CABLE_QUALITY.label}</strong> in shared mode. Discord/OBS should use{' '}
+          <strong>Hi-Fi Cable Output</strong>. Use <strong>Listen to Hi-Fi Cable</strong> to hear that
+          mix on your headset. If you hear yourself without Listen on, uncheck{' '}
+          <strong>Listen to this device</strong> on Hi-Fi Cable Output, set ASIO Bridge to Pass-Through,
+          and turn Discord input monitoring off.
         </p>
         <ol>
           {setupSteps.map((step) => (

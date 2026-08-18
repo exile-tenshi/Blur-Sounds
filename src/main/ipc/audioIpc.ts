@@ -71,6 +71,7 @@ export function registerAudioIpc(mainWindow: BrowserWindow): RoutingStore {
     store.applyHifiCableStudioSettings(),
   )
   ipcMain.handle(audioChannels.probeHifiCable, () => store.probeHifiCable())
+  ipcMain.handle(audioChannels.setHifiListen, (_event, enabled: boolean) => store.setHifiListen(enabled))
 
   return store
 }
