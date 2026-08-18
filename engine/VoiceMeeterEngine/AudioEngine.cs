@@ -946,6 +946,7 @@ internal sealed class AudioEngine : IDisposable
                     Volume = Math.Clamp(slot.Volume, 0f, 4f),
                     NoiseSuppression = slot.NoiseSuppression || (slot.NoiseSuppressionSettings?.Enabled ?? false),
                     NoiseSuppressionSettings = slot.NoiseSuppressionSettings,
+                    Equalizer = slot.Equalizer,
                 })
                 .ToList();
         }
@@ -1413,49 +1414,47 @@ internal sealed class AudioEngine : IDisposable
 
         foreach (var targetProcessId in processIdsToTry)
         {
-            foreach (var includeProcessTree in new[] { true, false })
+            ProcessLoopbackPool.Evict(targetProcessId);
+
+            try
             {
+                // Include the app's process tree only — ExcludeTargetProcessTree captures
+                // everything except that app (music never reaches the mixer).
+                var source = await AppLoopbackSource.CreateAsync(
+                    appId,
+                    processId,
+                    targetProcessId,
+                    mixFormat,
+                    volume,
+                    includeProcessTree: true,
+                    UsesHifiCableInput());
+
+                var warning = AudioProcessResolver.TryGetDirectHifiPlaybackWarning(
+                    enumerator,
+                    targetProcessId,
+                    selection.InputDeviceId);
+                if (!string.IsNullOrWhiteSpace(warning))
+                {
+                    routeErrors[appId] = warning;
+                }
+                else
+                {
+                    routeErrors.Remove(appId);
+                }
+
+                return source;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
                 ProcessLoopbackPool.Evict(targetProcessId);
 
-                try
+                if (!IsLoopbackReuseFailure(ex))
                 {
-                    var source = await AppLoopbackSource.CreateAsync(
-                        appId,
-                        processId,
-                        targetProcessId,
-                        mixFormat,
-                        volume,
-                        includeProcessTree,
-                        UsesHifiCableInput());
-
-                    var warning = AudioProcessResolver.TryGetDirectHifiPlaybackWarning(
-                        enumerator,
-                        targetProcessId,
-                        selection.InputDeviceId);
-                    if (!string.IsNullOrWhiteSpace(warning))
-                    {
-                        routeErrors[appId] = warning;
-                    }
-                    else
-                    {
-                        routeErrors.Remove(appId);
-                    }
-
-                    return source;
+                    throw;
                 }
-                catch (Exception ex)
-                {
-                    lastError = ex;
-                    ProcessLoopbackPool.Evict(targetProcessId);
 
-                    if (!IsLoopbackReuseFailure(ex))
-                    {
-                        throw;
-                    }
-
-                    // Only wait after a failed reuse attempt, not on the first try.
-                    await Task.Delay(150);
-                }
+                await Task.Delay(150);
             }
         }
 

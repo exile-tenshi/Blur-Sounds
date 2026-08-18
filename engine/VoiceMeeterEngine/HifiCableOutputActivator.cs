@@ -207,11 +207,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
         try
         {
             var nativeRate = recording.AudioClient.MixFormat.SampleRate;
-            // Prefer the live MixFormat only when it already matches the engine (48 kHz)
-            // or when both cable sides are still on the legacy 384 kHz studio rate.
-            // Opening Output at a different rate than Input is silent on bit-perfect Hi-Fi Cable.
-            if (nativeRate == HifiStreamingPolicy.EngineMixSampleRate ||
-                nativeRate == HifiStreamingPolicy.DeviceSampleRate)
+            if (nativeRate is HifiStreamingPolicy.EngineMixSampleRate or HifiStreamingPolicy.DeviceSampleRate)
             {
                 return nativeRate;
             }
@@ -221,6 +217,7 @@ internal sealed class HifiCableOutputActivator : IDisposable
             // MixFormat can be unavailable while another client holds exclusive mode.
         }
 
+        // Match the engine mix (48 kHz) so Input→Output stays bit-perfect with WasapiOut.
         return HifiStreamingPolicy.EngineMixSampleRate;
     }
 
