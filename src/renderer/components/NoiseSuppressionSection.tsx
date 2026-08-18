@@ -632,8 +632,8 @@ function MicNoiseCard({
             <div>
               <h3>Noise reduction</h3>
               <p className="muted clearcast-module-note">
-                Background = fans/room. Impact = desk taps, bumps, keyboard — 0 keeps them
-                natural, higher removes them.
+                Background 0 keeps a clear, natural room sound when you are not talking. 100 is
+                silence — no leftover swirl. Impact = desk taps / keyboard.
               </p>
             </div>
             <SonarToggle
@@ -643,7 +643,7 @@ function MicNoiseCard({
                 setActivePresetId(null)
                 if (checked) {
                   void onChange({
-                    threshold: settings.threshold > 0 ? settings.threshold : 55,
+                    threshold: settings.threshold > 0 ? settings.threshold : 72,
                     impact: settings.impact,
                   })
                 } else {
@@ -674,7 +674,8 @@ function MicNoiseCard({
               }}
             />
             <p className="muted clearcast-module-note">
-              Set Impact to 0 to hear real taps; raise it to strip desk / keyboard hits.
+              Background 0 = hear the real room. Background 100 = no background noise. Impact 0
+              keeps real taps; raise it to strip desk / keyboard hits.
             </p>
           </div>
         </section>

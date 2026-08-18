@@ -21,8 +21,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private const float PeakReleaseRate = 0.08f;
     /// <summary>Light makeup only — high makeup made mic taps blast.</summary>
     private const float RnnoiseMakeup = 1.08f;
-    /// <summary>Residual room floor when quiet (not near-mute — that pumped on taps).</summary>
-    private const float ResidualFloorMin = 0.18f;
     /// <summary>Only clamp true overs — continuous SoftClip on voice caused static grit.</summary>
     private const float SoftLimitCeiling = 0.92f;
     private const float SoftLimitKnee = 0.86f;
@@ -34,6 +32,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private readonly float[] processFrame = new float[Native.FRAME_SIZE];
     private readonly Queue<float> inputQueue = new(Native.FRAME_SIZE * 2);
     private readonly Queue<float> outputQueue = new(Native.FRAME_SIZE * 2);
+    private readonly Queue<float> dryOutQueue = new(Native.FRAME_SIZE * 2);
     private Denoiser? denoiser;
     private bool denoiserFailed;
     private BiQuadFilter? highPass;
@@ -165,17 +164,16 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 // Only soft-clip true overs — never auto-duck taps (Impact slider owns that).
                 dry = SoftClip(dry, 0.95f);
 
-                var clean = ProcessMonoSample(dry);
-
                 if (enabled)
                 {
-                    UpdateResidual(Math.Abs(clean));
-                    clean *= ResolveResidualGainForSample();
+                    UpdateResidual();
                 }
                 else
                 {
                     residualGain = 1f;
                 }
+
+                var clean = ProcessMonoSample(dry);
 
                 if (noiseGateEnabled)
                 {
@@ -234,7 +232,18 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
         if (outputQueue.Count > 0)
         {
-            return outputQueue.Dequeue();
+            var mixed = outputQueue.Dequeue();
+            var dryOut = dryOutQueue.Count > 0 ? dryOutQueue.Dequeue() : mixed;
+            if (!enabled)
+            {
+                return mixed;
+            }
+
+            // Speech stays on the RNNoise mix (voice quality). Quiet frames use dry room
+            // or silence from Background — never ducked RNNoise (that is the spaceship hiss).
+            var speech = residualGain;
+            var quiet = QuietRoomGain();
+            return (mixed * speech) + (dryOut * (1f - speech) * quiet);
         }
 
         return 0f;
@@ -248,6 +257,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
                 outputQueue.Enqueue(dryFrame[index]);
+                dryOutQueue.Enqueue(dryFrame[index]);
             }
 
             return;
@@ -268,7 +278,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 var impactGain = 1f - (blendImpulse * (impact / 100f) * 0.97f);
                 for (var index = 0; index < Native.FRAME_SIZE; index++)
                 {
-                    outputQueue.Enqueue(dryFrame[index] * impactGain);
+                    var tap = dryFrame[index] * impactGain;
+                    outputQueue.Enqueue(tap);
+                    dryOutQueue.Enqueue(tap);
                 }
 
                 return;
@@ -287,6 +299,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 }
 
                 outputQueue.Enqueue(mixed);
+                dryOutQueue.Enqueue(dryFrame[index]);
             }
         }
         catch
@@ -305,6 +318,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
                 outputQueue.Enqueue(dryFrame[index]);
+                dryOutQueue.Enqueue(dryFrame[index]);
             }
         }
     }
@@ -367,16 +381,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// Residual floor with speech hysteresis — stays open through quiet consonants
-    /// so extended talk doesn't flutter into static. Impulses do not open the path.
+    /// Speech hysteresis for the dry-room / silence crossfade. Impulses do not open the path.
     /// </summary>
-    private void UpdateResidual(float abs)
+    private void UpdateResidual()
     {
-        _ = abs;
         var wet = StrengthToWet(strength);
-        var backgroundAmount = background / 100f;
-        // Open on sustained voice envelope only — taps already charged peakEnvelope,
-        // but channelEnvelope (slow) must rise for residual to open.
         var openThreshold = 0.022f - (wet * 0.004f);
         var closeThreshold = 0.010f - (wet * 0.002f);
         if (!residualSpeechOpen && channelEnvelope >= openThreshold)
@@ -388,39 +397,22 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             residualSpeechOpen = false;
         }
 
-        // Background deepens the quiet-floor cut (more Background → quieter residual).
-        var noiseFloor = (ResidualFloorMin + ((1f - wet) * 0.18f)) * (1f - (backgroundAmount * 0.55f));
-        noiseFloor = Math.Clamp(noiseFloor, 0.06f, 1f);
-        var target = residualSpeechOpen ? 1f : noiseFloor;
-
+        var target = residualSpeechOpen ? 1f : 0f;
         var openCoeff = 0.08f;
-        var closeCoeff = 0.008f + ((1f - wet) * 0.006f);
+        var closeCoeff = 0.010f + ((1f - wet) * 0.006f);
         var coeff = target > residualGain ? openCoeff : closeCoeff;
         residualGain += (target - residualGain) * coeff;
-        residualGain = Math.Clamp(residualGain, 0.06f, 1f);
+        residualGain = Math.Clamp(residualGain, 0f, 1f);
     }
 
     /// <summary>
-    /// Speech uses residual floor as usual. Impulses: Impact 0 keeps natural level;
-    /// Impact 100 applies residual cut + extra suppress so taps/keyboard disappear.
+    /// Background 0 keeps a clear dry room when quiet, not RNNoise swirl.
+    /// Background 100 is true silence when you are not talking.
     /// </summary>
-    private float ResolveResidualGainForSample()
+    private float QuietRoomGain()
     {
-        // Only duck true desk-tap frames, and only when Impact is turned up.
-        if (impulseAmount < 0.55f)
-        {
-            return residualGain;
-        }
-
-        var impactAmount = impact / 100f;
-        if (impactAmount <= 0.001f)
-        {
-            return 1f;
-        }
-
-        var blended = 1f + ((residualGain - 1f) * impactAmount);
-        blended *= 1f - (impulseAmount * impactAmount * 0.9f);
-        return Math.Clamp(blended, 0.02f, 1f);
+        var amount = Math.Clamp(background / 100f, 0f, 1f);
+        return MathF.Pow(1f - amount, 2.2f);
     }
 
     private bool EnsureDenoiser()
@@ -482,12 +474,12 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
         var thresholdLinear = MathF.Pow(10f, (-50f + (noiseGateThreshold * 0.28f)) / 20f);
-        var target = channelEnvelope >= thresholdLinear ? 1f : 0.12f;
+        var target = channelEnvelope >= thresholdLinear ? 1f : 0f;
         var attackCoeff = 0.08f + ((100f - attack) * 0.0035f);
         var releaseCoeff = 0.018f + ((100f - release) * 0.0012f);
         var coeff = target > gateGain ? attackCoeff : releaseCoeff;
         gateGain += (target - gateGain) * coeff;
-        gateGain = Math.Clamp(gateGain, 0.12f, 1f);
+        gateGain = Math.Clamp(gateGain, 0f, 1f);
     }
 
     /// <summary>
@@ -574,6 +566,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         limiterEnvelope = MinEnvelope;
         inputQueue.Clear();
         outputQueue.Clear();
+        dryOutQueue.Clear();
         Array.Clear(dryFrame);
         Array.Clear(processFrame);
         RebuildHighPass();
