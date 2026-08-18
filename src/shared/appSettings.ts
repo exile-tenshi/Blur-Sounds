@@ -75,12 +75,12 @@ export interface AppSettings {
   clip: ClipSettings
 }
 
-export const APP_SETTINGS_VERSION = 2
+export const APP_SETTINGS_VERSION = 3
 
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   lookbackSeconds: 60,
-  /** Off by default — desktop capture is expensive; user opts in from Clips. */
-  bufferingEnabled: false,
+  /** On at launch so Clip it / “clip it blur” work without a extra toggle. */
+  bufferingEnabled: true,
   keybinds: ['F8'],
   voiceCommandsEnabled: true,
   resolution: '1080p',

@@ -158,7 +158,7 @@ export function useClipRecorder() {
   const [resolution, setResolutionState] = useState<ClipResolution>('1080p')
   const [keybinds, setKeybinds] = useState<string[]>(['F8'])
   const [voiceCommandsEnabled, setVoiceCommandsEnabledState] = useState(true)
-  const [bufferingEnabled, setBufferingEnabledState] = useState(false)
+  const [bufferingEnabled, setBufferingEnabledState] = useState(true)
   const [status, setStatus] = useState<ClipRecordingStatus>({
     recording: false,
     buffering: false,
@@ -678,8 +678,18 @@ export function useClipRecorder() {
         resolutionRef.current = clipSettings.resolution
         setKeybinds(clipSettings.keybinds)
         setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
-        setBufferingEnabledState(clipSettings.bufferingEnabled)
-        setSelectedSourceId(clipSettings.sourceId ?? '')
+        const bufferOn = clipSettings.bufferingEnabled !== false
+        setBufferingEnabledState(bufferOn)
+        let sourceId = clipSettings.sourceId ?? ''
+        if (bufferOn && !sourceId) {
+          const nextSources = await clipControl.listSources({ includeWindows: false })
+          setSources(nextSources)
+          sourceId = nextSources[0]?.id ?? ''
+          if (sourceId) {
+            await clipControl.setSettings({ sourceId })
+          }
+        }
+        setSelectedSourceId(sourceId)
         setStatus({ ...nextStatus, outputFolder: folder })
       } catch {
         // Ignore boot errors; Clips section can retry.
