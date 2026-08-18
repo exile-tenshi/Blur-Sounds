@@ -263,8 +263,9 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
             <span>Voice clip commands</span>
           </label>
           <p className="muted">
-            Say <strong>clip it blur</strong> or <strong>blur clip it</strong>. A toast pops up on
-            the top-right when Blur hears you. Windows speech uses your <strong>default recording
+            Say the full phrase <strong>clip it blur</strong> or <strong>blur clip it</strong>.
+            Stopping after “clip it” will not save a clip. A toast pops up on the top-right when
+            Blur hears the whole command. Windows speech uses your <strong>default recording
             mic</strong> (not Hi-Fi Cable) and needs an English speech pack.
           </p>
           <p className="muted">

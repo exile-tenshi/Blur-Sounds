@@ -5,22 +5,26 @@ import { join } from 'node:path'
 import type { ClipKeybindService } from './clipKeybinds.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
-/** Phrases that trigger Clip it with the current lookback/forward preset. */
-export const CLIP_VOICE_PHRASES = [
-  'clip it blur',
-  'clip it, blur',
-  'blur clip it',
-  'clip blur',
-  'blur clip',
-  'hey blur clip it',
-  'blur clip that',
-  'clip that blur',
-  'clip it blur sounds',
-] as const
+/** Full phrases only — short aliases were firing on “clip it” before “blur”. */
+export const CLIP_VOICE_PHRASES = ['clip it blur', 'blur clip it'] as const
 
 const TRIGGER_COOLDOWN_MS = 2800
 
 export type ClipVoiceListenerState = 'off' | 'starting' | 'ready' | 'error'
+
+export function normalizeClipVoiceText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** True only for the complete command, not prefixes like “clip it”. */
+export function isCompleteClipVoicePhrase(text: string): boolean {
+  const normalized = normalizeClipVoiceText(text)
+  return CLIP_VOICE_PHRASES.some((phrase) => phrase === normalized)
+}
 
 /**
  * Windows speech listener (System.Speech) for Clip it voice commands.
@@ -169,6 +173,11 @@ export class ClipVoiceCommandService {
       return
     }
 
+    const heard = line.slice('CLIP_VOICE_HIT:'.length)
+    if (!isCompleteClipVoicePhrase(heard)) {
+      return
+    }
+
     const now = Date.now()
     if (now - this.lastTriggerAt < TRIGGER_COOLDOWN_MS) {
       return
@@ -202,20 +211,42 @@ try {
     $builder.Culture = $engine.RecognizerInfo.Culture
   }
   [void]$builder.Append($choices)
-  $grammar = New-Object System.Speech.Recognition.Grammar($builder)
-  $engine.LoadGrammar($grammar)
+  $commandGrammar = New-Object System.Speech.Recognition.Grammar($builder)
+  $commandGrammar.Name = 'clip-command'
+  $commandGrammar.Priority = 1
+  $engine.LoadGrammar($commandGrammar)
+  try {
+    $dictation = New-Object System.Speech.Recognition.DictationGrammar
+    $dictation.Name = 'reject-other-speech'
+    $dictation.Priority = 0
+    $dictation.Weight = 0.75
+    $engine.LoadGrammar($dictation)
+  } catch {}
   $engine.InitialSilenceTimeout = [TimeSpan]::FromSeconds(20)
-  $engine.BabbleTimeout = [TimeSpan]::FromSeconds(0)
-  $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(500)
-  try { $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(700) } catch {}
+  $engine.BabbleTimeout = [TimeSpan]::FromSeconds(2)
+  $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(950)
+  try { $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(1300) } catch {}
   $engine.SetInputToDefaultAudioDevice()
   [Console]::Out.WriteLine('CLIP_VOICE_READY')
   [Console]::Out.Flush()
   while ($true) {
     $result = $engine.Recognize()
     if ($null -eq $result -or -not $result.Text) { continue }
-    if ($result.Confidence -lt 0.28) { continue }
-    $text = [string]$result.Text
+    $grammarName = ''
+    if ($result.Grammar -and $result.Grammar.Name) { $grammarName = [string]$result.Grammar.Name }
+    if ($grammarName -eq 'reject-other-speech') { continue }
+    if ($result.Confidence -lt 0.78) { continue }
+    $text = (([string]$result.Text).ToLower() -replace '[^a-z ]', ' ')
+    $text = ($text -replace ' +', ' ').Trim()
+    if ($text -ne 'clip it blur' -and $text -ne 'blur clip it') { continue }
+    $words = @($result.Words)
+    if ($words.Count -lt 3) { continue }
+    $weakWord = $false
+    foreach ($word in $words) {
+      if ($word.Confidence -lt 0.62) { $weakWord = $true; break }
+    }
+    if ($weakWord) { continue }
+    if ($result.Audio -and $result.Audio.Duration.TotalMilliseconds -lt 620) { continue }
     [Console]::Out.WriteLine('CLIP_VOICE_HIT:' + $text)
     [Console]::Out.Flush()
   }
