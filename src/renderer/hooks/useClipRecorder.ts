@@ -48,6 +48,7 @@ function resolveClipControl(): ClipControlApi | undefined {
     setSettings: (patch) => ipcRenderer.invoke(clipChannels.setSettings, patch),
     addKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.addKeybind, accelerator),
     removeKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.removeKeybind, accelerator),
+    showOverlay: (payload) => ipcRenderer.invoke(clipChannels.showOverlay, payload),
     onTriggerClip: (listener) => {
       const wrapped = () => listener()
       ipcRenderer.on(clipChannels.subscribeTrigger, wrapped)
@@ -60,7 +61,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 12
+export const CLIPS_PICKER_BUILD = 13
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -496,6 +497,11 @@ export function useClipRecorder() {
         sourceName,
       })
       setLastSavedPath(saved.path)
+      void clipControl.showOverlay({
+        title: 'Clip saved',
+        body: saved.fileName,
+        kind: 'saved',
+      })
       await syncStatus(
         {
           buffering: Boolean(mediaRecorderRef.current),
@@ -526,6 +532,11 @@ export function useClipRecorder() {
 
     if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
       setError('Turn on background buffering in Clips before using Clip it.')
+      void clipControl.showOverlay({
+        title: 'Clip it',
+        body: 'Turn on “Run buffer in background” on the Clips tab first.',
+        kind: 'error',
+      })
       return
     }
 
@@ -533,6 +544,12 @@ export function useClipRecorder() {
     setIsBusy(true)
     setError(undefined)
     playClipChime()
+    void clipControl.showOverlay({
+      title: 'Clipping…',
+      body: 'Saving lookback plus a short forward roll.',
+      kind: 'clipping',
+      holdMs: 2800,
+    })
     await syncStatus(
       {
         recording: true,
@@ -684,6 +701,26 @@ export function useClipRecorder() {
       stopTracks()
     }
   }, [clipControl, stopTracks])
+
+  useEffect(() => {
+    if (!clipControl || !voiceCommandsEnabled) {
+      return
+    }
+
+    const timer = setInterval(() => {
+      void clipControl.getStatus().then((next) => {
+        setStatus((current) => ({
+          ...current,
+          voiceListener: next.voiceListener,
+          voiceListenerError: next.voiceListenerError,
+        }))
+      })
+    }, 2000)
+
+    return () => {
+      clearInterval(timer)
+    }
+  }, [clipControl, voiceCommandsEnabled])
 
   useEffect(() => {
     if (!listeningForKeybind) {

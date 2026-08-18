@@ -15,6 +15,17 @@ export interface ClipSource {
 
 export type ClipBufferState = 'idle' | 'buffering' | 'clipping' | 'error'
 
+export type ClipVoiceListenerState = 'off' | 'starting' | 'ready' | 'error'
+
+export type ClipOverlayKind = 'heard' | 'clipping' | 'saved' | 'error'
+
+export interface ClipOverlayPayload {
+  title: string
+  body: string
+  kind: ClipOverlayKind
+  holdMs?: number
+}
+
 export interface ClipRecordingStatus {
   recording: boolean
   buffering: boolean
@@ -31,6 +42,8 @@ export interface ClipRecordingStatus {
   error?: string
   keybinds: string[]
   voiceCommandsEnabled: boolean
+  voiceListener?: ClipVoiceListenerState
+  voiceListenerError?: string
   resolution: ClipResolution
 }
 
@@ -59,6 +72,7 @@ export const clipChannels = {
   removeKeybind: 'clip:removeKeybind',
   triggerClip: 'clip:triggerClip',
   subscribeTrigger: 'clip:subscribeTrigger',
+  showOverlay: 'clip:showOverlay',
 } as const
 
 export interface ClipControlApi {
@@ -80,6 +94,7 @@ export interface ClipControlApi {
   setSettings: (patch: Partial<ClipSettings>) => Promise<ClipSettings>
   addKeybind: (accelerator: string) => Promise<ClipSettings>
   removeKeybind: (accelerator: string) => Promise<ClipSettings>
+  showOverlay: (payload: ClipOverlayPayload) => Promise<void>
   /** Ask the renderer to save an instant replay clip (also fired by hotkeys). */
   onTriggerClip: (listener: () => void) => () => void
 }

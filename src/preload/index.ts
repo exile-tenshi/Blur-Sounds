@@ -56,6 +56,7 @@ const clipControlApi: ClipControlApi = {
   setSettings: (patch) => ipcRenderer.invoke(clipChannels.setSettings, patch),
   addKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.addKeybind, accelerator),
   removeKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.removeKeybind, accelerator),
+  showOverlay: (payload) => ipcRenderer.invoke(clipChannels.showOverlay, payload),
   onTriggerClip: (listener) => {
     const wrapped = () => listener()
     ipcRenderer.on(clipChannels.subscribeTrigger, wrapped)
