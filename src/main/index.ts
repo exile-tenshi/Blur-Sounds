@@ -28,6 +28,9 @@ mkdirSync(sessionDataRoot, { recursive: true })
 app.setPath('userData', appDataRoot)
 app.setPath('sessionData', sessionDataRoot)
 app.setName('Blur Sounds')
+app.setAppUserModelId('com.blursounds.app')
+app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 function shutdownAudioStore(): void {
   clipVoiceCommands?.stop()

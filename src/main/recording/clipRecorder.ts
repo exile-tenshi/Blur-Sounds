@@ -21,7 +21,6 @@ const MAX_WINDOW_SOURCES = 40
 const MAX_APP_SOURCES = 60
 const CAPTURER_TIMEOUT_MS = 2500
 const WINDOW_SCAN_TIMEOUT_MS = 2000
-const SCREEN_SOURCE_CACHE_MS = 60_000
 
 function sanitizeFilePart(value: string): string {
   return (
@@ -167,8 +166,6 @@ export class ClipRecorderService {
   private cachedWindows: ClipSource[] = []
   private cachedWindowsAt = 0
   private windowsScanInFlight?: Promise<ClipSource[]>
-  private cachedScreenSources: Electron.DesktopCapturerSource[] = []
-  private cachedScreenSourcesAt = 0
 
   constructor(private readonly settings: SettingsStore) {}
 
@@ -295,7 +292,7 @@ export class ClipRecorderService {
   }
 
   /**
-   * Resolve a screen DesktopCapturerSource (cached). Never opens a window scan —
+   * Resolve a screen DesktopCapturerSource. Never opens a window scan —
    * window enumeration hangs on some PCs and broke getDisplayMedia with
    * "Invalid capture constraints" when the handler returned an empty source.
    */
@@ -303,28 +300,17 @@ export class ClipRecorderService {
     preferredSourceId?: string,
   ): Promise<Electron.DesktopCapturerSource | undefined> {
     const displayId = parseDisplaySourceId(preferredSourceId)
-    const now = Date.now()
 
-    if (
-      this.cachedScreenSources.length > 0 &&
-      now - this.cachedScreenSourcesAt < SCREEN_SOURCE_CACHE_MS
-    ) {
-      return this.pickScreenSource(this.cachedScreenSources, displayId)
-    }
-
+    // Always fetch a fresh capturer source for getDisplayMedia. Cached IDs go stale
+    // and Chromium then throws "Could not start video source".
     const sources = await getSourcesWithTimeout(
       {
         types: ['screen'],
-        thumbnailSize: { width: 0, height: 0 },
+        thumbnailSize: { width: 1, height: 1 },
         fetchWindowIcons: false,
       },
-      CAPTURER_TIMEOUT_MS,
+      8000,
     )
-
-    if (sources.length > 0) {
-      this.cachedScreenSources = sources
-      this.cachedScreenSourcesAt = Date.now()
-    }
 
     return this.pickScreenSource(sources, displayId)
   }

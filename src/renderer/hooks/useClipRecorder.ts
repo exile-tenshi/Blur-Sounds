@@ -60,7 +60,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 11
+export const CLIPS_PICKER_BUILD = 12
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -81,23 +81,30 @@ async function captureDesktopStream(
   // Keep getDisplayMedia constraints minimal — detailed width/height/frameRate objects
   // are rejected as "Invalid capture constraints" on some Electron/Chromium builds.
   // The main-process setDisplayMediaRequestHandler maps display:*/app:* to a real source.
-  let stream: MediaStream
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: true,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/invalid capture constraints/i.test(message)) {
-      // Retry without audio — loopback can fail while video still works.
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      })
-    } else {
-      throw error
+  const attempts: MediaStreamConstraints[] = [
+    { video: true, audio: false },
+    { video: true, audio: true },
+  ]
+
+  let lastError: unknown
+  let stream: MediaStream | undefined
+  for (const constraints of attempts) {
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia(constraints)
+      break
+    } catch (error) {
+      lastError = error
     }
+  }
+
+  if (!stream) {
+    const message = lastError instanceof Error ? lastError.message : String(lastError)
+    if (/could not start video source|invalid capture constraints|permission/i.test(message)) {
+      throw new Error(
+        'Could not start screen capture. Pick a Desktop source, then allow screen recording for desktop apps in Windows Settings → Privacy → Screenshots and screen recording.',
+      )
+    }
+    throw lastError instanceof Error ? lastError : new Error('Could not start screen capture.')
   }
 
   const spec = getClipResolutionSpec(resolution)
@@ -437,8 +444,8 @@ export function useClipRecorder() {
           startError instanceof Error
             ? startError.message
             : 'Unable to start background clip buffer.'
-        const message = /invalid capture constraints/i.test(raw)
-          ? 'Unable to start clip buffer (capture rejected). Pick a Desktop source, or Refresh games and try again.'
+        const message = /invalid capture constraints|could not start video source/i.test(raw)
+          ? 'Could not start screen capture. Pick a Desktop source, then allow screen recording for desktop apps in Windows Settings → Privacy → Screenshots and screen recording.'
           : raw
         setError(message)
         await syncStatus(

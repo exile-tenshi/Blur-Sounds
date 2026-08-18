@@ -274,7 +274,9 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
           <p className="muted">Clips picker build {CLIPS_PICKER_BUILD}</p>
           {lastSavedPath ? <p className="notice success">Saved clip: {lastSavedPath}</p> : null}
           {error ? <p className="notice error">{error}</p> : null}
-          {status.error ? <p className="notice error">{status.error}</p> : null}
+          {status.error && status.error !== error ? (
+            <p className="notice error">{status.error}</p>
+          ) : null}
         </div>
       </div>
     </section>
