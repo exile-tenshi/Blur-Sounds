@@ -60,29 +60,52 @@ jobs:
           Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip -Force
           Write-Host "Wrote $zip"
 
-      - name: Locate installer
+      - name: Locate installer and write checksums
+        id: pack
         shell: pwsh
         run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $installer = Get-ChildItem -Path (Join-Path $PWD 'release') -Filter '*-Setup-*.exe' |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
           if (-not $installer) {
             throw 'NSIS installer exe was not found in release/'
           }
+          $portable = Join-Path $PWD 'release\Blur-Sounds-portable.zip'
+          if (-not (Test-Path $portable)) {
+            throw "Portable zip was not found at $portable"
+          }
+          $sums = Join-Path $PWD 'release\SHA256SUMS.txt'
+          $installerHash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLower()
+          $portableHash = (Get-FileHash -Algorithm SHA256 $portable).Hash.ToLower()
+          @(
+            "$installerHash  $($installer.Name)"
+            "$portableHash  Blur-Sounds-portable.zip"
+          ) | Set-Content -Path $sums -Encoding ASCII
           Write-Host "Installer: $($installer.FullName) ($([math]::Round($installer.Length / 1MB, 1)) MB)"
+          Write-Host "Version: $version"
+          Get-Content $sums
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Do not publish a GitHub Release
+        shell: pwsh
+        run: |
+          Write-Host "Packaged Blur Sounds $($env:GITHUB_REF) as a tester build only."
+          Write-Host "Skipping gh release create / electron-builder GitHub publish so /releases/latest stays at v1.0.0 until it is tested."
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Blur-Sounds-portable
+          name: Blur-Sounds-${{ steps.pack.outputs.version }}-portable
           path: release/Blur-Sounds-portable.zip
           if-no-files-found: error
           retention-days: 14
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Blur-Sounds-Setup
+          name: Blur-Sounds-${{ steps.pack.outputs.version }}-Setup
           path: |
             release/*-Setup-*.exe
             release/*-Setup-*.exe.blockmap
+            release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
