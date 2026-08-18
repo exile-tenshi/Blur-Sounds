@@ -1,4 +1,4 @@
-name: Build Windows portable
+name: Build Windows installer
 
 on:
   push:
@@ -44,15 +44,15 @@ jobs:
           }
           Write-Host "Engine marker OK in $target"
 
-      - name: Package portable Windows app
+      - name: Package Windows portable and installer
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --win dir --config.directories.output=release/portable
+        run: npx electron-builder --win dir nsis --config.directories.output=release
 
       - name: Zip portable app
         shell: pwsh
         run: |
-          $src = Join-Path $PWD 'release\portable\win-unpacked'
+          $src = Join-Path $PWD 'release\win-unpacked'
           $zip = Join-Path $PWD 'release\Blur-Sounds-portable.zip'
           if (-not (Test-Path (Join-Path $src 'Blur Sounds.exe'))) {
             throw "Portable exe was not found in $src"
@@ -60,9 +60,29 @@ jobs:
           Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip -Force
           Write-Host "Wrote $zip"
 
+      - name: Locate installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path (Join-Path $PWD 'release') -Filter '*-Setup-*.exe' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw 'NSIS installer exe was not found in release/'
+          }
+          Write-Host "Installer: $($installer.FullName) ($([math]::Round($installer.Length / 1MB, 1)) MB)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Blur-Sounds-portable
           path: release/Blur-Sounds-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blur-Sounds-Setup
+          path: |
+            release/*-Setup-*.exe
+            release/*-Setup-*.exe.blockmap
           if-no-files-found: error
           retention-days: 14
