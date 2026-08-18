@@ -31,6 +31,7 @@ export const audioChannels = {
   openHifiCableRecordingSettings: 'system:openHifiCableRecordingSettings',
   applyHifiCableStudioSettings: 'audio:applyHifiCableStudioSettings',
   probeHifiCable: 'audio:probeHifiCable',
+  setHifiListen: 'audio:setHifiListen',
 } as const
 
 export interface HifiCableFormatResult {
@@ -62,4 +63,5 @@ export interface AudioControlApi {
   openHifiCableRecordingSettings: () => Promise<void>
   applyHifiCableStudioSettings: () => Promise<HifiCableFormatResult>
   probeHifiCable: () => Promise<string>
+  setHifiListen: (enabled: boolean) => Promise<AudioSnapshot>
 }

@@ -27,7 +27,9 @@ function shouldShowEngineNotice(engine: AudioSnapshot['engine']): boolean {
 
   return (
     engine.state === 'running' &&
-    /listen to this device|speakers will hear|asio bridge|direct mode/i.test(engine.message)
+    /listen to this device|speakers will hear|asio bridge|direct mode|listening to hi-fi/i.test(
+      engine.message,
+    )
   )
 }
 
@@ -39,6 +41,10 @@ function getEngineStatusLabel(engine: AudioSnapshot['engine']): string {
 
   if (engine.state === 'error') {
     return 'error'
+  }
+
+  if (engine.hifiListenActive) {
+    return engine.state === 'running' ? 'streaming · listening' : 'listening to cable'
   }
 
   if (engine.state === 'running') {
@@ -120,6 +126,7 @@ const AppShell = memo(function AppShell() {
     openHifiCableRecordingSettings,
     applyHifiCableStudioSettings,
     probeHifiCable,
+    setHifiListen,
     toggleRoute,
     setRouteVolume,
     setRouteEqualizer,
@@ -345,8 +352,11 @@ const AppShell = memo(function AppShell() {
             playbackDevices={playbackDevices}
             recordingDevices={recordingDevices}
             hifiCable={snapshot.hifiCable}
+            engine={snapshot.engine}
+            streamActive={isEngineActive}
             onApplyStudioSettings={() => void applyHifiCableStudioSettings()}
             onProbeHifiCable={probeHifiCable}
+            onSetHifiListen={setHifiListen}
             onOpenPlaybackSettings={() => void openHifiCablePlaybackSettings()}
             onOpenRecordingSettings={() => void openHifiCableRecordingSettings()}
             onSelectInput={(deviceId) => updateSelection('inputDeviceId', deviceId)}
