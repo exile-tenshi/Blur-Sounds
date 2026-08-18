@@ -13,6 +13,7 @@ namespace VoiceMeeterEngine;
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
+    private const string BackgroundPathMarker = "Never sum dry + RNNoise on Background";
     private const float MinEnvelope = 1e-6f;
     private const float NoiseLearnRate = 0.02f;
     /// <summary>Voice envelope — fast enough that talk isn't treated as a desk tap.</summary>
@@ -422,6 +423,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     /// </summary>
     private float SelectBackgroundPath(float mixed, float dryOut)
     {
+        _ = BackgroundPathMarker;
         var wantIdle = !residualSpeechOpen;
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
         var duckCoeff = 1f / Math.Max(2f, sampleRate * 0.004f);

@@ -33,14 +33,16 @@ jobs:
         shell: pwsh
         run: |
           $dll = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.dll'
-          if (-not (Test-Path $dll)) {
-            throw "Engine DLL was not published: $dll"
+          $exe = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe'
+          $target = if (Test-Path $dll) { $dll } elseif (Test-Path $exe) { $exe } else { $null }
+          if (-not $target) {
+            throw "Engine was not published under resources\engine"
           }
-          $marker = Select-String -Path $dll -Pattern 'Never sum dry \+ RNNoise' -Quiet
-          if (-not $marker) {
-            throw 'VoiceMeeterEngine.dll is missing the Background exclusive-path marker. Engine rebuild failed.'
+          $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($target))
+          if ($text -notmatch 'Never sum dry \+ RNNoise') {
+            throw "Engine binary is missing the Background exclusive-path marker: $target"
           }
-          Write-Host 'Engine marker OK: Never sum dry + RNNoise'
+          Write-Host "Engine marker OK in $target"
 
       - name: Package portable Windows app
         env:
