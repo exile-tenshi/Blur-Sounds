@@ -57,6 +57,8 @@ start "" "%~dp0Blur Sounds.exe"
     Write-Host "  $launcherBat"
     Write-Host "Desktop folder copy:"
     Write-Host "  $desktopFolder"
+    Write-Host "Unlocked launch copy:"
+    Write-Host "  $freshFolder"
     Write-Host "Clips folder:"
     Write-Host "  $clipsFolder"
 }
