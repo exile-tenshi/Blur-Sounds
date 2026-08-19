@@ -78,6 +78,7 @@ export function registerVideoStudioIpc(mainWindow: BrowserWindow): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Load .cube LUT',
       properties: ['openFile'],
+      defaultPath: recordings.getOutputFolder(),
       filters: [{ name: 'Cube LUT', extensions: ['cube', 'CUBE'] }],
     })
     if (result.canceled || result.filePaths.length === 0) {

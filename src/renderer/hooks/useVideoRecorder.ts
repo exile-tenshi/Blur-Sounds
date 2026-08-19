@@ -62,9 +62,12 @@ function resolveVideoControl(): VideoStudioApi | undefined {
 }
 
 function pickRecorderMimeType(): string {
+  // Prefer VP8 first: it is the most broadly reliable MediaRecorder path (the existing
+  // Clips capture uses it). VP9 encode can stall and emit no data on some software-GL /
+  // headless GPU stacks, producing an empty recording.
   const candidates = [
-    'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9,opus',
     'video/webm',
     'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
     'video/mp4',
@@ -74,14 +77,21 @@ function pickRecorderMimeType(): string {
 
 async function captureStream(settings: RecordingSettings): Promise<MediaStream> {
   const preset = VIDEO_RESOLUTION_PRESETS.find((item) => item.id === settings.resolution)
+  // Use only `ideal` hints (no hard `max`): over-constraining the capturer can yield a
+  // track that produces no frames on some displays/headless GPUs. Target size is enforced
+  // best-effort below and, authoritatively, by the FFmpeg scale on export.
   const video: MediaTrackConstraints = {
-    frameRate: { ideal: settings.fps, max: settings.fps },
+    frameRate: { ideal: settings.fps },
   }
   if (preset?.width && preset.height) {
-    video.width = { ideal: preset.width, max: preset.width }
-    video.height = { ideal: preset.height, max: preset.height }
+    video.width = { ideal: preset.width }
+    video.height = { ideal: preset.height }
   }
-  return navigator.mediaDevices.getDisplayMedia({ video, audio: settings.captureAudio })
+
+  return navigator.mediaDevices.getDisplayMedia({
+    video,
+    audio: settings.captureAudio,
+  })
 }
 
 export function useVideoRecorder() {
@@ -104,6 +114,8 @@ export function useVideoRecorder() {
   const streamRef = useRef<MediaStream | null>(null)
   const startedAtRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
+  const mimeRef = useRef('')
+  const finalizingRef = useRef(false)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
 
@@ -203,10 +215,16 @@ export function useVideoRecorder() {
       streamRef.current = stream
       setPreviewStream(stream)
       chunksRef.current = []
+      finalizingRef.current = false
+      mimeRef.current = mimeType
 
+      // Cap the software-encode bitrate: very high VP8 targets can stall the encoder on
+      // software-GL / headless stacks and emit no data. FFmpeg re-encodes to the requested
+      // bitrate on save, so quality is preserved.
+      const videoBps = Math.min(settingsRef.current.videoBitrateKbps, 8_000) * 1000
       const recorder = new MediaRecorder(stream, {
         mimeType,
-        videoBitsPerSecond: settingsRef.current.videoBitrateKbps * 1000,
+        videoBitsPerSecond: videoBps,
         audioBitsPerSecond: settingsRef.current.audioBitrateKbps * 1000,
       })
       recorderRef.current = recorder
@@ -216,22 +234,21 @@ export function useVideoRecorder() {
           chunksRef.current.push(event.data)
         }
       }
+      // The capture track ending (or the recorder stopping itself) must not lose the take:
+      // finalize is idempotent and pulls from the collected timeslice chunks.
       recorder.onstop = () => {
-        void finalizeRecording(mimeType)
+        void finalizeRecording()
       }
       recorder.onerror = () => {
-        setError('Recording failed.')
         void stopRecording()
       }
-
-      // A capture source that ends (user closes the shared window) should stop us cleanly.
       stream.getVideoTracks().forEach((track) => {
         track.onended = () => {
           void stopRecording()
         }
       })
 
-      recorder.start(1000)
+      recorder.start(2000)
       startedAtRef.current = Date.now()
       setElapsedMs(0)
       setRecording(true)
@@ -246,39 +263,46 @@ export function useVideoRecorder() {
     } finally {
       setIsBusy(false)
     }
-    // finalizeRecording / stopRecording are declared below and captured via refs-free closures.
+    // finalizeRecording / stopRecording are declared below; captured lazily at call time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clipControl, recording, selectedSourceId, stopTracks, videoControl])
 
-  const finalizeRecording = useCallback(
-    async (mimeType: string) => {
-      if (!videoControl) {
-        return
-      }
-      const durationMs = Date.now() - startedAtRef.current
-      const sourceName =
-        sources.find((source) => source.id === selectedSourceId)?.name ?? 'Screen'
-      const blob = new Blob(chunksRef.current, { type: mimeType })
-      chunksRef.current = []
-      try {
-        const buffer = await blob.arrayBuffer()
-        const saved = await videoControl.saveRecording({
-          data: buffer,
-          mimeType: blob.type || mimeType,
-          sourceName,
-          settings: settingsRef.current,
-          durationMs,
-        })
-        setLastSaved(saved)
-        setError(undefined)
-      } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : 'Unable to save recording.')
-      } finally {
-        setIsBusy(false)
-      }
-    },
-    [selectedSourceId, sources, videoControl],
-  )
+  const finalizeRecording = useCallback(async () => {
+    if (!videoControl || finalizingRef.current) {
+      return
+    }
+    finalizingRef.current = true
+    setIsBusy(true)
+
+    const mimeType = mimeRef.current || 'video/webm'
+    const durationMs = Date.now() - startedAtRef.current
+    const sourceName = sources.find((source) => source.id === selectedSourceId)?.name ?? 'Screen'
+    const blob = new Blob(chunksRef.current, { type: mimeType })
+    chunksRef.current = []
+
+    if (blob.size === 0) {
+      setError('No video frames were captured. Try a Desktop source or a lower resolution/frame rate.')
+      setIsBusy(false)
+      return
+    }
+
+    try {
+      const buffer = await blob.arrayBuffer()
+      const saved = await videoControl.saveRecording({
+        data: buffer,
+        mimeType: blob.type || mimeType,
+        sourceName,
+        settings: settingsRef.current,
+        durationMs,
+      })
+      setLastSaved(saved)
+      setError(undefined)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save recording.')
+    } finally {
+      setIsBusy(false)
+    }
+  }, [selectedSourceId, sources, videoControl])
 
   const stopRecording = useCallback(async () => {
     if (timerRef.current) {
@@ -286,13 +310,27 @@ export function useVideoRecorder() {
       timerRef.current = undefined
     }
     setRecording(false)
-    setIsBusy(true)
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop()
-    }
+    const recorder = recorderRef.current
     recorderRef.current = null
+
+    if (recorder && recorder.state !== 'inactive') {
+      setIsBusy(true)
+      try {
+        recorder.requestData()
+        recorder.stop()
+      } catch {
+        // fall through to chunk-based finalize
+      }
+      // Watchdog: if onstop does not arrive (headless capture quirks), finalize from chunks.
+      setTimeout(() => {
+        void finalizeRecording()
+      }, 600)
+    } else {
+      // Recorder already stopped itself (e.g. the capture track ended) — save what we have.
+      void finalizeRecording()
+    }
     stopTracks()
-  }, [stopTracks])
+  }, [finalizeRecording, stopTracks])
 
   const openRecordingsFolder = useCallback(async () => {
     await videoControl?.openRecordingsFolder()

@@ -10,6 +10,11 @@ import { registerVideoStudioIpc } from './ipc/videoStudioIpc.js'
 import { ClipKeybindService } from './recording/clipKeybinds.js'
 import { SettingsStore } from './settings/settingsStore.js'
 
+// Keep the WebGL2 preview compositor working on machines with older/blocklisted
+// GPUs (and headless/software-GL environments) by allowing a SwiftShader fallback.
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const appDataRoot = join(app.getPath('appData'), 'BlurSounds')
