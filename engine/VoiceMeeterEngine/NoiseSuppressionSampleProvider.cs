@@ -13,8 +13,6 @@ namespace VoiceMeeterEngine;
 /// </summary>
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
-    private static readonly string BackgroundPathMarker = "Never sum dry + RNNoise on Background";
-    private static readonly string FanIdleMarker = "idle leftover uses RNNoise, not dry fan";
     private const float MinEnvelope = 1e-6f;
     private const float NoiseLearnRate = 0.02f;
     /// <summary>Voice envelope — fast enough that talk isn't treated as a desk tap.</summary>
@@ -452,14 +450,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     /// </summary>
     private float SelectBackgroundPath(float mixed, float dryOut)
     {
-        _ = BackgroundPathMarker;
-        _ = FanIdleMarker;
         _ = dryOut;
-        // Keep marker strings live in the published binary (CI greps for them).
-        mixed *= BackgroundPathMarker.Contains("RNNoise", StringComparison.Ordinal)
-            && FanIdleMarker.Contains("fan", StringComparison.Ordinal)
-            ? 1f
-            : 1f;
+        mixed *= EngineDspMarkers.KeepAliveScale();
         var wantIdle = !residualSpeechOpen;
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
         var duckCoeff = 1f / Math.Max(2f, sampleRate * 0.004f);

@@ -32,6 +32,12 @@ jobs:
       - name: Verify rebuilt noise engine
         shell: pwsh
         run: |
+          function Test-Utf16Contains([string]$path, [string]$ascii) {
+            $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($path))
+            return $text.Contains($ascii)
+          }
+
+          Get-ChildItem (Join-Path $PWD 'resources\engine') | Select-Object Name, Length | Format-Table | Out-String | Write-Host
           $candidates = @(
             (Join-Path $PWD 'resources\engine\VoiceMeeterEngine.dll'),
             (Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe')
@@ -42,9 +48,8 @@ jobs:
           $foundBackground = $false
           $foundFan = $false
           foreach ($target in $candidates) {
-            $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($target))
-            if ($text -match 'Never sum dry \+ RNNoise') { $foundBackground = $true }
-            if ($text -match 'idle leftover uses RNNoise') { $foundFan = $true }
+            if (Test-Utf16Contains $target 'Never sum dry + RNNoise') { $foundBackground = $true }
+            if (Test-Utf16Contains $target 'idle leftover uses RNNoise') { $foundFan = $true }
             Write-Host "Scanned $target"
           }
           if (-not $foundBackground) {
