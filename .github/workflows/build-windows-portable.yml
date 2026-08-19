@@ -32,20 +32,28 @@ jobs:
       - name: Verify rebuilt noise engine
         shell: pwsh
         run: |
-          $dll = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.dll'
-          $exe = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe'
-          $target = if (Test-Path $dll) { $dll } elseif (Test-Path $exe) { $exe } else { $null }
-          if (-not $target) {
+          $candidates = @(
+            (Join-Path $PWD 'resources\engine\VoiceMeeterEngine.dll'),
+            (Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe')
+          ) | Where-Object { Test-Path $_ }
+          if (-not $candidates) {
             throw "Engine was not published under resources\engine"
           }
-          $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($target))
-          if ($text -notmatch 'Never sum dry \+ RNNoise') {
-            throw "Engine binary is missing the Background exclusive-path marker: $target"
+          $foundBackground = $false
+          $foundFan = $false
+          foreach ($target in $candidates) {
+            $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($target))
+            if ($text -match 'Never sum dry \+ RNNoise') { $foundBackground = $true }
+            if ($text -match 'idle leftover uses RNNoise') { $foundFan = $true }
+            Write-Host "Scanned $target"
           }
-          if ($text -notmatch 'idle leftover uses RNNoise') {
-            throw "Engine binary is missing the fan idle-path marker: $target"
+          if (-not $foundBackground) {
+            throw "Engine binary is missing the Background exclusive-path marker"
           }
-          Write-Host "Engine marker OK in $target"
+          if (-not $foundFan) {
+            throw "Engine binary is missing the fan idle-path marker"
+          }
+          Write-Host "Engine markers OK"
 
       - name: Package Windows portable and installer
         env:
