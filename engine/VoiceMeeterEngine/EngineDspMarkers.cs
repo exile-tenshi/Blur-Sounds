@@ -17,13 +17,13 @@ internal static class EngineDspMarkers
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static string NeverSumDryAndRnnoise()
+    internal static string NeverSumDryAndRnnoise()
     {
         return "Never sum dry + RNNoise on Background";
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static string IdleLeftoverUsesRnnoise()
+    internal static string IdleLeftoverUsesRnnoise()
     {
         return "idle leftover uses RNNoise, not dry fan";
     }
