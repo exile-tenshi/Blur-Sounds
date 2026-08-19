@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { audioChannels, type AudioControlApi } from '../shared/audioApi.js'
 import { clipChannels, type ClipControlApi } from '../shared/clipApi.js'
 import { settingsChannels, type SettingsControlApi } from '../shared/settingsApi.js'
+import { videoStudioChannels, type VideoStudioApi } from '../shared/videoStudio.js'
 
 const audioControlApi: AudioControlApi = {
   getSnapshot: () => ipcRenderer.invoke(audioChannels.getSnapshot),
@@ -75,6 +76,24 @@ const settingsControlApi: SettingsControlApi = {
   },
 }
 
+const videoStudioApi: VideoStudioApi = {
+  getRecordingSettings: () => ipcRenderer.invoke(videoStudioChannels.getRecordingSettings),
+  setRecordingSettings: (patch) =>
+    ipcRenderer.invoke(videoStudioChannels.setRecordingSettings, patch),
+  saveRecording: (payload) => ipcRenderer.invoke(videoStudioChannels.saveRecording, payload),
+  openRecordingsFolder: () => ipcRenderer.invoke(videoStudioChannels.openRecordingsFolder),
+  probeMedia: (path) => ipcRenderer.invoke(videoStudioChannels.probeMedia, path),
+  pickMediaFile: () => ipcRenderer.invoke(videoStudioChannels.pickMediaFile),
+  pickLutFile: () => ipcRenderer.invoke(videoStudioChannels.pickLutFile),
+  readTextFile: (path) => ipcRenderer.invoke(videoStudioChannels.readTextFile, path),
+  readMediaFile: (path) => ipcRenderer.invoke(videoStudioChannels.readMediaFile, path),
+  exportClip: (request) => ipcRenderer.invoke(videoStudioChannels.exportClip, request),
+  saveProject: (project) => ipcRenderer.invoke(videoStudioChannels.saveProject, project),
+  loadProject: () => ipcRenderer.invoke(videoStudioChannels.loadProject),
+  detectEncoders: () => ipcRenderer.invoke(videoStudioChannels.detectEncoders),
+}
+
 contextBridge.exposeInMainWorld('audioControl', audioControlApi)
 contextBridge.exposeInMainWorld('clipControl', clipControlApi)
 contextBridge.exposeInMainWorld('settingsControl', settingsControlApi)
+contextBridge.exposeInMainWorld('videoStudioControl', videoStudioApi)

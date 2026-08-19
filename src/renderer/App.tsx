@@ -7,7 +7,9 @@ import { HIFI_CABLE_QUALITY } from '../shared/hifiCable'
 import { AppLibraryPanel } from './components/AppLibraryPanel'
 import { AudioRoutingPanel } from './components/AudioRoutingPanel'
 import { ClipRecordingPanel } from './components/ClipRecordingPanel'
+import { ClipEditorPanel } from './components/ClipEditorPanel'
 import { HifiSetupPanel } from './components/HifiSetupPanel'
+import { VideoRecordingPanel } from './components/VideoRecordingPanel'
 import { InputVolumeList } from './components/InputVolumeList'
 import { NoiseSuppressionSection } from './components/NoiseSuppressionSection'
 import { ClipRecorderProvider, useClipRecorderContext } from './context/ClipRecorderContext'
@@ -288,6 +290,16 @@ const AppShell = memo(function AppShell() {
         {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}
         <div className={activeSection === 'clips' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'clips'}>
           <ClipRecordingPanel isActive={activeSection === 'clips'} />
+        </div>
+
+        {/* Keep Record mounted so an in-progress capture survives section switches. */}
+        <div className={activeSection === 'record' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'record'}>
+          <VideoRecordingPanel isActive={activeSection === 'record'} />
+        </div>
+
+        {/* Keep Editor mounted so the project, undo stack, and preview persist. */}
+        <div className={activeSection === 'editor' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'editor'}>
+          <ClipEditorPanel isActive={activeSection === 'editor'} />
         </div>
 
         {activeSection === 'setup' ? (

@@ -1,4 +1,13 @@
-export type AppSectionId = 'mixer' | 'noise' | 'clips' | 'setup'
+export type AppSectionId = 'mixer' | 'noise' | 'clips' | 'record' | 'editor' | 'setup'
+
+export const APP_SECTION_IDS: readonly AppSectionId[] = [
+  'mixer',
+  'noise',
+  'clips',
+  'record',
+  'editor',
+  'setup',
+]
 
 export const CLIP_LOOKBACK_OPTIONS_SECONDS = [15, 30, 60, 120, 180, 300] as const
 

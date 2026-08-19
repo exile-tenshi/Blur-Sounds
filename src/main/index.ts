@@ -6,6 +6,7 @@ import type { RoutingStore } from './audio/routingStore.js'
 import { registerAudioIpc } from './ipc/audioIpc.js'
 import { registerClipIpc } from './ipc/clipIpc.js'
 import { registerSettingsIpc } from './ipc/settingsIpc.js'
+import { registerVideoStudioIpc } from './ipc/videoStudioIpc.js'
 import { ClipKeybindService } from './recording/clipKeybinds.js'
 import { SettingsStore } from './settings/settingsStore.js'
 
@@ -66,6 +67,7 @@ async function createMainWindow(): Promise<void> {
   registerSettingsIpc(mainWindow, settings)
   audioStore = registerAudioIpc(mainWindow)
   registerClipIpc(mainWindow, settings, clipKeybinds)
+  registerVideoStudioIpc(mainWindow)
 
   mainWindow.on('closed', () => {
     shutdownAudioStore()

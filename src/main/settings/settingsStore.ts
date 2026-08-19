@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import {
+  APP_SECTION_IDS,
   APP_SETTINGS_VERSION,
   DEFAULT_APP_SETTINGS,
   DEFAULT_CLIP_SETTINGS,
@@ -35,10 +36,9 @@ function normalizeSettings(raw: unknown): AppSettings {
   const input = raw && typeof raw === 'object' ? (raw as Partial<AppSettings>) : {}
   const clipInput = input.clip && typeof input.clip === 'object' ? input.clip : {}
   const section = input.activeSection
-  const activeSection: AppSectionId =
-    section === 'mixer' || section === 'noise' || section === 'clips' || section === 'setup'
-      ? section
-      : DEFAULT_APP_SETTINGS.activeSection
+  const activeSection: AppSectionId = APP_SECTION_IDS.includes(section as AppSectionId)
+    ? (section as AppSectionId)
+    : DEFAULT_APP_SETTINGS.activeSection
 
   const savedVersion =
     typeof input.settingsVersion === 'number' ? input.settingsVersion : 0
