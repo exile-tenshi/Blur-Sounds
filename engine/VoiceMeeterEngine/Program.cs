@@ -14,6 +14,13 @@ internal static class Program
         Console.InputEncoding = System.Text.Encoding.UTF8;
         Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+        if (args.Any(arg => string.Equals(arg, "--dsp-markers", StringComparison.OrdinalIgnoreCase)))
+        {
+            Console.WriteLine(EngineDspMarkers.NeverSumDryAndRnnoise());
+            Console.WriteLine(EngineDspMarkers.IdleLeftoverUsesRnnoise());
+            return;
+        }
+
         if (args.Any(arg => string.Equals(arg, "--configure-hifi", StringComparison.OrdinalIgnoreCase)))
         {
             Console.WriteLine(HifiCableFormatConfigurator.ApplyStudioQuality().Message);

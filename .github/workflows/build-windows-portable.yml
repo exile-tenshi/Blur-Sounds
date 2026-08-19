@@ -32,30 +32,16 @@ jobs:
       - name: Verify rebuilt noise engine
         shell: pwsh
         run: |
-          function Test-Utf16Contains([string]$path, [string]$ascii) {
-            $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($path))
-            return $text.Contains($ascii)
-          }
-
-          Get-ChildItem (Join-Path $PWD 'resources\engine') | Select-Object Name, Length | Format-Table | Out-String | Write-Host
-          $candidates = @(
-            (Join-Path $PWD 'resources\engine\VoiceMeeterEngine.dll'),
-            (Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe')
-          ) | Where-Object { Test-Path $_ }
-          if (-not $candidates) {
+          $exe = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe'
+          if (-not (Test-Path $exe)) {
             throw "Engine was not published under resources\engine"
           }
-          $foundBackground = $false
-          $foundFan = $false
-          foreach ($target in $candidates) {
-            if (Test-Utf16Contains $target 'Never sum dry + RNNoise') { $foundBackground = $true }
-            if (Test-Utf16Contains $target 'idle leftover uses RNNoise') { $foundFan = $true }
-            Write-Host "Scanned $target"
-          }
-          if (-not $foundBackground) {
+          $printed = & $exe --dsp-markers 2>&1 | Out-String
+          Write-Host $printed
+          if ($printed -notmatch 'Never sum dry \+ RNNoise') {
             throw "Engine binary is missing the Background exclusive-path marker"
           }
-          if (-not $foundFan) {
+          if ($printed -notmatch 'idle leftover uses RNNoise') {
             throw "Engine binary is missing the fan idle-path marker"
           }
           Write-Host "Engine markers OK"
