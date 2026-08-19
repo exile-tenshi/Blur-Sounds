@@ -22,3 +22,12 @@ The app is built for Windows, but the Electron shell and renderer run fine on Li
 ### Good Linux-safe smoke test (core functionality)
 
 The **Clips** section works fully on Linux: toggle "Run buffer in background" (the main-process clip recorder starts and the top status bar counts up in real time) and change the lookback duration (a persisted setting). Settings persist across section navigation via the on-disk settings store. This exercises the renderer ↔ IPC ↔ main-process path without needing Windows audio.
+
+### Video Studio tabs (Record + Editor)
+
+Architecture and the full requested-stack mapping live in `docs/VIDEO_STUDIO_ROADMAP.md`. Key points for testing on the cloud VM:
+
+- Uses `ffmpeg-static` + `ffprobe-static` (kept external from the Electron main bundle in `vite.config.ts`; resolved at runtime via `createRequire`). Editor export/transcode uses `libx264` here.
+- The **Editor** is fully testable on Linux and is the best smoke test: use `ffmpeg` (`node -e "require('ffmpeg-static')"`) to generate a sample MP4 into `~/Desktop/Blur Sounds Recordings/`, then Import it, scrub, adjust the color-grade sliders (WebGL2 preview), Load a `.cube` LUT, Analyze audio (dead-air + highlights), Trim dead air, and Export clip — verify the output MP4 with `ffprobe`.
+- WebGL2 is blocklisted on this VM by default; `src/main/index.ts` sets `ignore-gpu-blocklist` + `enable-unsafe-swiftshader` so the preview renders via SwiftShader.
+- **Record tab caveat**: live `getDisplayMedia`+`MediaRecorder` screen capture does not reliably deliver frames on this headless/virtual display (same limitation affects the pre-existing Clips capture). Expect a clean "No video frames were captured" message rather than a saved file. This is an environment limitation; capture works on real Windows/desktop GPUs. The Record tab's settings and save/transcode pipeline are shared with the Editor export, which is validated.
