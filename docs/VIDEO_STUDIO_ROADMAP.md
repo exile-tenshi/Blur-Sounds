@@ -52,13 +52,28 @@ Legend: ✅ Implemented · 🟡 Planned (this stack) · 🧭 Native track (separ
 - 🟡 **Text/title rendering** — FFmpeg build includes FreeType; a titles pass is planned.
 
 ## 5. AI / smart features
+- ✅ **ClearCast voice isolation (RNNoise)** — `src/main/video/clearCast.ts` builds an
+  FFmpeg audio chain: subsonic/high-pass → **`arnndn`** (RNNoise ML speech denoiser,
+  bundled `resources/rnnoise/cb.rnnn`) → gate → de-ess → speech-normalize. Removes
+  fans, hum, hiss, keyboard/desk taps, low rumble, and room-echo tails so only the
+  speaker's voice remains. Applied to Editor exports and recording saves; strength
+  0–100. Falls back to `afftdn`+`anlmdn` when the model is absent. The live-mic C#
+  engine (`NoiseSuppressionSampleProvider`) also got a subsonic cut + deeper gate and
+  a "ClearCast" preset; a native RNNoise pass on the live stream is the next step.
 - ✅ **Dead-air detection + audio-spike auto-highlights** — local, model-free RMS
   envelope analysis via the Web Audio API (`src/renderer/utils/audioAnalysis.ts`),
-  surfaced in the Editor with one-click "Trim dead air". This is the working,
-  testable stand-in for the VAD/vision roadmap items (no network, no weights).
+  surfaced in the Editor with one-click "Trim dead air".
 - 🟡 **Whisper.cpp captions / Silero-WebRTC VAD** — the analysis module exposes a
   typed `AudioAnalysis` interface these can plug into.
 - 🧭 **Groq Vision / YOLO kill-feed OCR** — heavier model integrations; separate track.
+
+### ClearCast testing (verified on the Linux VM)
+A synthesized "dirty mic" clip (espeak voice + brown-noise fan + 2 kHz desk taps +
+85 Hz rumble + `aecho` room echo) was processed through the shipped ClearCast chain via
+the in-app Editor export. Result: the silent-gap noise floor dropped from **-20 dB to
+-33 dB** (~13 dB), overall noise fell ~8 dB, and the before/after spectrogram shows the
+low-frequency rumble band and tap streaks removed while the voice harmonics are
+preserved. Attribution: RNNoise model `cb.rnnn` from the GregorR/rnnoise-models set.
 
 ## 6. Dev tools & build system
 - ✅ **Existing build system** — Vite + `vite-plugin-electron` (this app), lint via oxlint.
