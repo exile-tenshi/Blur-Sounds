@@ -396,9 +396,8 @@ export class RoutingStore {
       try {
         if (routesRemapped) {
           await this.syncEngineRoutes()
-        } else {
-          await this.ensureEngineRunning()
         }
+        // Device list refresh alone must not re-bind mics/loopback — that glitched the live mix.
       } catch (error) {
         this.setEngineError(
           error instanceof Error ? error.message : 'Unable to refresh the audio engine.',
@@ -461,7 +460,6 @@ export class RoutingStore {
 
     const engineSelectionChanged =
       payload.inputDeviceId !== undefined ||
-      payload.recordingDeviceId !== undefined ||
       payload.microphoneId !== undefined ||
       payload.microphones !== undefined
 

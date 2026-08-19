@@ -9,6 +9,13 @@ import { ClipVoiceCommandService } from '../recording/clipVoiceCommands.js'
 import { showClipOverlay } from '../recording/clipOverlay.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
+function keybindsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((item, index) => item === right[index])
+}
+
 export function registerClipIpc(
   mainWindow: BrowserWindow,
   settings: SettingsStore,
@@ -17,12 +24,38 @@ export function registerClipIpc(
 ): ClipRecorderService {
   const recorder = new ClipRecorderService(settings)
   keybinds.setMainWindow(mainWindow)
+  keybinds.setClipGate(() => {
+    const status = recorder.getStatus()
+    if (status.bufferState === 'clipping') {
+      return { ok: false, reason: 'A clip is already saving — wait a moment.' }
+    }
+    if (!status.buffering || status.bufferState === 'idle' || status.bufferState === 'error') {
+      return {
+        ok: false,
+        reason: 'Turn on “Run buffer in background” on the Clips tab first.',
+      }
+    }
+    return { ok: true }
+  })
   keybinds.refresh()
   voiceCommands?.refresh()
 
-  settings.subscribe(() => {
-    keybinds.refresh()
-    voiceCommands?.refresh()
+  let trackedKeybinds = [...settings.get().clip.keybinds]
+  let trackedVoiceEnabled = settings.get().clip.voiceCommandsEnabled !== false
+
+  settings.subscribe((next) => {
+    const nextKeybinds = next.clip.keybinds
+    const nextVoiceEnabled = next.clip.voiceCommandsEnabled !== false
+
+    if (!keybindsEqual(trackedKeybinds, nextKeybinds)) {
+      trackedKeybinds = [...nextKeybinds]
+      keybinds.refresh()
+    }
+
+    if (nextVoiceEnabled !== trackedVoiceEnabled) {
+      trackedVoiceEnabled = nextVoiceEnabled
+      voiceCommands?.refresh()
+    }
   })
 
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -111,8 +144,12 @@ export function registerClipIpc(
   ipcMain.handle(clipChannels.getSettings, () => settings.get().clip)
   ipcMain.handle(clipChannels.setSettings, (_event, patch: Partial<ClipSettings>) => {
     const next = settings.set({ clip: patch })
-    keybinds.refresh()
-    voiceCommands?.refresh()
+    if (patch.keybinds) {
+      keybinds.refresh()
+    }
+    if (typeof patch.voiceCommandsEnabled === 'boolean') {
+      voiceCommands?.refresh()
+    }
     return next.clip
   })
   ipcMain.handle(clipChannels.addKeybind, (_event, accelerator: string) => {

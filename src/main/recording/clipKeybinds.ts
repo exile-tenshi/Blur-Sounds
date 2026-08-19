@@ -3,14 +3,22 @@ import { clipChannels } from '../../shared/clipApi.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 import { showClipOverlay } from './clipOverlay.js'
 
+export type ClipTriggerGate = () => { ok: true } | { ok: false; reason: string }
+
 export class ClipKeybindService {
   private mainWindow?: BrowserWindow
   private registered: string[] = []
+  private clipGate?: ClipTriggerGate
 
   constructor(private readonly settings: SettingsStore) {}
 
   setMainWindow(window: BrowserWindow): void {
     this.mainWindow = window
+  }
+
+  /** Optional guard — e.g. buffer must be running before Clip it fires. */
+  setClipGate(gate: ClipTriggerGate | undefined): void {
+    this.clipGate = gate
   }
 
   refresh(): void {
@@ -43,6 +51,17 @@ export class ClipKeybindService {
 
   /** Same path for keybinds and voice commands. */
   triggerClip(source: 'keybind' | 'voice' | 'ui' = 'keybind'): void {
+    const gate = this.clipGate?.()
+    if (gate && !gate.ok) {
+      showClipOverlay({
+        title: source === 'voice' ? 'Heard “clip it blur”' : 'Clip it',
+        body: gate.reason,
+        kind: 'error',
+        holdMs: 3200,
+      })
+      return
+    }
+
     const heard = source === 'voice' ? 'Heard “clip it blur”' : 'Clip it'
     showClipOverlay({
       title: heard,

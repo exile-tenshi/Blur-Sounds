@@ -55,10 +55,12 @@ export class ClipVoiceCommandService {
   refresh(): void {
     const enabled = this.settings.get().clip.voiceCommandsEnabled !== false
     if (enabled) {
-      this.start()
-    } else {
-      this.stop()
+      if (!this.process && !this.starting) {
+        this.start()
+      }
+      return
     }
+    this.stop()
   }
 
   start(): void {
@@ -235,7 +237,7 @@ try {
     $grammarName = ''
     if ($result.Grammar -and $result.Grammar.Name) { $grammarName = [string]$result.Grammar.Name }
     if ($grammarName -eq 'reject-other-speech') { continue }
-    if ($result.Confidence -lt 0.78) { continue }
+    if ($result.Confidence -lt 0.72) { continue }
     $text = (([string]$result.Text).ToLower() -replace '[^a-z ]', ' ')
     $text = ($text -replace ' +', ' ').Trim()
     if ($text -ne 'clip it blur' -and $text -ne 'blur clip it') { continue }
@@ -243,10 +245,10 @@ try {
     if ($words.Count -lt 3) { continue }
     $weakWord = $false
     foreach ($word in $words) {
-      if ($word.Confidence -lt 0.62) { $weakWord = $true; break }
+      if ($word.Confidence -lt 0.58) { $weakWord = $true; break }
     }
     if ($weakWord) { continue }
-    if ($result.Audio -and $result.Audio.Duration.TotalMilliseconds -lt 620) { continue }
+    if ($result.Audio -and $result.Audio.Duration.TotalMilliseconds -lt 550) { continue }
     [Console]::Out.WriteLine('CLIP_VOICE_HIT:' + $text)
     [Console]::Out.Flush()
   }

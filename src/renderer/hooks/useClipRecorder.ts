@@ -61,7 +61,45 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 14
+export const CLIPS_PICKER_BUILD = 15
+
+function flushRecorderBuffer(
+  recorder: MediaRecorder,
+  onChunk: (blob: Blob) => void,
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (recorder.state !== 'recording') {
+      resolve()
+      return
+    }
+
+    let settled = false
+    const done = () => {
+      if (settled) {
+        return
+      }
+      settled = true
+      resolve()
+    }
+
+    const onData = (event: BlobEvent) => {
+      if (event.data.size > 0) {
+        onChunk(event.data)
+      }
+      done()
+    }
+
+    recorder.addEventListener('dataavailable', onData, { once: true })
+    try {
+      recorder.requestData()
+    } catch {
+      done()
+      return
+    }
+
+    window.setTimeout(done, 300)
+  })
+}
 
 function pickRecorderMimeType(): string {
   const candidates = [
@@ -564,7 +602,16 @@ export function useClipRecorder() {
       clearTimeout(forwardTimerRef.current)
     }
     forwardTimerRef.current = setTimeout(() => {
-      void finalizeClip()
+      void (async () => {
+        const recorder = mediaRecorderRef.current
+        if (recorder && recorder.state === 'recording') {
+          await flushRecorderBuffer(recorder, (blob) => {
+            chunksRef.current.push({ blob, at: Date.now() })
+            chunksRef.current = pruneChunks(chunksRef.current, lookbackRef.current)
+          })
+        }
+        await finalizeClip()
+      })()
     }, forwardMs)
   }, [clipControl, finalizeClip, syncStatus])
 

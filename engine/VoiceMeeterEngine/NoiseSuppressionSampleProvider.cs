@@ -41,6 +41,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float peakEnvelope = MinEnvelope;
     private float impulseAmount;
     private float gateGain = 1f;
+    private float gateEnvelope = MinEnvelope;
     private bool residualSpeechOpen;
     private int quietHoldSamples;
     private bool idlePath;
@@ -65,6 +66,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         WaveFormat = source.WaveFormat;
         channels = Math.Max(1, WaveFormat.Channels);
         RebuildHighPass();
+        _ = EngineDspMarkers.KeepAliveScale();
     }
 
     public WaveFormat WaveFormat { get; }
@@ -451,7 +453,6 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float SelectBackgroundPath(float mixed, float dryOut)
     {
         _ = dryOut;
-        mixed *= EngineDspMarkers.KeepAliveScale();
         var wantIdle = !residualSpeechOpen;
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
         var duckCoeff = 1f / Math.Max(2f, sampleRate * 0.004f);
@@ -565,12 +566,12 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
     private void UpdateGate(float abs)
     {
-        var previous = channelEnvelope;
+        var previous = gateEnvelope;
         var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
-        channelEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
+        gateEnvelope = Math.Max(MinEnvelope, previous + ((abs - previous) * learn));
 
         var thresholdLinear = MathF.Pow(10f, (-50f + (noiseGateThreshold * 0.28f)) / 20f);
-        var target = channelEnvelope >= thresholdLinear ? 1f : 0f;
+        var target = gateEnvelope >= thresholdLinear ? 1f : 0f;
         var attackCoeff = 0.08f + ((100f - attack) * 0.0035f);
         var releaseCoeff = 0.018f + ((100f - release) * 0.0012f);
         var coeff = target > gateGain ? attackCoeff : releaseCoeff;
@@ -653,6 +654,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private void ResetIdleState()
     {
         gateGain = 1f;
+        gateEnvelope = MinEnvelope;
         residualSpeechOpen = false;
         quietHoldSamples = 0;
         idlePath = true;
