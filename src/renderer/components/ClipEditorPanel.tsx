@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ENCODER_OPTIONS,
   type ColorGrade,
   type GradeParam,
 } from '../../shared/videoStudio'
-import { useVideoEditor } from '../hooks/useVideoEditor'
+import { useVideoEditorContext } from '../context/VideoEditorContext'
 import { clipDuration } from '../hooks/useVideoEditor'
 import { PreviewRenderer } from '../utils/webglPreview'
 import { parseCubeLut } from '../utils/cubeLut'
@@ -39,10 +39,15 @@ function formatTime(seconds: number): string {
     .padStart(2, '0')}`
 }
 
-export function ClipEditorPanel({ isActive = false }: { isActive?: boolean }) {
-  const editor = useVideoEditor()
+export const ClipEditorPanel = memo(function ClipEditorPanel({
+  isActive = false,
+}: {
+  isActive?: boolean
+}) {
+  const editor = useVideoEditorContext()
   const {
     available,
+    ensureLoaded,
     clips,
     selectedClip,
     selectedClipId,
@@ -85,6 +90,7 @@ export function ClipEditorPanel({ isActive = false }: { isActive?: boolean }) {
   const rendererRef = useRef<PreviewRenderer | null>(null)
   const rafRef = useRef<number>(0)
   const loadedLutPathRef = useRef<string | undefined>(undefined)
+  const lastRenderSigRef = useRef('')
   const [pxPerSec, setPxPerSec] = useState(48)
   const [isPlaying, setIsPlaying] = useState(false)
   const playingRef = useRef(false)
@@ -95,6 +101,11 @@ export function ClipEditorPanel({ isActive = false }: { isActive?: boolean }) {
   // Keep refs of the latest values the render loop reads without re-subscribing rAF.
   const stateRef = useRef({ selectedClip, playhead })
   stateRef.current = { selectedClip, playhead }
+
+  // Trigger the editor's lazy init (encoder detection) only when the tab opens.
+  useEffect(() => {
+    ensureLoaded()
+  }, [ensureLoaded])
 
   // Set up the WebGL preview renderer once the canvas mounts.
   useEffect(() => {
@@ -172,7 +183,14 @@ export function ClipEditorPanel({ isActive = false }: { isActive?: boolean }) {
 
         if (renderer && video.readyState >= 2 && video.videoWidth > 0) {
           const grade = resolveGradeAtTime(clip.grade, clip.curves, localTime)
-          renderer.render(video, grade, clip.lutIntensity)
+          // Skip redundant GPU draws when idle: only redraw when playing or when the
+          // frame/grade/LUT actually changed. Keeps the paused editor near-zero GPU cost.
+          const g = grade
+          const sig = `${video.currentTime.toFixed(3)}|${clip.id}|${clip.lutPath ?? ''}|${clip.lutIntensity}|${g.exposure},${g.contrast},${g.saturation},${g.temperature},${g.tint},${g.lift},${g.gamma},${g.gain}`
+          if (playingRef.current || sig !== lastRenderSigRef.current) {
+            lastRenderSigRef.current = sig
+            renderer.render(video, grade, clip.lutIntensity)
+          }
         }
       }
 
@@ -544,4 +562,4 @@ export function ClipEditorPanel({ isActive = false }: { isActive?: boolean }) {
       {error ? <p className="notice error">{error}</p> : null}
     </section>
   )
-}
+})
