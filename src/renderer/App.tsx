@@ -13,6 +13,8 @@ import { VideoRecordingPanel } from './components/VideoRecordingPanel'
 import { InputVolumeList } from './components/InputVolumeList'
 import { NoiseSuppressionSection } from './components/NoiseSuppressionSection'
 import { ClipRecorderProvider, useClipRecorderContext } from './context/ClipRecorderContext'
+import { VideoRecorderProvider } from './context/VideoRecorderContext'
+import { VideoEditorProvider } from './context/VideoEditorContext'
 import { useAppSettings } from './hooks/useAppSettings'
 import { useAudioControlState } from './hooks/useAudioControlState'
 import { SidebarNav } from './layout/SidebarNav'
@@ -287,20 +289,12 @@ const AppShell = memo(function AppShell() {
           />
         ) : null}
 
-        {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}
-        <div className={activeSection === 'clips' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'clips'}>
-          <ClipRecordingPanel isActive={activeSection === 'clips'} />
-        </div>
-
-        {/* Keep Record mounted so an in-progress capture survives section switches. */}
-        <div className={activeSection === 'record' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'record'}>
-          <VideoRecordingPanel isActive={activeSection === 'record'} />
-        </div>
-
-        {/* Keep Editor mounted so the project, undo stack, and preview persist. */}
-        <div className={activeSection === 'editor' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'editor'}>
-          <ClipEditorPanel isActive={activeSection === 'editor'} />
-        </div>
+        {/* Heavy panels mount only while active — their state (clip buffer, in-progress
+            recording, editor project + undo) lives in providers above, so nothing is lost
+            on switch and no rendering/capture/decoding runs for inactive tabs. */}
+        {activeSection === 'clips' ? <ClipRecordingPanel isActive /> : null}
+        {activeSection === 'record' ? <VideoRecordingPanel isActive /> : null}
+        {activeSection === 'editor' ? <ClipEditorPanel isActive /> : null}
 
         {activeSection === 'setup' ? (
           <HifiSetupPanel
@@ -323,7 +317,11 @@ const AppShell = memo(function AppShell() {
 function App() {
   return (
     <ClipRecorderProvider>
-      <AppShell />
+      <VideoRecorderProvider>
+        <VideoEditorProvider>
+          <AppShell />
+        </VideoEditorProvider>
+      </VideoRecorderProvider>
     </ClipRecorderProvider>
   )
 }

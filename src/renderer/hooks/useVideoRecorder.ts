@@ -116,6 +116,7 @@ export function useVideoRecorder() {
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const mimeRef = useRef('')
   const finalizingRef = useRef(false)
+  const loadedRef = useRef(false)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
 
@@ -142,25 +143,31 @@ export function useVideoRecorder() {
     }
   }, [clipControl])
 
-  useEffect(() => {
-    void (async () => {
-      if (videoControl) {
-        try {
-          const [loaded, encoders] = await Promise.all([
-            videoControl.getRecordingSettings(),
-            videoControl.detectEncoders(),
-          ])
-          setSettings(loaded)
-          if (encoders.length > 0) {
-            setAvailableEncoders(encoders)
-          }
-        } catch {
-          // keep defaults
+  // Lazy init: nothing runs until the Record tab is actually opened (ensureLoaded is
+  // called by the panel on activation), so this feature does no background work otherwise.
+  const ensureLoaded = useCallback(async () => {
+    if (loadedRef.current) {
+      return
+    }
+    loadedRef.current = true
+    if (videoControl) {
+      try {
+        const [loaded, encoders] = await Promise.all([
+          videoControl.getRecordingSettings(),
+          videoControl.detectEncoders(),
+        ])
+        setSettings(loaded)
+        if (encoders.length > 0) {
+          setAvailableEncoders(encoders)
         }
+      } catch {
+        // keep defaults
       }
-      await refreshSources()
-    })()
+    }
+    await refreshSources()
+  }, [refreshSources, videoControl])
 
+  useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current)
@@ -171,7 +178,7 @@ export function useVideoRecorder() {
       }
       streamRef.current?.getTracks().forEach((track) => track.stop())
     }
-  }, [videoControl, refreshSources])
+  }, [])
 
   const updateSettings = useCallback(
     async (patch: Partial<RecordingSettings>) => {
@@ -338,6 +345,7 @@ export function useVideoRecorder() {
 
   return {
     available: Boolean(videoControl),
+    ensureLoaded,
     sources,
     selectedSourceId,
     selectSource,

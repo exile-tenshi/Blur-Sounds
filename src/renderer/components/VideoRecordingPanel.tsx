@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import {
   ENCODER_OPTIONS,
   VIDEO_FPS_OPTIONS,
@@ -6,7 +6,7 @@ import {
   type VideoFps,
   type VideoResolutionId,
 } from '../../shared/videoStudio'
-import { useVideoRecorder } from '../hooks/useVideoRecorder'
+import { useVideoRecorderContext } from '../context/VideoRecorderContext'
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -15,9 +15,14 @@ function formatElapsed(ms: number): string {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 }
 
-export function VideoRecordingPanel({ isActive = false }: { isActive?: boolean }) {
+export const VideoRecordingPanel = memo(function VideoRecordingPanel({
+  isActive = false,
+}: {
+  isActive?: boolean
+}) {
   const {
     available,
+    ensureLoaded,
     sources,
     selectedSourceId,
     selectSource,
@@ -34,15 +39,21 @@ export function VideoRecordingPanel({ isActive = false }: { isActive?: boolean }
     startRecording,
     stopRecording,
     openRecordingsFolder,
-  } = useVideoRecorder()
+  } = useVideoRecorderContext()
 
   const videoRef = useRef<HTMLVideoElement>(null)
-  const refreshRef = useRef(refreshSources)
-  refreshRef.current = refreshSources
+  const initRef = useRef(() => {
+    void ensureLoaded()
+    void refreshSources()
+  })
+  initRef.current = () => {
+    void ensureLoaded()
+    void refreshSources()
+  }
 
   useEffect(() => {
     if (isActive) {
-      void refreshRef.current()
+      initRef.current()
     }
   }, [isActive])
 
@@ -276,4 +287,4 @@ export function VideoRecordingPanel({ isActive = false }: { isActive?: boolean }
       </div>
     </section>
   )
-}
+})

@@ -142,6 +142,7 @@ function findClipLocation(
 
 export interface UseVideoEditor {
   available: boolean
+  ensureLoaded: () => void
   project: EditorProject
   clips: EditorClip[]
   selectedClipId: string | undefined
@@ -203,15 +204,20 @@ export function useVideoEditor(): UseVideoEditor {
   const selectedClip = selectedClipId ? getClip(project, selectedClipId) : undefined
   const duration = useMemo(() => timelineDuration(project), [project])
 
-  const detectedEncodersRef = useRef(false)
-  if (!detectedEncodersRef.current && videoControl) {
-    detectedEncodersRef.current = true
+  // Lazy init: encoder detection only runs once the Editor tab is opened, so the
+  // provider does no background work until the user actually uses the editor.
+  const loadedRef = useRef(false)
+  const ensureLoaded = useCallback(() => {
+    if (loadedRef.current || !videoControl) {
+      return
+    }
+    loadedRef.current = true
     void videoControl.detectEncoders().then((encoders) => {
       if (encoders.length > 0) {
         setAvailableEncoders(encoders)
       }
     })
-  }
+  }, [videoControl])
 
   const dispatch = useCallback((command: EditorCommand) => {
     setStack((current) => runCommand(current, command))
@@ -595,6 +601,7 @@ export function useVideoEditor(): UseVideoEditor {
 
   return {
     available: Boolean(videoControl),
+    ensureLoaded,
     project,
     clips,
     selectedClipId,
