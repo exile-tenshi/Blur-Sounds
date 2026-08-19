@@ -24,6 +24,8 @@ export interface ClipOverlayPayload {
   body: string
   kind: ClipOverlayKind
   holdMs?: number
+  clipPath?: string
+  thumbnailDataUrl?: string
 }
 
 export interface ClipRecordingStatus {
@@ -57,6 +59,7 @@ export interface SaveClipResult {
   path: string
   fileName: string
   folder: string
+  thumbnailDataUrl?: string
 }
 
 export const clipChannels = {

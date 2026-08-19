@@ -61,7 +61,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 15
+export const CLIPS_PICKER_BUILD = 16
 
 function flushRecorderBuffer(
   recorder: MediaRecorder,
@@ -111,6 +111,59 @@ function pickRecorderMimeType(): string {
   ]
 
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? ''
+}
+
+function extractThumbnail(blob: Blob): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob)
+    const video = document.createElement('video')
+    video.muted = true
+    video.preload = 'auto'
+
+    let settled = false
+    const done = (result?: string) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      URL.revokeObjectURL(url)
+      resolve(result)
+    }
+
+    const timer = window.setTimeout(() => done(), 3000)
+
+    video.onloadeddata = () => {
+      video.currentTime = Math.min(0.5, video.duration || 0)
+    }
+    video.onseeked = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        const w = Math.min(video.videoWidth, 256)
+        const h = Math.round(w * (video.videoHeight / Math.max(1, video.videoWidth)))
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, w, h)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75)
+          clearTimeout(timer)
+          done(dataUrl)
+        } else {
+          clearTimeout(timer)
+          done()
+        }
+      } catch {
+        clearTimeout(timer)
+        done()
+      }
+    }
+    video.onerror = () => {
+      clearTimeout(timer)
+      done()
+    }
+
+    video.src = url
+  })
 }
 
 async function captureDesktopStream(
@@ -528,6 +581,7 @@ export function useClipRecorder() {
     clippingRef.current = false
 
     try {
+      const thumbnailDataUrl = await extractThumbnail(blob)
       const buffer = await blob.arrayBuffer()
       const saved = await clipControl.saveClip({
         data: buffer,
@@ -539,6 +593,8 @@ export function useClipRecorder() {
         title: 'Clip saved',
         body: saved.fileName,
         kind: 'saved',
+        clipPath: saved.path,
+        thumbnailDataUrl: thumbnailDataUrl ?? saved.thumbnailDataUrl,
       })
       await syncStatus(
         {
