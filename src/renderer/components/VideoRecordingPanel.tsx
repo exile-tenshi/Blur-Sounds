@@ -241,6 +241,42 @@ export const VideoRecordingPanel = memo(function VideoRecordingPanel({
             <span>Transcode to MP4 on save (FFmpeg)</span>
           </label>
 
+          <label className="eq-toggle noise-toggle">
+            <input
+              type="checkbox"
+              checked={settings.clearCast.enabled}
+              disabled={recording}
+              onChange={(event) =>
+                void updateSettings({
+                  clearCast: { ...settings.clearCast, enabled: event.target.checked },
+                })
+              }
+            />
+            <span className="eq-toggle-track" />
+            <span>ClearCast voice isolation (RNNoise)</span>
+          </label>
+          {settings.clearCast.enabled ? (
+            <>
+              <label className="field-label" htmlFor="record-clearcast">
+                ClearCast strength: {settings.clearCast.strength}
+              </label>
+              <input
+                id="record-clearcast"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                disabled={recording}
+                value={settings.clearCast.strength}
+                onChange={(event) =>
+                  void updateSettings({
+                    clearCast: { ...settings.clearCast, strength: Number(event.target.value) },
+                  })
+                }
+              />
+            </>
+          ) : null}
+
           <div className="button-row">
             {recording ? (
               <button

@@ -241,6 +241,24 @@ function MicEditorCard({
             <div className="noise-preset-row">
               <button
                 type="button"
+                className="primary-button"
+                disabled={!slot.deviceId}
+                title="Voice only — maximum suppression of fans, taps, rumble and echo"
+                onClick={() =>
+                  void onChange({
+                    enabled: true,
+                    strength: 100,
+                    threshold: 40,
+                    highPassHz: 110,
+                    attack: 70,
+                    release: 60,
+                  })
+                }
+              >
+                ClearCast
+              </button>
+              <button
+                type="button"
                 className="secondary-button"
                 disabled={!slot.deviceId}
                 onClick={() =>

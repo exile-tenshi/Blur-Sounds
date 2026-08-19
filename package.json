@@ -51,6 +51,10 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
+    ],
     "extraResources": [
       {
         "from": "build/icon.png",
@@ -59,6 +63,13 @@
       {
         "from": "resources/engine",
         "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/rnnoise",
+        "to": "rnnoise",
         "filter": [
           "**/*"
         ]

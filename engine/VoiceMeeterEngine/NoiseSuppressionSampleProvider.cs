@@ -12,9 +12,12 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
     private const float SpeechLearnRate = 0.35f;
     private const float MinEnvelope = 1e-6f;
 
+    private const float SubsonicHz = 45f;
+
     private readonly ISampleProvider source;
     private readonly int channels;
     private readonly BiQuadFilter[] highPassFilters;
+    private readonly BiQuadFilter[] subsonicFilters;
     private readonly float[] channelEnvelope;
     private float noiseFloor = 0.002f;
     private float gateGain = 1f;
@@ -32,9 +35,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
         channels = Math.Max(1, WaveFormat.Channels);
         channelEnvelope = new float[channels];
         highPassFilters = new BiQuadFilter[channels];
+        subsonicFilters = new BiQuadFilter[channels];
         RebuildHighPass();
         for (var channel = 0; channel < channels; channel++)
         {
+            subsonicFilters[channel] = BiQuadFilter.HighPassFilter(WaveFormat.SampleRate, SubsonicHz, 0.707f);
             channelEnvelope[channel] = MinEnvelope;
         }
     }
@@ -83,7 +88,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
         for (var index = 0; index < samplesRead; index++)
         {
             var channel = index % channels;
-            var sample = highPassFilters[channel].Transform(buffer[offset + index]);
+            // Subsonic cut first (kills desk thumps / low rumble), then the tunable high-pass.
+            var sample = subsonicFilters[channel].Transform(buffer[offset + index]);
+            sample = highPassFilters[channel].Transform(sample);
             var abs = Math.Abs(sample);
             var previous = channelEnvelope[channel];
             var learn = abs > previous ? SpeechLearnRate : NoiseLearnRate;
@@ -111,8 +118,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider
 
     private void UpdateGate(float envelope)
     {
-        // Higher strength → deeper attenuation when gated.
-        var maxAttenuation = Math.Clamp(0.35f - strength * 0.0032f, 0.02f, 0.35f);
+        // Higher strength → deeper attenuation when gated (down to ~-40 dB at 100 for a
+        // near-silent ClearCast noise floor between words).
+        var maxAttenuation = Math.Clamp(0.35f - strength * 0.0034f, 0.01f, 0.35f);
         // Higher threshold → easier to open (more voice kept).
         var openMarginDb = Math.Clamp(14f - threshold * 0.1f, 3f, 14f);
         var closeMarginDb = Math.Max(1.5f, openMarginDb * 0.45f);
