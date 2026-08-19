@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   createEmptyProject,
+  DEFAULT_CLEARCAST,
   NEUTRAL_GRADE,
   videoStudioChannels,
   type AudioAnalysis,
+  type ClearCastOptions,
   type ColorGrade,
   type EditorClip,
   type EditorProject,
@@ -156,6 +158,8 @@ export interface UseVideoEditor {
   exportResult: ExportResult | undefined
   exportEncoder: EncoderPreference
   availableEncoders: EncoderPreference[]
+  clearCast: ClearCastOptions
+  setClearCast: (patch: Partial<ClearCastOptions>) => void
   canUndo: boolean
   canRedo: boolean
   undoLabel: string | undefined
@@ -197,6 +201,7 @@ export function useVideoEditor(): UseVideoEditor {
   const [exportResult, setExportResult] = useState<ExportResult>()
   const [exportEncoder, setExportEncoder] = useState<EncoderPreference>('auto')
   const [availableEncoders, setAvailableEncoders] = useState<EncoderPreference[]>(['auto', 'x264'])
+  const [clearCast, setClearCastState] = useState<ClearCastOptions>(DEFAULT_CLEARCAST)
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({})
 
   const project = stack.project
@@ -556,6 +561,7 @@ export function useVideoEditor(): UseVideoEditor {
         width: selectedClip.width || undefined,
         height: selectedClip.height || undefined,
         outputName: selectedClip.name.replace(/\.[^.]+$/, ''),
+        clearCast,
       })
       setExportResult(result)
       setInfo(`Exported with ${result.encoderUsed}.`)
@@ -564,7 +570,11 @@ export function useVideoEditor(): UseVideoEditor {
     } finally {
       setIsBusy(false)
     }
-  }, [exportEncoder, selectedClip, videoControl])
+  }, [clearCast, exportEncoder, selectedClip, videoControl])
+
+  const setClearCast = useCallback((patch: Partial<ClearCastOptions>) => {
+    setClearCastState((current) => ({ ...current, ...patch }))
+  }, [])
 
   const saveProject = useCallback(async () => {
     if (!videoControl) {
@@ -615,6 +625,8 @@ export function useVideoEditor(): UseVideoEditor {
     exportResult,
     exportEncoder,
     availableEncoders,
+    clearCast,
+    setClearCast,
     canUndo: canUndo(stack),
     canRedo: canRedo(stack),
     undoLabel: lastUndoLabel(stack),

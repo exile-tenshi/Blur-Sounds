@@ -60,6 +60,8 @@ export const ClipEditorPanel = memo(function ClipEditorPanel({
     exportResult,
     exportEncoder,
     availableEncoders,
+    clearCast,
+    setClearCast,
     mediaUrlFor,
     setPlayhead,
     selectClip,
@@ -474,6 +476,42 @@ export const ClipEditorPanel = memo(function ClipEditorPanel({
                       ))}
                     </div>
                   </div>
+                ) : null}
+              </div>
+
+              <div className="smart-block">
+                <div className="panel-header compact">
+                  <p className="field-label">ClearCast voice isolation</p>
+                </div>
+                <label className="eq-toggle noise-toggle">
+                  <input
+                    type="checkbox"
+                    checked={clearCast.enabled}
+                    onChange={(event) => setClearCast({ enabled: event.target.checked })}
+                  />
+                  <span className="eq-toggle-track" />
+                  <span>{clearCast.enabled ? 'On — voice only' : 'Off'}</span>
+                </label>
+                <p className="muted">
+                  Removes fans, hum, desk taps, low rumble, and room echo so only the voice
+                  remains (RNNoise). Applied to the exported clip's audio.
+                </p>
+                {clearCast.enabled ? (
+                  <>
+                    <label className="grade-label" htmlFor="clearcast-strength">
+                      Strength
+                      <span className="grade-value">{clearCast.strength}</span>
+                    </label>
+                    <input
+                      id="clearcast-strength"
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={clearCast.strength}
+                      onChange={(event) => setClearCast({ strength: Number(event.target.value) })}
+                    />
+                  </>
                 ) : null}
               </div>
 

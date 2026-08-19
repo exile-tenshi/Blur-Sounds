@@ -42,6 +42,35 @@ export const ENCODER_OPTIONS: EncoderOption[] = [
   { id: 'x265', label: 'x265 / HEVC (software)', vendor: 'CPU', note: 'Smaller files, slower encode' },
 ]
 
+// ClearCast: FFmpeg-based voice isolation (RNNoise + subsonic/high-pass + gate +
+// de-ess + speech normalize) that removes fans, hum, desk taps, low rumble, and room
+// echo tails so only the speaker's voice remains. Strength 0–100 scales aggressiveness.
+export interface ClearCastOptions {
+  enabled: boolean
+  strength: number
+}
+
+export const DEFAULT_CLEARCAST: ClearCastOptions = {
+  enabled: false,
+  strength: 85,
+}
+
+export function clampStrength(value: unknown, fallback: number): number {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+  return Math.min(100, Math.max(0, Math.round(numeric)))
+}
+
+export function normalizeClearCast(raw: unknown): ClearCastOptions {
+  const input = raw && typeof raw === 'object' ? (raw as Partial<ClearCastOptions>) : {}
+  return {
+    enabled: typeof input.enabled === 'boolean' ? input.enabled : DEFAULT_CLEARCAST.enabled,
+    strength: clampStrength(input.strength, DEFAULT_CLEARCAST.strength),
+  }
+}
+
 export interface RecordingSettings {
   resolution: VideoResolutionId
   fps: VideoFps
@@ -51,6 +80,8 @@ export interface RecordingSettings {
   captureAudio: boolean
   /** Remux/transcode the raw MediaRecorder capture to MP4 through FFmpeg on save. */
   transcodeToMp4: boolean
+  /** ClearCast voice isolation applied to the recording's audio on save. */
+  clearCast: ClearCastOptions
 }
 
 export const DEFAULT_RECORDING_SETTINGS: RecordingSettings = {
@@ -61,6 +92,7 @@ export const DEFAULT_RECORDING_SETTINGS: RecordingSettings = {
   encoder: 'auto',
   captureAudio: true,
   transcodeToMp4: true,
+  clearCast: { ...DEFAULT_CLEARCAST },
 }
 
 export function normalizeRecordingSettings(raw: unknown): RecordingSettings {
@@ -107,6 +139,7 @@ export function normalizeRecordingSettings(raw: unknown): RecordingSettings {
       typeof input.transcodeToMp4 === 'boolean'
         ? input.transcodeToMp4
         : DEFAULT_RECORDING_SETTINGS.transcodeToMp4,
+    clearCast: normalizeClearCast(input.clearCast),
   }
 }
 
@@ -255,6 +288,7 @@ export interface ExportClipRequest {
   width?: number
   height?: number
   outputName?: string
+  clearCast?: ClearCastOptions
 }
 
 export interface ExportResult {

@@ -101,6 +101,7 @@ export class RecordingStore {
         encoder: payload.settings.encoder,
         videoBitrateKbps: payload.settings.videoBitrateKbps,
         audioBitrateKbps: payload.settings.audioBitrateKbps,
+        clearCast: payload.settings.clearCast,
       })
       return {
         path: mp4Path,

@@ -2,11 +2,13 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
 import type {
+  ClearCastOptions,
   ColorGrade,
   EncoderPreference,
   ExportClipRequest,
   MediaInfo,
 } from '../../shared/videoStudio.js'
+import { buildClearCastFilter } from './clearCast.js'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -171,46 +173,71 @@ function temperatureFilter(grade: ColorGrade): string | undefined {
 }
 
 interface BuiltFilters {
+  /** FFmpeg args for the filtergraph (-vf/-af or -filter_complex + -map). */
   filterArgs: string[]
-  simpleChain: string[]
+  usedRnnoise: boolean
 }
 
-function buildVideoFilters(request: ExportClipRequest): BuiltFilters {
-  const chain: string[] = []
+function buildFilterArgs(request: ExportClipRequest): BuiltFilters {
+  const videoChain: string[] = []
   if (request.width && request.height) {
-    chain.push(`scale=${request.width}:${request.height}:flags=lanczos`)
+    videoChain.push(`scale=${request.width}:${request.height}:flags=lanczos`)
   }
   const eq = gradeToEqFilter(request.grade)
   if (eq) {
-    chain.push(eq)
+    videoChain.push(eq)
   }
   const temp = temperatureFilter(request.grade)
   if (temp) {
-    chain.push(temp)
+    videoChain.push(temp)
   }
 
-  // LUT with partial intensity needs a filter_complex blend; full intensity is a simple chain link.
-  if (request.lutPath && request.lutIntensity >= 0.99) {
-    chain.push(`lut3d=file='${escapeFilterPath(request.lutPath)}'`)
-    return { filterArgs: chain.length > 0 ? ['-vf', chain.join(',')] : [], simpleChain: chain }
-  }
+  const clear = request.clearCast?.enabled
+    ? buildClearCastFilter(request.clearCast.strength)
+    : undefined
+  const audioChain = clear?.filter
 
-  if (request.lutPath && request.lutIntensity > 0.01) {
-    const pre = chain.length > 0 ? chain.join(',') + ',' : ''
-    const opacity = Math.max(0, Math.min(1, request.lutIntensity)).toFixed(3)
-    const complex =
+  const fullLut = request.lutPath && request.lutIntensity >= 0.99
+  const blendLut = request.lutPath && request.lutIntensity > 0.01 && request.lutIntensity < 0.99
+
+  // Partial-intensity LUT needs a filter_complex blend; when present, audio (ClearCast)
+  // must also live in the complex graph since -af cannot be combined with -filter_complex.
+  if (blendLut && request.lutPath) {
+    const pre = videoChain.length > 0 ? videoChain.join(',') + ',' : ''
+    const opacity = request.lutIntensity.toFixed(3)
+    let complex =
       `[0:v]${pre}split=2[base][lutin];` +
       `[lutin]lut3d=file='${escapeFilterPath(request.lutPath)}'[lutout];` +
       `[base][lutout]blend=all_mode=normal:all_opacity=${opacity}[vout]`
-    return { filterArgs: ['-filter_complex', complex, '-map', '[vout]'], simpleChain: chain }
+    const filterArgs = ['-filter_complex', '', '-map', '[vout]']
+    if (audioChain) {
+      complex += `;[0:a]${audioChain}[aout]`
+      filterArgs.push('-map', '[aout]')
+    } else {
+      filterArgs.push('-map', '0:a?')
+    }
+    filterArgs[1] = complex
+    return { filterArgs, usedRnnoise: clear?.usedRnnoise ?? false }
   }
 
-  return { filterArgs: chain.length > 0 ? ['-vf', chain.join(',')] : [], simpleChain: chain }
+  if (fullLut && request.lutPath) {
+    videoChain.push(`lut3d=file='${escapeFilterPath(request.lutPath)}'`)
+  }
+
+  const filterArgs: string[] = []
+  if (videoChain.length > 0) {
+    filterArgs.push('-vf', videoChain.join(','))
+  }
+  if (audioChain) {
+    filterArgs.push('-af', audioChain)
+  }
+  return { filterArgs, usedRnnoise: clear?.usedRnnoise ?? false }
 }
 
 export interface ExportRunResult {
   encoderUsed: string
   command: string
+  clearCastUsedRnnoise?: boolean
 }
 
 export async function exportClip(
@@ -219,8 +246,7 @@ export async function exportClip(
 ): Promise<ExportRunResult> {
   const codec = await resolveVideoCodec(request.encoder)
   const duration = Math.max(0.1, request.outPoint - request.inPoint)
-  const { filterArgs } = buildVideoFilters(request)
-  const usesComplex = filterArgs[0] === '-filter_complex'
+  const { filterArgs, usedRnnoise } = buildFilterArgs(request)
 
   const args: string[] = [
     '-y',
@@ -231,14 +257,6 @@ export async function exportClip(
     '-t',
     duration.toFixed(3),
     ...filterArgs,
-  ]
-
-  // When a filter_complex maps [vout], audio must be mapped explicitly.
-  if (usesComplex) {
-    args.push('-map', '0:a?')
-  }
-
-  args.push(
     '-c:v',
     codec,
     '-b:v',
@@ -250,7 +268,7 @@ export async function exportClip(
     '-b:a',
     `${request.audioBitrateKbps}k`,
     outputPath,
-  )
+  ]
 
   const command = `ffmpeg ${args.join(' ')}`
 
@@ -261,25 +279,38 @@ export async function exportClip(
     if (codec !== 'libx264') {
       const fallbackArgs = args.map((arg) => (arg === codec ? 'libx264' : arg))
       await execFileAsync(ffmpegPath, fallbackArgs, { maxBuffer: 1024 * 1024 * 16 })
-      return { encoderUsed: 'libx264', command: `ffmpeg ${fallbackArgs.join(' ')}` }
+      return {
+        encoderUsed: 'libx264',
+        command: `ffmpeg ${fallbackArgs.join(' ')}`,
+        clearCastUsedRnnoise: usedRnnoise,
+      }
     }
     throw error
   }
 
-  return { encoderUsed: codec, command }
+  return { encoderUsed: codec, command, clearCastUsedRnnoise: usedRnnoise }
 }
 
 /** Remux/transcode a raw capture blob file to MP4 with the chosen encoder. */
 export async function transcodeToMp4(
   inputPath: string,
   outputPath: string,
-  options: { encoder: EncoderPreference; videoBitrateKbps: number; audioBitrateKbps: number },
+  options: {
+    encoder: EncoderPreference
+    videoBitrateKbps: number
+    audioBitrateKbps: number
+    clearCast?: ClearCastOptions
+  },
 ): Promise<ExportRunResult> {
   const codec = await resolveVideoCodec(options.encoder)
+  const clear = options.clearCast?.enabled
+    ? buildClearCastFilter(options.clearCast.strength)
+    : undefined
   const args = [
     '-y',
     '-i',
     inputPath,
+    ...(clear ? ['-af', clear.filter] : []),
     '-c:v',
     codec,
     '-b:v',
