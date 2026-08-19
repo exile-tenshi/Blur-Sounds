@@ -14,6 +14,7 @@ namespace VoiceMeeterEngine;
 internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposable
 {
     private const string BackgroundPathMarker = "Never sum dry + RNNoise on Background";
+    private const string FanIdleMarker = "idle leftover uses RNNoise, not dry fan";
     private const float MinEnvelope = 1e-6f;
     private const float NoiseLearnRate = 0.02f;
     /// <summary>Voice envelope — fast enough that talk isn't treated as a desk tap.</summary>
@@ -46,6 +47,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private int quietHoldSamples;
     private bool idlePath;
     private float pathGain = 1f;
+    private float noiseFloor = 0.004f;
     private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
@@ -165,6 +167,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
                 }
 
                 UpdateImpulseDetector(Math.Abs(dry));
+                UpdateNoiseFloor(Math.Abs(dry));
 
                 // Only soft-clip true overs — never auto-duck taps (Impact slider owns that).
                 dry = SoftClip(dry, 0.95f);
@@ -248,8 +251,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             }
 
             // Never sum dry + RNNoise — that comb-filters into “complete ass”
-            // after a few Background moves. Talking stays on mixed; idle is dry room
-            // or silence. Duck, switch path, then rise.
+            // after a few Background moves. Talking and idle both stay on mixed
+            // (RNNoise). Idle dry was letting PC fans back in as fuzz.
             return SelectBackgroundPath(mixed, dryOut);
         }
 
@@ -331,14 +334,13 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet. Leave some dry so voice stays present.
-    /// 50→0.71, 70→0.82, 85→0.91, 100→1.0
+    /// UI 0–100 → wet. Keep this almost fully wet at typical settings so a fan
+    /// does not leak under the voice as dry fuzz. 50→0.80, 70→0.94, 88→0.99, 100→1.0
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        // 50→0.71, 70→0.82, 85→0.91, 100→1.0 — leave some dry so voice stays present.
-        return MathF.Pow(normalized, 0.50f);
+        return 1f - MathF.Pow(1f - normalized, 2.35f);
     }
 
     /// <summary>
@@ -388,23 +390,24 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// Speech hysteresis for the dry-room / silence crossfade. Impulses do not open the path.
+    /// Speech vs a learned noise floor (fan / room tone), not a fixed amplitude.
     /// Hangover so Background cannot chop syllables or duck the whole voice.
     /// </summary>
     private void UpdateResidual()
     {
-        var wet = StrengthToWet(strength);
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
         var hangoverSamples = Math.Max(1, (int)(sampleRate * 0.22f));
-        var openThreshold = 0.018f - (wet * 0.003f);
-        var closeThreshold = 0.007f - (wet * 0.0015f);
+        var floor = Math.Max(noiseFloor, MinEnvelope);
+        var snr = channelEnvelope / floor;
+        var openThreshold = Math.Max(0.008f, floor * 1.9f);
+        var closeThreshold = Math.Max(0.0035f, floor * 1.25f);
 
-        if (channelEnvelope >= openThreshold)
+        if (channelEnvelope >= openThreshold && snr >= 1.75f)
         {
             residualSpeechOpen = true;
             quietHoldSamples = 0;
         }
-        else if (residualSpeechOpen && channelEnvelope < closeThreshold)
+        else if (residualSpeechOpen && (channelEnvelope < closeThreshold || snr < 1.22f))
         {
             quietHoldSamples++;
             if (quietHoldSamples >= hangoverSamples)
@@ -419,11 +422,39 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// Exclusive path: mixed while talking, dry*Background when idle. Never sum both.
+    /// Slow minimum tracker so a fan becomes the floor instead of “always talking”.
+    /// </summary>
+    private void UpdateNoiseFloor(float abs)
+    {
+        var env = Math.Max(abs, MinEnvelope);
+        var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
+        float coeff;
+        if (env < noiseFloor)
+        {
+            coeff = 1f / (sampleRate * 0.35f);
+        }
+        else if (!residualSpeechOpen)
+        {
+            coeff = 1f / (sampleRate * 3.2f);
+        }
+        else
+        {
+            coeff = 1f / (sampleRate * 28f);
+        }
+
+        noiseFloor += (env - noiseFloor) * coeff;
+        noiseFloor = Math.Clamp(noiseFloor, 0.00035f, 0.07f);
+    }
+
+    /// <summary>
+    /// Exclusive path: RNNoise mixed while talking and when idle. Never sum dry + wet.
+    /// Idle dry was a clear room — and a clear fan. Duck, switch gain, then rise.
     /// </summary>
     private float SelectBackgroundPath(float mixed, float dryOut)
     {
         _ = BackgroundPathMarker;
+        _ = FanIdleMarker;
+        _ = dryOut;
         var wantIdle = !residualSpeechOpen;
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
         var duckCoeff = 1f / Math.Max(2f, sampleRate * 0.004f);
@@ -445,18 +476,42 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             pathGain = Math.Clamp(pathGain, 0f, 1f);
         }
 
-        var sample = idlePath ? dryOut : mixed;
-        return sample * pathGain;
+        // Always the RNNoise mix — idle attenuation is gain, not a dry-fan switch.
+        return ExpandResidual(mixed * pathGain);
     }
 
     /// <summary>
-    /// Background 0 keeps a clear dry room when quiet, not RNNoise swirl.
+    /// Background 0 keeps cleaned leftover when quiet (fan stays suppressed).
     /// Background 100 is true silence when you are not talking.
     /// </summary>
     private float QuietRoomGain()
     {
         var amount = Math.Clamp(background / 100f, 0f, 1f);
         return MathF.Pow(1f - amount, 2.2f);
+    }
+
+    /// <summary>
+    /// Crush leftover fan/swirl near the noise floor. Gentle while talking so
+    /// consonants survive; stronger when idle and as Background rises.
+    /// </summary>
+    private float ExpandResidual(float sample)
+    {
+        var abs = Math.Abs(sample);
+        var amount = Math.Clamp(background / 100f, 0f, 1f);
+        var thresh = Math.Max(noiseFloor * (1.35f + (amount * 3.4f)), 0.0007f);
+        if (residualSpeechOpen)
+        {
+            thresh *= 0.5f;
+        }
+
+        if (abs >= thresh)
+        {
+            return sample;
+        }
+
+        var ratio = 1.7f + (amount * 3.6f);
+        var gain = MathF.Pow(Math.Max(abs, MinEnvelope) / thresh, ratio - 1f);
+        return sample * Math.Clamp(gain, 0f, 1f);
     }
 
     private bool EnsureDenoiser()
@@ -610,6 +665,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         impulseAmount = 0f;
         compressorEnvelope = MinEnvelope;
         limiterEnvelope = MinEnvelope;
+        noiseFloor = 0.004f;
         inputQueue.Clear();
         outputQueue.Clear();
         dryOutQueue.Clear();

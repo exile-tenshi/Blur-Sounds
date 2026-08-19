@@ -15,7 +15,7 @@ import {
   presetsForMic,
   recommendedPresetForMic,
 } from '../../shared/noisePresets'
-import { normalizeNoiseSuppression, type NoiseSuppressionSettings } from '../../shared/noiseSuppression'
+import { DEFAULT_NOISE_SUPPRESSION, normalizeNoiseSuppression, type NoiseSuppressionSettings } from '../../shared/noiseSuppression'
 import type { AudioDevice, MicrophoneSlot } from '../../shared/audioTypes'
 import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots'
 import { GraphicalEqualizer } from './GraphicalEqualizer'
@@ -663,9 +663,9 @@ function MicNoiseCard({
             <div>
               <h3>Noise reduction</h3>
               <p className="muted clearcast-module-note">
-                Background only changes leftover noise after you stop talking. It does not
-                rewrite your voice. 0 = natural room. 100 = silence. Impact = desk taps /
-                keyboard.
+                Background tames leftover fan / room tone after ClearCast. It does not
+                rewrite your voice. 0 = quiet cleaned leftover. 100 = silence when idle.
+                Impact = desk taps / keyboard.
               </p>
             </div>
             <SonarToggle
@@ -675,7 +675,7 @@ function MicNoiseCard({
                 setActivePresetId(null)
                 if (checked) {
                   void onChange({
-                    threshold: settings.threshold > 0 ? settings.threshold : 72,
+                    threshold: settings.threshold > 0 ? settings.threshold : DEFAULT_NOISE_SUPPRESSION.threshold,
                     impact: settings.impact,
                   })
                 } else {
@@ -708,9 +708,9 @@ function MicNoiseCard({
               }}
             />
             <p className="muted clearcast-module-note">
-              Background 0 = hear the real room when idle. Background 100 = no leftover noise
-              when idle. Talking stays on ClearCast. Impact 0 keeps real taps; raise it to
-              strip desk / keyboard hits.
+              Background 0 = cleaned leftover when idle (fans stay suppressed). Background 100
+              = no leftover noise when idle. Talking stays on ClearCast. Impact 0 keeps real
+              taps; raise it to strip desk / keyboard hits.
             </p>
           </div>
         </section>
