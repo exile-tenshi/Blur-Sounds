@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import {
   CLIP_RESOLUTION_SPECS,
   type ClipLookbackSeconds,
@@ -7,7 +7,11 @@ import {
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 import { CLIPS_PICKER_BUILD } from '../hooks/useClipRecorder'
 
-export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean }) {
+export const ClipRecordingPanel = memo(function ClipRecordingPanel({
+  isActive = false,
+}: {
+  isActive?: boolean
+}) {
   const {
     sources,
     selectedSourceId,
@@ -294,4 +298,4 @@ export function ClipRecordingPanel({ isActive = false }: { isActive?: boolean })
       </div>
     </section>
   )
-}
+})

@@ -30,6 +30,24 @@ function SectionIcon({ id }: { id: AppSectionId }) {
           />
         </svg>
       )
+    case 'record':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M3 5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v3.5l3.3-2.3a1 1 0 0 1 1.7.8v10a1 1 0 0 1-1.7.8L18 15.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5zm7 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"
+          />
+        </svg>
+      )
+    case 'editor':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M4 4h16a1 1 0 0 1 1 1v3H3V5a1 1 0 0 1 1-1zm-1 6h6v10H4a1 1 0 0 1-1-1V10zm8 0h10v9a1 1 0 0 1-1 1h-9V10zM6 2h2v4H6V2zm10 0h2v4h-2V2z"
+          />
+        </svg>
+      )
     case 'setup':
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
