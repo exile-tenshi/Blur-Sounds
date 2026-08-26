@@ -7,10 +7,14 @@ import { HIFI_CABLE_QUALITY } from '../shared/hifiCable'
 import { AppLibraryPanel } from './components/AppLibraryPanel'
 import { AudioRoutingPanel } from './components/AudioRoutingPanel'
 import { ClipRecordingPanel } from './components/ClipRecordingPanel'
+import { ClipEditorPanel } from './components/ClipEditorPanel'
 import { HifiSetupPanel } from './components/HifiSetupPanel'
+import { VideoRecordingPanel } from './components/VideoRecordingPanel'
 import { InputVolumeList } from './components/InputVolumeList'
 import { NoiseSuppressionSection } from './components/NoiseSuppressionSection'
 import { ClipRecorderProvider, useClipRecorderContext } from './context/ClipRecorderContext'
+import { VideoRecorderProvider } from './context/VideoRecorderContext'
+import { VideoEditorProvider } from './context/VideoEditorContext'
 import { useAppSettings } from './hooks/useAppSettings'
 import { useAudioControlState } from './hooks/useAudioControlState'
 import { SidebarNav } from './layout/SidebarNav'
@@ -348,10 +352,12 @@ const AppShell = memo(function AppShell() {
           </div>
         ) : null}
 
-        {/* Keep clip UI mounted so background buffer + hotkeys never stop when changing sections. */}
-        <div className={activeSection === 'clips' ? undefined : 'section-hidden'} aria-hidden={activeSection !== 'clips'}>
-          <ClipRecordingPanel isActive={activeSection === 'clips'} />
-        </div>
+        {/* Heavy panels mount only while active — their state (clip buffer, in-progress
+            recording, editor project + undo) lives in providers above, so nothing is lost
+            on switch and no rendering/capture/decoding runs for inactive tabs. */}
+        {activeSection === 'clips' ? <ClipRecordingPanel isActive /> : null}
+        {activeSection === 'record' ? <VideoRecordingPanel isActive /> : null}
+        {activeSection === 'editor' ? <ClipEditorPanel isActive /> : null}
 
         {activeSection === 'setup' ? (
           <HifiSetupPanel
@@ -378,7 +384,11 @@ const AppShell = memo(function AppShell() {
 function App() {
   return (
     <ClipRecorderProvider>
-      <AppShell />
+      <VideoRecorderProvider>
+        <VideoEditorProvider>
+          <AppShell />
+        </VideoEditorProvider>
+      </VideoRecorderProvider>
     </ClipRecorderProvider>
   )
 }

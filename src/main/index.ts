@@ -6,9 +6,15 @@ import type { RoutingStore } from './audio/routingStore.js'
 import { registerAudioIpc } from './ipc/audioIpc.js'
 import { registerClipIpc } from './ipc/clipIpc.js'
 import { registerSettingsIpc } from './ipc/settingsIpc.js'
+import { registerVideoStudioIpc } from './ipc/videoStudioIpc.js'
 import { ClipKeybindService } from './recording/clipKeybinds.js'
 import { ClipVoiceCommandService } from './recording/clipVoiceCommands.js'
 import { SettingsStore } from './settings/settingsStore.js'
+
+// Keep the WebGL2 preview compositor working on machines with older/blocklisted
+// GPUs (and headless/software-GL environments) by allowing a SwiftShader fallback.
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-unsafe-swiftshader')
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -74,6 +80,7 @@ async function createMainWindow(): Promise<void> {
   registerSettingsIpc(mainWindow, settings)
   audioStore = registerAudioIpc(mainWindow)
   registerClipIpc(mainWindow, settings, clipKeybinds, clipVoiceCommands)
+  registerVideoStudioIpc(mainWindow)
 
   mainWindow.on('closed', () => {
     shutdownAudioStore()
