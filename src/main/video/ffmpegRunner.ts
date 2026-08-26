@@ -193,7 +193,7 @@ function buildFilterArgs(request: ExportClipRequest): BuiltFilters {
   }
 
   const clear = request.clearCast?.enabled
-    ? buildClearCastFilter(request.clearCast.strength)
+    ? buildClearCastFilter(request.clearCast.strength, { deEcho: request.clearCast.deEcho })
     : undefined
   const audioChain = clear?.filter
 
@@ -304,7 +304,7 @@ export async function transcodeToMp4(
 ): Promise<ExportRunResult> {
   const codec = await resolveVideoCodec(options.encoder)
   const clear = options.clearCast?.enabled
-    ? buildClearCastFilter(options.clearCast.strength)
+    ? buildClearCastFilter(options.clearCast.strength, { deEcho: options.clearCast.deEcho })
     : undefined
   const args = [
     '-y',

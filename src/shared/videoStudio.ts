@@ -48,11 +48,14 @@ export const ENCODER_OPTIONS: EncoderOption[] = [
 export interface ClearCastOptions {
   enabled: boolean
   strength: number
+  /** Extra reverb/echo suppression for people talking in an echoey room. */
+  deEcho: boolean
 }
 
 export const DEFAULT_CLEARCAST: ClearCastOptions = {
   enabled: false,
   strength: 85,
+  deEcho: true,
 }
 
 export function clampStrength(value: unknown, fallback: number): number {
@@ -68,6 +71,7 @@ export function normalizeClearCast(raw: unknown): ClearCastOptions {
   return {
     enabled: typeof input.enabled === 'boolean' ? input.enabled : DEFAULT_CLEARCAST.enabled,
     strength: clampStrength(input.strength, DEFAULT_CLEARCAST.strength),
+    deEcho: typeof input.deEcho === 'boolean' ? input.deEcho : DEFAULT_CLEARCAST.deEcho,
   }
 }
 
