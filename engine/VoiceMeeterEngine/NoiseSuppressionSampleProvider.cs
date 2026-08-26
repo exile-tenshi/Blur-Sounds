@@ -56,7 +56,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float noiseGateThreshold = 40f;
     private float attack = 55f;
     private float release = 40f;
-    private bool deEcho = true;
+    private bool deEchoActive;
+    private float deEchoAmount = 45f;
     private bool compressorEnabled;
     private float compressorLevel = 30f;
     private float compressorEnvelope = MinEnvelope;
@@ -102,7 +103,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         float nextNoiseGateThreshold = 35f,
         bool nextCompressorEnabled = false,
         float nextCompressorLevel = 30f,
-        bool nextDeEcho = true)
+        float nextDeEcho = 45f)
     {
         lock (gate)
         {
@@ -110,7 +111,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             enabled = nextEnabled;
             noiseGateEnabled = nextNoiseGateEnabled;
             compressorEnabled = nextCompressorEnabled;
-            deEcho = nextDeEcho;
+            deEchoAmount = Math.Clamp(nextDeEcho, 0f, 100f);
+            deEchoActive = deEchoAmount > 0.5f;
             strength = Math.Clamp(nextStrength, 0f, 100f);
             background = Math.Clamp(nextThreshold, 0f, 100f);
             impact = Math.Clamp(nextImpact, 0f, 100f);
@@ -266,10 +268,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private void ProcessFullFrame()
     {
         var wet = enabled ? StrengthToWet(strength) : 0f;
-        if (enabled && deEcho)
+        if (enabled && deEchoActive)
         {
-            // Slightly more wet for echo rooms — still capped below robotic full-wet.
-            wet = Math.Min(0.94f, wet + 0.06f);
+            // Scale wet boost with Echo bar — high Echo tips toward robotic.
+            var echo = deEchoAmount / 100f;
+            wet = Math.Min(0.94f, wet + (0.02f + (echo * 0.07f)));
         }
         if (!enabled || wet <= 0.001f || !EnsureDenoiser())
         {
@@ -402,15 +405,15 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// Speech vs a learned noise floor (fan / room tone), not a fixed amplitude.
-    /// Hangover so Background cannot chop syllables. De-echo shortens hangover and
-    /// arms a post-speech tail window that crushes reverb wash.
+    /// Speech vs a learned noise floor. Echo amount shortens hangover and arms a
+    /// post-speech tail window — higher Echo = longer/harder reverb crush.
     /// </summary>
     private void UpdateResidual()
     {
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
-        // De-echo: close sooner so room reflections after words get treated as idle/tail.
-        var hangoverSeconds = deEcho ? 0.08f : 0.22f;
+        var echo = Math.Clamp(deEchoAmount / 100f, 0f, 1f);
+        // 0 Echo → 220 ms hangover; 100 Echo → ~55 ms (close sooner into tail kill).
+        var hangoverSeconds = deEchoActive ? (0.22f - (echo * 0.165f)) : 0.22f;
         var hangoverSamples = Math.Max(1, (int)(sampleRate * hangoverSeconds));
         var floor = Math.Max(noiseFloor, MinEnvelope);
         var snr = channelEnvelope / floor;
@@ -430,10 +433,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             if (quietHoldSamples >= hangoverSamples)
             {
                 residualSpeechOpen = false;
-                if (deEcho)
+                if (deEchoActive)
                 {
-                    // ~280 ms of aggressive tail kill after the last syllable.
-                    echoTailSamples = Math.Max(1, (int)(sampleRate * 0.28f));
+                    // Tail window grows with Echo bar (~120–360 ms).
+                    var tailSeconds = 0.12f + (echo * 0.24f);
+                    echoTailSamples = Math.Max(1, (int)(sampleRate * tailSeconds));
                 }
             }
         }
@@ -517,14 +521,15 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// Duck leftover fan / room swirl. De-echo arms a post-speech tail that crushes
-    /// reverb wash hard without crushing consonants while talking.
+    /// Duck leftover fan / room swirl. Echo bar scales post-speech tail crush —
+    /// mid values clear rooms; max can sound gated/robotic.
     /// </summary>
     private float ExpandResidual(float sample)
     {
         var abs = Math.Abs(sample);
         var amount = Math.Clamp(background / 100f, 0f, 1f);
-        var inEchoTail = deEcho && echoTailSamples > 0;
+        var echo = Math.Clamp(deEchoAmount / 100f, 0f, 1f);
+        var inEchoTail = deEchoActive && echoTailSamples > 0;
         if (inEchoTail)
         {
             echoTailSamples--;
@@ -532,8 +537,7 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
         if (residualSpeechOpen && !inEchoTail)
         {
-            // Keep speech natural; only lightly duck very quiet under-voice wash.
-            var talkAmount = deEcho ? Math.Min(1f, amount + 0.25f) : amount;
+            var talkAmount = deEchoActive ? Math.Min(1f, amount + (echo * 0.35f)) : amount;
             var talkThresh = Math.Max(noiseFloor * (0.7f + (talkAmount * 1.1f)), 0.00055f);
             if (abs >= talkThresh)
             {
@@ -541,26 +545,28 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
             }
 
             var talkRatio = 1.2f + (talkAmount * 0.75f);
+            var talkFloor = deEchoActive ? (0.35f - (echo * 0.18f)) : 0.35f;
             var talkGain = MathF.Pow(Math.Max(abs, MinEnvelope) / talkThresh, talkRatio - 1f);
-            return sample * Math.Clamp(talkGain, deEcho ? 0.2f : 0.35f, 1f);
+            return sample * Math.Clamp(talkGain, Math.Max(0.12f, talkFloor), 1f);
         }
 
-        // Idle or echo-tail: crush reverb / room tone under the noise floor.
-        var floorScale = inEchoTail ? (2.2f + (amount * 3.5f)) : (1.25f + (amount * 2.6f));
-        var thresh = Math.Max(noiseFloor * floorScale, inEchoTail ? 0.0012f : 0.0006f);
+        var floorScale = inEchoTail
+            ? (1.4f + (amount * 2.2f) + (echo * 2.8f))
+            : (1.25f + (amount * 2.6f));
+        var thresh = Math.Max(noiseFloor * floorScale, inEchoTail ? (0.0007f + (echo * 0.0012f)) : 0.0006f);
         if (abs >= thresh)
         {
-            // Even above thresh, taper soft late energy during echo-tail.
-            if (inEchoTail && abs < thresh * 2.4f)
+            if (inEchoTail && abs < thresh * (1.8f + (echo * 1.2f)))
             {
                 var taper = Math.Clamp((abs - thresh) / Math.Max(MinEnvelope, thresh * 1.4f), 0f, 1f);
-                return sample * (0.15f + (0.85f * taper));
+                var floorGain = 0.35f - (echo * 0.25f);
+                return sample * (Math.Max(0.05f, floorGain) + ((1f - Math.Max(0.05f, floorGain)) * taper));
             }
 
             return sample;
         }
 
-        var ratio = inEchoTail ? (2.4f + (amount * 3.2f)) : (1.4f + (amount * 2.4f));
+        var ratio = inEchoTail ? (1.6f + (amount * 2.0f) + (echo * 2.8f)) : (1.4f + (amount * 2.4f));
         var gain = MathF.Pow(Math.Max(abs, MinEnvelope) / thresh, ratio - 1f);
         return sample * Math.Clamp(gain, 0f, 1f);
     }

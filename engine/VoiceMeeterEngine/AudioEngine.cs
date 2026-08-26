@@ -1944,7 +1944,7 @@ internal sealed class MicSource : IDisposable
         float noiseGateThreshold = 35f,
         bool compressorEnabled = false,
         float compressorLevel = 30f,
-        bool deEcho = true)
+        float deEcho = 45f)
     {
         noiseSuppressionProvider.SetSettings(
             enabled,

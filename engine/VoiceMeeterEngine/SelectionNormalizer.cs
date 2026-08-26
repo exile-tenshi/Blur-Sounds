@@ -72,7 +72,7 @@ internal sealed class NoiseSuppressionSettingsConfig
     public float Release { get; set; } = 40f;
 
     [System.Text.Json.Serialization.JsonPropertyName("deEcho")]
-    public bool DeEcho { get; set; } = true;
+    public float DeEcho { get; set; } = 45f;
 
     [System.Text.Json.Serialization.JsonPropertyName("noiseGateEnabled")]
     public bool NoiseGateEnabled { get; set; }

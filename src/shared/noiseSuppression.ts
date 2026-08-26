@@ -12,8 +12,11 @@ export interface NoiseSuppressionSettings {
   attack: number
   /** 0–100: optional hard-gate close speed */
   release: number
-  /** Kill room echo / reverb tails after speech (live mic) */
-  deEcho: boolean
+  /**
+   * 0–100: room echo / reverb-tail kill after speech.
+   * 0 = off. ~40–55 natural. High values can sound processed/robotic.
+   */
+  deEcho: number
   /** Optional noise gate */
   noiseGateEnabled: boolean
   /** 0–100: gate sensitivity */
@@ -24,7 +27,7 @@ export interface NoiseSuppressionSettings {
   compressorLevel: number
 }
 
-/** Natural voice + live echo-tail kill on by default. */
+/** Mid Echo (~45) kills room wash without going full robotic. */
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
   strength: 72,
@@ -33,7 +36,7 @@ export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   highPassHz: 80,
   attack: 55,
   release: 40,
-  deEcho: true,
+  deEcho: 45,
   noiseGateEnabled: false,
   noiseGateThreshold: 36,
   compressorEnabled: false,
@@ -52,6 +55,17 @@ export function clampHighPassHz(value: number): number {
     return DEFAULT_NOISE_SUPPRESSION.highPassHz
   }
   return Math.max(40, Math.min(220, Math.round(value)))
+}
+
+/** Accept legacy boolean deEcho from older installs. */
+export function normalizeDeEchoAmount(raw: unknown): number {
+  if (typeof raw === 'boolean') {
+    return raw ? 55 : 0
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return clampNoisePercent(raw)
+  }
+  return DEFAULT_NOISE_SUPPRESSION.deEcho
 }
 
 export function normalizeNoiseSuppression(
@@ -73,8 +87,9 @@ export function normalizeNoiseSuppression(
     highPassHz: clampHighPassHz(partial.highPassHz ?? DEFAULT_NOISE_SUPPRESSION.highPassHz),
     attack: clampNoisePercent(partial.attack ?? DEFAULT_NOISE_SUPPRESSION.attack),
     release: clampNoisePercent(partial.release ?? DEFAULT_NOISE_SUPPRESSION.release),
-    // Default ON so older saved settings pick up live echo removal.
-    deEcho: typeof partial.deEcho === 'boolean' ? partial.deEcho : DEFAULT_NOISE_SUPPRESSION.deEcho,
+    deEcho: normalizeDeEchoAmount(
+      partial.deEcho !== undefined ? partial.deEcho : DEFAULT_NOISE_SUPPRESSION.deEcho,
+    ),
     noiseGateEnabled: Boolean(partial.noiseGateEnabled),
     noiseGateThreshold: clampNoisePercent(
       partial.noiseGateThreshold ?? DEFAULT_NOISE_SUPPRESSION.noiseGateThreshold,
