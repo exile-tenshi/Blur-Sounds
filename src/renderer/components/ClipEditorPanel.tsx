@@ -511,6 +511,19 @@ export const ClipEditorPanel = memo(function ClipEditorPanel({
                       value={clearCast.strength}
                       onChange={(event) => setClearCast({ strength: Number(event.target.value) })}
                     />
+                    <label className="eq-toggle noise-toggle">
+                      <input
+                        type="checkbox"
+                        checked={clearCast.deEcho}
+                        onChange={(event) => setClearCast({ deEcho: event.target.checked })}
+                      />
+                      <span className="eq-toggle-track" />
+                      <span>Echo removal (de-reverb)</span>
+                    </label>
+                    <p className="muted">
+                      Extra suppression of room echo / reverb for people talking in an echoey
+                      space — cuts the reflected tail so only the direct voice comes through.
+                    </p>
                   </>
                 ) : null}
               </div>

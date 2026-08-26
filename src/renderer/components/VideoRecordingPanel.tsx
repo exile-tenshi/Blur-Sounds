@@ -274,6 +274,20 @@ export const VideoRecordingPanel = memo(function VideoRecordingPanel({
                   })
                 }
               />
+              <label className="eq-toggle noise-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.clearCast.deEcho}
+                  disabled={recording}
+                  onChange={(event) =>
+                    void updateSettings({
+                      clearCast: { ...settings.clearCast, deEcho: event.target.checked },
+                    })
+                  }
+                />
+                <span className="eq-toggle-track" />
+                <span>Echo removal (de-reverb)</span>
+              </label>
             </>
           ) : null}
 
