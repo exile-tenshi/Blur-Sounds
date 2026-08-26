@@ -720,20 +720,40 @@ function MicNoiseCard({
             <div>
               <h3>Echo removal</h3>
               <p className="muted clearcast-module-note">
-                Cuts room reverb / slap-echo tails after you stop talking. Keep on for live
-                rooms. Use headphones if you also use Listen to Hi-Fi Cable — speakers will
-                feed your mic and sound like echo.
+                Cuts room reverb / slap-echo after you stop talking. Start around 40–55.
+                Higher clears more echo but can sound robotic. 0 = off.
               </p>
             </div>
             <SonarToggle
-              checked={settings.deEcho}
+              checked={settings.deEcho > 0}
               disabled={!slot.deviceId}
               onChange={(checked) => {
                 setActivePresetId(null)
-                void onChange({ deEcho: checked })
+                void onChange({
+                  deEcho: checked
+                    ? settings.deEcho > 0
+                      ? settings.deEcho
+                      : DEFAULT_NOISE_SUPPRESSION.deEcho
+                    : 0,
+                })
               }}
             />
           </div>
+          <ModuleSlider
+            label="Echo"
+            valueLabel={(settings.deEcho / 100).toFixed(2)}
+            formatValue={(deEcho) => (deEcho / 100).toFixed(2)}
+            value={settings.deEcho}
+            disabled={!slot.deviceId}
+            onChange={(deEcho) => {
+              setActivePresetId(null)
+              void onChange({ deEcho })
+            }}
+          />
+          <p className="muted clearcast-module-note">
+            ~0.40–0.55 clears most room echo. Above ~0.70 starts sounding robotic.
+            Use headphones if Listen to Hi-Fi Cable is on.
+          </p>
         </section>
 
         <section className="clearcast-module">

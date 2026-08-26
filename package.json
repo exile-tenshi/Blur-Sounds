@@ -1,7 +1,7 @@
 {
   "name": "blur-sounds",
   "private": true,
-  "version": "1.3.3",
+  "version": "1.3.4",
   "author": "Blur Sounds",
   "description": "Mix microphone and application audio through VB-Audio Hi-Fi Cable at studio quality, with desktop/game clip recording and mic noise suppression.",
   "type": "module",

@@ -40,7 +40,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['vr-headset'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 55,
       strength: 78,
       highPassHz: 95,
       attack: 58,
@@ -61,7 +61,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['gaming-headset'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 48,
       strength: 72,
       highPassHz: 85,
       attack: 55,
@@ -82,7 +82,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['boom-arm', 'usb-condenser', 'dynamic'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 45,
       strength: 70,
       highPassHz: 80,
       attack: 54,
@@ -103,7 +103,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['desk-stand', 'usb-condenser'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 50,
       strength: 74,
       highPassHz: 90,
       attack: 56,
@@ -124,7 +124,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['usb-condenser'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 45,
       strength: 68,
       highPassHz: 80,
       attack: 52,
@@ -145,7 +145,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['dynamic'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 30,
       strength: 58,
       highPassHz: 75,
       attack: 50,
@@ -166,7 +166,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['lapel'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 50,
       strength: 72,
       highPassHz: 90,
       attack: 56,
@@ -187,7 +187,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['laptop'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 55,
       strength: 80,
       highPassHz: 100,
       attack: 58,
@@ -208,7 +208,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: ['webcam'],
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 52,
       strength: 76,
       highPassHz: 95,
       attack: 56,
@@ -229,7 +229,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: 'all',
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 25,
       strength: 52,
       highPassHz: 70,
       threshold: 22,
@@ -249,7 +249,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     settings: {
       ...DEFAULT_NOISE_SUPPRESSION,
       enabled: true,
-      deEcho: true,
+      deEcho: 45,
       strength: 70,
       highPassHz: 80,
       threshold: 42,
@@ -267,7 +267,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: 'all',
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 50,
       strength: 76,
       highPassHz: 88,
       attack: 56,
@@ -288,7 +288,7 @@ export const NOISE_PRESETS: NoisePreset[] = [
     kinds: 'all',
     settings: {
       enabled: true,
-      deEcho: true,
+      deEcho: 70,
       strength: 90,
       highPassHz: 105,
       attack: 62,
