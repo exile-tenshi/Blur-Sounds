@@ -5,9 +5,9 @@ import { app } from 'electron'
 
 // ClearCast voice isolation, expressed as an FFmpeg audio filtergraph.
 //
-// Tuned for natural voice: one moderate RNNoise pass by default (full wet + a
-// second pass sounds robotic). Echo removal uses a soft expander, not a second
-// hard denoise. Gate stays gentle so consonants aren't chopped into "radio voice".
+// Natural voice during speech (moderate RNNoise mix). De-echo focuses on
+// post-speech tails / room wash via a faster gate + soft expander — not a
+// second full-wet RNNoise pass (that sounded robotic).
 
 function resolveModelPath(): string | undefined {
   const candidates: string[] = []
@@ -50,16 +50,15 @@ export function buildClearCastFilter(
   const deEcho = options.deEcho ?? false
   const model = resolveModelPath()
 
-  // Keep more low-end body than before — high highpass + RNNoise = thin robot voice.
-  const subCut = Math.round(lerp(30, 50, t))
-  const highPass = Math.round(lerp(70, 95, t))
+  const subCut = Math.round(lerp(30, 55, t))
+  const highPass = Math.round(lerp(70, 100, t))
 
-  // Soft gate: never slam shut. Longer release keeps natural decay.
-  const gateThreshold = lerp(0.004, 0.018, t).toFixed(4)
-  const gateRange = lerp(0.22, 0.08, t).toFixed(4)
-  const gateRatio = lerp(1.6, 3.2, t).toFixed(2)
-  const baseRelease = lerp(220, 140, t)
-  const gateRelease = Math.round(deEcho ? baseRelease * 0.75 : baseRelease)
+  // De-echo: faster close after words so reverb tails don't ring out.
+  const gateThreshold = lerp(deEcho ? 0.008 : 0.004, deEcho ? 0.028 : 0.018, t).toFixed(4)
+  const gateRange = lerp(deEcho ? 0.1 : 0.22, deEcho ? 0.03 : 0.08, t).toFixed(4)
+  const gateRatio = lerp(deEcho ? 2.2 : 1.6, deEcho ? 4.5 : 3.2, t).toFixed(2)
+  const baseRelease = lerp(deEcho ? 140 : 220, deEcho ? 70 : 140, t)
+  const gateRelease = Math.round(baseRelease)
 
   const stages: string[] = [
     `asubcut=cutoff=${subCut}`,
@@ -70,30 +69,25 @@ export function buildClearCastFilter(
   if (model) {
     usedRnnoise = true
     const escaped = escapeFilterPath(model)
-    // Cap mix below 1.0 — full wet RNNoise is the main "robotic" artifact.
-    const mix = lerp(0.45, 0.82, t).toFixed(3)
+    // Cap mix — full wet is robotic. De-echo adds a little more wet, still < 0.9.
+    const mix = lerp(0.48, deEcho ? 0.88 : 0.82, t).toFixed(3)
     stages.push(`arnndn=m='${escaped}':mix=${mix}`)
-    // Optional light second pass only for strong de-echo — never mix=1.
-    if (deEcho && t >= 0.8) {
-      stages.push(`arnndn=m='${escaped}':mix=${lerp(0.35, 0.55, t).toFixed(3)}`)
-    }
   } else {
-    const nr = Math.round(lerp(8, 20, t))
+    const nr = Math.round(lerp(8, deEcho ? 24 : 20, t))
     stages.push(`afftdn=nr=${nr}:nf=-30:tn=1`)
     stages.push(`anlmdn=s=0.0006:p=0.002:r=0.008`)
   }
 
-  // De-echo: soft downward expander on late energy — not a hard chop.
+  // De-echo expander: crush late energy under the direct voice.
   if (deEcho) {
-    stages.push('agate=threshold=0.035:range=0.12:ratio=2:attack=6:release=90:knee=2')
+    stages.push('agate=threshold=0.04:range=0.06:ratio=2.8:attack=4:release=60:knee=1.5')
   }
 
   stages.push(
-    `agate=threshold=${gateThreshold}:range=${gateRange}:ratio=${gateRatio}:attack=8:release=${gateRelease}:knee=3.5`,
+    `agate=threshold=${gateThreshold}:range=${gateRange}:ratio=${gateRatio}:attack=6:release=${gateRelease}:knee=3`,
   )
-  stages.push('deesser=i=0.25')
-  // Milder speech normalize — aggressive speechnorm pumps and sounds processed.
-  stages.push('speechnorm=e=6:r=0.00005:l=1')
+  stages.push('deesser=i=0.28')
+  stages.push('speechnorm=e=7:r=0.00005:l=1')
   stages.push('alimiter=limit=0.97')
 
   return { filter: stages.join(','), usedRnnoise, usedDeEcho: deEcho }

@@ -54,9 +54,8 @@ export interface ClearCastOptions {
 
 export const DEFAULT_CLEARCAST: ClearCastOptions = {
   enabled: false,
-  strength: 65,
-  // Off by default — hard de-echo + double RNNoise sounded robotic.
-  deEcho: false,
+  strength: 70,
+  deEcho: true,
 }
 
 export function clampStrength(value: unknown, fallback: number): number {

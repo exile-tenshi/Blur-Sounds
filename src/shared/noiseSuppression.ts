@@ -12,6 +12,8 @@ export interface NoiseSuppressionSettings {
   attack: number
   /** 0–100: optional hard-gate close speed */
   release: number
+  /** Kill room echo / reverb tails after speech (live mic) */
+  deEcho: boolean
   /** Optional noise gate */
   noiseGateEnabled: boolean
   /** 0–100: gate sensitivity */
@@ -22,15 +24,16 @@ export interface NoiseSuppressionSettings {
   compressorLevel: number
 }
 
-/** Natural-first defaults — high strength + high Background made ClearCast robotic. */
+/** Natural voice + live echo-tail kill on by default. */
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
-  strength: 70,
-  threshold: 42,
+  strength: 72,
+  threshold: 48,
   impact: 0,
   highPassHz: 80,
   attack: 55,
   release: 40,
+  deEcho: true,
   noiseGateEnabled: false,
   noiseGateThreshold: 36,
   compressorEnabled: false,
@@ -70,6 +73,8 @@ export function normalizeNoiseSuppression(
     highPassHz: clampHighPassHz(partial.highPassHz ?? DEFAULT_NOISE_SUPPRESSION.highPassHz),
     attack: clampNoisePercent(partial.attack ?? DEFAULT_NOISE_SUPPRESSION.attack),
     release: clampNoisePercent(partial.release ?? DEFAULT_NOISE_SUPPRESSION.release),
+    // Default ON so older saved settings pick up live echo removal.
+    deEcho: typeof partial.deEcho === 'boolean' ? partial.deEcho : DEFAULT_NOISE_SUPPRESSION.deEcho,
     noiseGateEnabled: Boolean(partial.noiseGateEnabled),
     noiseGateThreshold: clampNoisePercent(
       partial.noiseGateThreshold ?? DEFAULT_NOISE_SUPPRESSION.noiseGateThreshold,

@@ -494,8 +494,7 @@ export const ClipEditorPanel = memo(function ClipEditorPanel({
                 </label>
                 <p className="muted">
                   Removes fans and room tone while keeping voice natural. High strength
-                  can sound processed — start around 60–70.
-                  remains (RNNoise). Applied to the exported clip's audio.
+                  can sound processed — start around 60–70. Applied to the exported clip.
                 </p>
                 {clearCast.enabled ? (
                   <>
@@ -522,8 +521,8 @@ export const ClipEditorPanel = memo(function ClipEditorPanel({
                       <span>Echo removal (de-reverb)</span>
                     </label>
                     <p className="muted">
-                      Extra suppression of room echo / reverb for people talking in an echoey
-                      space — cuts the reflected tail so only the direct voice comes through.
+                      Cuts room reverb / slap-echo after you stop talking. Leave on for
+                      echoey rooms.
                     </p>
                   </>
                 ) : null}

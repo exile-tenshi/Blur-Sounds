@@ -717,6 +717,27 @@ function MicNoiseCard({
 
         <section className="clearcast-module">
           <div className="clearcast-ai-header">
+            <div>
+              <h3>Echo removal</h3>
+              <p className="muted clearcast-module-note">
+                Cuts room reverb / slap-echo tails after you stop talking. Keep on for live
+                rooms. Use headphones if you also use Listen to Hi-Fi Cable — speakers will
+                feed your mic and sound like echo.
+              </p>
+            </div>
+            <SonarToggle
+              checked={settings.deEcho}
+              disabled={!slot.deviceId}
+              onChange={(checked) => {
+                setActivePresetId(null)
+                void onChange({ deEcho: checked })
+              }}
+            />
+          </div>
+        </section>
+
+        <section className="clearcast-module">
+          <div className="clearcast-ai-header">
             <h3>Noise gate</h3>
             <SonarToggle
               checked={settings.noiseGateEnabled}
