@@ -663,9 +663,9 @@ function MicNoiseCard({
             <div>
               <h3>Noise reduction</h3>
               <p className="muted clearcast-module-note">
-                Background tames leftover fan / room tone after ClearCast. It does not
-                rewrite your voice. 0 = quiet cleaned leftover. 100 = silence when idle.
-                Impact = desk taps / keyboard.
+                Background tames leftover fan / room tone after ClearCast. Keep it
+                mid-range for a natural voice — high values can sound gated. 0 = quiet
+                cleaned leftover. 100 = silence when idle. Impact = desk taps / keyboard.
               </p>
             </div>
             <SonarToggle

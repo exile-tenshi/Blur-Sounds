@@ -22,18 +22,19 @@ export interface NoiseSuppressionSettings {
   compressorLevel: number
 }
 
+/** Natural-first defaults — high strength + high Background made ClearCast robotic. */
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
-  strength: 88,
-  threshold: 80,
+  strength: 70,
+  threshold: 42,
   impact: 0,
-  highPassHz: 110,
-  attack: 58,
-  release: 44,
+  highPassHz: 80,
+  attack: 55,
+  release: 40,
   noiseGateEnabled: false,
-  noiseGateThreshold: 40,
-  compressorEnabled: true,
-  compressorLevel: 34,
+  noiseGateThreshold: 36,
+  compressorEnabled: false,
+  compressorLevel: 24,
 }
 
 export function clampNoisePercent(value: number): number {
