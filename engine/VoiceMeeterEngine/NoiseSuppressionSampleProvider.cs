@@ -19,8 +19,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private const float SpeechLearnRate = 0.22f;
     private const float PeakAttackRate = 0.55f;
     private const float PeakReleaseRate = 0.08f;
-    /// <summary>Light makeup only — high makeup made mic taps blast.</summary>
-    private const float RnnoiseMakeup = 1.08f;
+    /// <summary>Light makeup only — high makeup made mic taps blast / robotic.</summary>
+    private const float RnnoiseMakeup = 1.03f;
     /// <summary>Only clamp true overs — continuous SoftClip on voice caused static grit.</summary>
     private const float SoftLimitCeiling = 0.92f;
     private const float SoftLimitKnee = 0.86f;
@@ -50,8 +50,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
-    private float strength = 88f;
-    private float background = 55f;
+    private float strength = 70f;
+    private float background = 42f;
     private float impact = 0f;
     private float noiseGateThreshold = 40f;
     private float attack = 55f;
@@ -334,13 +334,16 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet. Keep this almost fully wet at typical settings so a fan
-    /// does not leak under the voice as dry fuzz. 50→0.80, 70→0.94, 88→0.99, 100→1.0
+    /// UI 0–100 → wet. Cap below full wet so voice keeps natural air/timbre;
+    /// full RNNoise (1.0) sounds robotic / under-water. Leave enough dry to
+    /// keep consonants, but still kill most fan fuzz under speech.
+    /// 50→0.58, 70→0.74, 85→0.84, 100→0.92
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        return 1f - MathF.Pow(1f - normalized, 2.35f);
+        // Mild curve, hard ceiling — never 100% wet even at slider max.
+        return 0.92f * (1f - MathF.Pow(1f - normalized, 1.45f));
     }
 
     /// <summary>
@@ -485,29 +488,39 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float QuietRoomGain()
     {
         var amount = Math.Clamp(background / 100f, 0f, 1f);
-        return MathF.Pow(1f - amount, 2.2f);
+        // Softer idle duck — hard silence between phrases sounded gated/robotic.
+        return MathF.Pow(1f - amount, 1.65f);
     }
 
     /// <summary>
-    /// Crush leftover fan/swirl near the noise floor. Gentle while talking so
-    /// consonants survive; stronger when idle and as Background rises.
+    /// Light leftover-fan duck near the noise floor. Stay very gentle while
+    /// talking — crushing mid/high residual is what makes RNNoise sound robotic.
     /// </summary>
     private float ExpandResidual(float sample)
     {
         var abs = Math.Abs(sample);
         var amount = Math.Clamp(background / 100f, 0f, 1f);
-        var thresh = Math.Max(noiseFloor * (1.35f + (amount * 3.4f)), 0.0007f);
+        // While talking, barely expand (preserve natural air). Idle can go deeper.
         if (residualSpeechOpen)
         {
-            thresh *= 0.5f;
+            var talkThresh = Math.Max(noiseFloor * (0.55f + (amount * 0.9f)), 0.0005f);
+            if (abs >= talkThresh)
+            {
+                return sample;
+            }
+
+            var talkRatio = 1.15f + (amount * 0.55f);
+            var talkGain = MathF.Pow(Math.Max(abs, MinEnvelope) / talkThresh, talkRatio - 1f);
+            return sample * Math.Clamp(talkGain, 0.35f, 1f);
         }
 
+        var thresh = Math.Max(noiseFloor * (1.15f + (amount * 2.4f)), 0.0006f);
         if (abs >= thresh)
         {
             return sample;
         }
 
-        var ratio = 1.7f + (amount * 3.6f);
+        var ratio = 1.35f + (amount * 2.2f);
         var gain = MathF.Pow(Math.Max(abs, MinEnvelope) / thresh, ratio - 1f);
         return sample * Math.Clamp(gain, 0f, 1f);
     }

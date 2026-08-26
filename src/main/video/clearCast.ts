@@ -5,16 +5,9 @@ import { app } from 'electron'
 
 // ClearCast voice isolation, expressed as an FFmpeg audio filtergraph.
 //
-// Chain (strongest → weakest by stage):
-//   asubcut/highpass  → remove subsonic rumble, desk thumps, low "body" noise (fart/AC)
-//   arnndn (RNNoise)  → ML speech-vs-noise separation: fans, hum, hiss, keyboard, taps
-//   agate             → close hard between words to kill residual room tone + echo tails
-//   deesser           → tame harsh sibilance the gate/RNN can exaggerate
-//   speechnorm        → even out level so the isolated voice sits consistently
-//
-// RNNoise is the key to "only the voice": it is trained specifically to keep speech and
-// drop everything else. If the bundled model is unavailable we fall back to an FFT +
-// non-local-means denoiser, which is weaker but still model-free.
+// Tuned for natural voice: one moderate RNNoise pass by default (full wet + a
+// second pass sounds robotic). Echo removal uses a soft expander, not a second
+// hard denoise. Gate stays gentle so consonants aren't chopped into "radio voice".
 
 function resolveModelPath(): string | undefined {
   const candidates: string[] = []
@@ -57,17 +50,16 @@ export function buildClearCastFilter(
   const deEcho = options.deEcho ?? false
   const model = resolveModelPath()
 
-  // Subsonic + high-pass: stronger strength trims more low-end rumble.
-  const subCut = Math.round(lerp(35, 65, t))
-  const highPass = Math.round(lerp(80, 110, t))
+  // Keep more low-end body than before — high highpass + RNNoise = thin robot voice.
+  const subCut = Math.round(lerp(30, 50, t))
+  const highPass = Math.round(lerp(70, 95, t))
 
-  // Gate: higher strength closes sooner (higher threshold) and deeper (lower range).
-  // De-echo shortens the release so reverb tails are cut instead of ringing out.
-  const gateThreshold = lerp(0.008, 0.035, t).toFixed(4)
-  const gateRange = lerp(0.12, 0.02, t).toFixed(4)
-  const gateRatio = lerp(2.5, 6, t).toFixed(2)
-  const baseRelease = lerp(180, 90, t)
-  const gateRelease = Math.round(deEcho ? baseRelease * 0.55 : baseRelease)
+  // Soft gate: never slam shut. Longer release keeps natural decay.
+  const gateThreshold = lerp(0.004, 0.018, t).toFixed(4)
+  const gateRange = lerp(0.22, 0.08, t).toFixed(4)
+  const gateRatio = lerp(1.6, 3.2, t).toFixed(2)
+  const baseRelease = lerp(220, 140, t)
+  const gateRelease = Math.round(deEcho ? baseRelease * 0.75 : baseRelease)
 
   const stages: string[] = [
     `asubcut=cutoff=${subCut}`,
@@ -78,32 +70,30 @@ export function buildClearCastFilter(
   if (model) {
     usedRnnoise = true
     const escaped = escapeFilterPath(model)
-    // RNNoise "mix" blends dry/denoised; a 2nd pass cleans residual noise + late reverb.
-    // RNNoise noticeably suppresses reverberation, so de-echo always runs the 2nd pass.
-    const mix = lerp(0.6, 1, t).toFixed(3)
+    // Cap mix below 1.0 — full wet RNNoise is the main "robotic" artifact.
+    const mix = lerp(0.45, 0.82, t).toFixed(3)
     stages.push(`arnndn=m='${escaped}':mix=${mix}`)
-    if (t >= 0.7 || deEcho) {
-      stages.push(`arnndn=m='${escaped}':mix=1`)
+    // Optional light second pass only for strong de-echo — never mix=1.
+    if (deEcho && t >= 0.8) {
+      stages.push(`arnndn=m='${escaped}':mix=${lerp(0.35, 0.55, t).toFixed(3)}`)
     }
   } else {
-    // Model-free fallback denoise.
-    const nr = Math.round(lerp(12, 30, t))
-    stages.push(`afftdn=nr=${nr}:nf=-28:tn=1`)
-    stages.push(`anlmdn=s=0.0008:p=0.002:r=0.006`)
+    const nr = Math.round(lerp(8, 20, t))
+    stages.push(`afftdn=nr=${nr}:nf=-30:tn=1`)
+    stages.push(`anlmdn=s=0.0006:p=0.002:r=0.008`)
   }
 
-  // De-echo: a downward expander keyed above the noise floor. Room reflections/echo
-  // sit below the direct voice, so expanding that mid band pushes the reverb wash and
-  // repeated slap-echo down while leaving the direct speech untouched.
+  // De-echo: soft downward expander on late energy — not a hard chop.
   if (deEcho) {
-    stages.push('agate=threshold=0.055:range=0.05:ratio=3:attack=4:release=55:knee=1')
+    stages.push('agate=threshold=0.035:range=0.12:ratio=2:attack=6:release=90:knee=2')
   }
 
   stages.push(
-    `agate=threshold=${gateThreshold}:range=${gateRange}:ratio=${gateRatio}:attack=5:release=${gateRelease}:knee=2.83`,
+    `agate=threshold=${gateThreshold}:range=${gateRange}:ratio=${gateRatio}:attack=8:release=${gateRelease}:knee=3.5`,
   )
-  stages.push('deesser=i=0.4')
-  stages.push('speechnorm=e=12.5:r=0.0001:l=1')
+  stages.push('deesser=i=0.25')
+  // Milder speech normalize — aggressive speechnorm pumps and sounds processed.
+  stages.push('speechnorm=e=6:r=0.00005:l=1')
   stages.push('alimiter=limit=0.97')
 
   return { filter: stages.join(','), usedRnnoise, usedDeEcho: deEcho }

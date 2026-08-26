@@ -493,7 +493,8 @@ export const ClipEditorPanel = memo(function ClipEditorPanel({
                   <span>{clearCast.enabled ? 'On — voice only' : 'Off'}</span>
                 </label>
                 <p className="muted">
-                  Removes fans, hum, desk taps, low rumble, and room echo so only the voice
+                  Removes fans and room tone while keeping voice natural. High strength
+                  can sound processed — start around 60–70.
                   remains (RNNoise). Applied to the exported clip's audio.
                 </p>
                 {clearCast.enabled ? (
