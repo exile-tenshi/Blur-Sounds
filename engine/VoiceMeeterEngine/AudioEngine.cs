@@ -1200,7 +1200,8 @@ internal sealed class AudioEngine : IDisposable
             settings.NoiseGateEnabled,
             settings.NoiseGateThreshold,
             settings.CompressorEnabled,
-            settings.CompressorLevel);
+            settings.CompressorLevel,
+            settings.DeEcho);
     }
 
     private async Task SyncAppLoopbackSourcesAsync(IReadOnlyCollection<RouteConfig> routes)
@@ -1942,7 +1943,8 @@ internal sealed class MicSource : IDisposable
         bool noiseGateEnabled = false,
         float noiseGateThreshold = 35f,
         bool compressorEnabled = false,
-        float compressorLevel = 30f)
+        float compressorLevel = 30f,
+        bool deEcho = true)
     {
         noiseSuppressionProvider.SetSettings(
             enabled,
@@ -1955,7 +1957,8 @@ internal sealed class MicSource : IDisposable
             noiseGateEnabled,
             noiseGateThreshold,
             compressorEnabled,
-            compressorLevel);
+            compressorLevel,
+            deEcho);
     }
 
     private void ApplyVolume()
