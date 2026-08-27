@@ -54,13 +54,13 @@ internal sealed class NoiseSuppressionSettingsConfig
     public bool Enabled { get; set; }
 
     [System.Text.Json.Serialization.JsonPropertyName("strength")]
-    public float Strength { get; set; } = 88f;
+    public float Strength { get; set; } = 90f;
 
     [System.Text.Json.Serialization.JsonPropertyName("threshold")]
-    public float Threshold { get; set; } = 55f;
+    public float Threshold { get; set; } = 78f;
 
     [System.Text.Json.Serialization.JsonPropertyName("impact")]
-    public float Impact { get; set; } = 0f;
+    public float Impact { get; set; } = 72f;
 
     [System.Text.Json.Serialization.JsonPropertyName("highPassHz")]
     public float HighPassHz { get; set; } = 100f;

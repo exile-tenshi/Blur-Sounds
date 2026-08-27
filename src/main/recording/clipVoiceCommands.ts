@@ -5,10 +5,19 @@ import { join } from 'node:path'
 import type { ClipKeybindService } from './clipKeybinds.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
-/** Full phrases only — short aliases were firing on “clip it” before “blur”. */
-export const CLIP_VOICE_PHRASES = ['clip it blur', 'blur clip it'] as const
+/** Primary phrases + common Windows Speech mishears of “blur”. */
+export const CLIP_VOICE_PHRASES = [
+  'clip it blur',
+  'blur clip it',
+  'clip it blurr',
+  'clip a blur',
+  'clipped blur',
+  'clip it blue',
+  'blurred clip it',
+  'blue clip it',
+] as const
 
-const TRIGGER_COOLDOWN_MS = 2800
+const TRIGGER_COOLDOWN_MS = 2200
 
 export type ClipVoiceListenerState = 'off' | 'starting' | 'ready' | 'error'
 
@@ -20,10 +29,34 @@ export function normalizeClipVoiceText(text: string): string {
     .trim()
 }
 
-/** True only for the complete command, not prefixes like “clip it”. */
+/** True for the full clip command (and common mishears), not bare “clip it”. */
 export function isCompleteClipVoicePhrase(text: string): boolean {
   const normalized = normalizeClipVoiceText(text)
-  return CLIP_VOICE_PHRASES.some((phrase) => phrase === normalized)
+  if (!normalized) {
+    return false
+  }
+
+  if (CLIP_VOICE_PHRASES.some((phrase) => phrase === normalized)) {
+    return true
+  }
+
+  // Allow short filler around the command (“hey clip it blur”).
+  if (/(?:^|\s)clip it blur(?:\s|$)/.test(normalized)) {
+    return true
+  }
+  if (/(?:^|\s)blur clip it(?:\s|$)/.test(normalized)) {
+    return true
+  }
+
+  // Fuzzy: clip(+ped) … blur/blue/blurr, with optional “it” / “a”.
+  if (/\bclip(?:ped)?\s+(?:it\s+)?(?:a\s+)?(?:blur+|blue)\b/.test(normalized)) {
+    return true
+  }
+  if (/\b(?:blur+|blue|blurred)\s+clip(?:ped)?\s+it\b/.test(normalized)) {
+    return true
+  }
+
+  return false
 }
 
 /**
@@ -167,7 +200,8 @@ export class ClipVoiceCommandService {
 
     if (line === 'CLIP_VOICE_ERROR') {
       this.state = 'error'
-      this.lastError = 'Windows speech failed. Install an English speech pack and set your real mic as the default recording device.'
+      this.lastError =
+        'Windows speech failed. Install an English speech pack and set your real mic as the default recording device (not Hi-Fi Cable).'
       return
     }
 
@@ -215,40 +249,42 @@ try {
   [void]$builder.Append($choices)
   $commandGrammar = New-Object System.Speech.Recognition.Grammar($builder)
   $commandGrammar.Name = 'clip-command'
-  $commandGrammar.Priority = 1
+  $commandGrammar.Priority = 127
   $engine.LoadGrammar($commandGrammar)
-  try {
-    $dictation = New-Object System.Speech.Recognition.DictationGrammar
-    $dictation.Name = 'reject-other-speech'
-    $dictation.Priority = 0
-    $dictation.Weight = 0.75
-    $engine.LoadGrammar($dictation)
-  } catch {}
-  $engine.InitialSilenceTimeout = [TimeSpan]::FromSeconds(20)
-  $engine.BabbleTimeout = [TimeSpan]::FromSeconds(2)
-  $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(950)
-  try { $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(1300) } catch {}
+  # No dictation grammar — it was stealing / delaying “clip it blur” hits.
+  $engine.InitialSilenceTimeout = [TimeSpan]::FromSeconds(30)
+  $engine.BabbleTimeout = [TimeSpan]::FromSeconds(3)
+  $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(450)
+  try { $engine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(700) } catch {}
   $engine.SetInputToDefaultAudioDevice()
   [Console]::Out.WriteLine('CLIP_VOICE_READY')
   [Console]::Out.Flush()
   while ($true) {
     $result = $engine.Recognize()
     if ($null -eq $result -or -not $result.Text) { continue }
-    $grammarName = ''
-    if ($result.Grammar -and $result.Grammar.Name) { $grammarName = [string]$result.Grammar.Name }
-    if ($grammarName -eq 'reject-other-speech') { continue }
-    if ($result.Confidence -lt 0.72) { continue }
+    # Looser than before — 0.72 + per-word 0.58 was missing real “clip it blur” takes.
+    if ($result.Confidence -lt 0.48) { continue }
     $text = (([string]$result.Text).ToLower() -replace '[^a-z ]', ' ')
     $text = ($text -replace ' +', ' ').Trim()
-    if ($text -ne 'clip it blur' -and $text -ne 'blur clip it') { continue }
-    $words = @($result.Words)
-    if ($words.Count -lt 3) { continue }
-    $weakWord = $false
-    foreach ($word in $words) {
-      if ($word.Confidence -lt 0.58) { $weakWord = $true; break }
+    $ok = $false
+    foreach ($phrase in @('${phrases}')) {
+      if ($text -eq $phrase) { $ok = $true; break }
     }
-    if ($weakWord) { continue }
-    if ($result.Audio -and $result.Audio.Duration.TotalMilliseconds -lt 550) { continue }
+    if (-not $ok) {
+      if ($text -match '(^|\\s)clip it blur(\\s|$)' -or $text -match '(^|\\s)blur clip it(\\s|$)') { $ok = $true }
+      elseif ($text -match '\\bclip(ped)?\\s+(it\\s+)?(a\\s+)?(blur+|blue)\\b') { $ok = $true }
+      elseif ($text -match '\\b(blur+|blue|blurred)\\s+clip(ped)?\\s+it\\b') { $ok = $true }
+    }
+    if (-not $ok) { continue }
+    $words = @($result.Words)
+    if ($words.Count -ge 2) {
+      $weakWord = $false
+      foreach ($word in $words) {
+        if ($word.Confidence -lt 0.35) { $weakWord = $true; break }
+      }
+      if ($weakWord) { continue }
+    }
+    if ($result.Audio -and $result.Audio.Duration.TotalMilliseconds -lt 350) { continue }
     [Console]::Out.WriteLine('CLIP_VOICE_HIT:' + $text)
     [Console]::Out.Flush()
   }

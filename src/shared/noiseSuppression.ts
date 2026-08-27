@@ -27,20 +27,23 @@ export interface NoiseSuppressionSettings {
   compressorLevel: number
 }
 
-/** Mid Echo (~45) kills room wash without going full robotic. */
+/**
+ * Sonar-competitive defaults: strong AI + Background kills room/fans,
+ * Impact kills keyboard/desk. Echo mid so rooms don't ring.
+ */
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
-  strength: 72,
-  threshold: 48,
-  impact: 0,
-  highPassHz: 80,
-  attack: 55,
-  release: 40,
-  deEcho: 45,
+  strength: 90,
+  threshold: 78,
+  impact: 72,
+  highPassHz: 95,
+  attack: 58,
+  release: 44,
+  deEcho: 48,
   noiseGateEnabled: false,
-  noiseGateThreshold: 36,
+  noiseGateThreshold: 40,
   compressorEnabled: false,
-  compressorLevel: 24,
+  compressorLevel: 28,
 }
 
 export function clampNoisePercent(value: number): number {

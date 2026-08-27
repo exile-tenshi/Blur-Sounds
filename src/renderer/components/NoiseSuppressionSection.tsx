@@ -663,9 +663,9 @@ function MicNoiseCard({
             <div>
               <h3>Noise reduction</h3>
               <p className="muted clearcast-module-note">
-                Background tames leftover fan / room tone after ClearCast. Keep it
-                mid-range for a natural voice — high values can sound gated. 0 = quiet
-                cleaned leftover. 100 = silence when idle. Impact = desk taps / keyboard.
+                Background kills leftover fan / room tone when you are not talking.
+                Impact kills keyboard and desk taps. Raise both for Sonar-level cleanup —
+                start Strength high, Background ~0.75–0.85, Impact ~0.70+.
               </p>
             </div>
             <SonarToggle
@@ -708,9 +708,8 @@ function MicNoiseCard({
               }}
             />
             <p className="muted clearcast-module-note">
-              Background 0 = cleaned leftover when idle (fans stay suppressed). Background 100
-              = no leftover noise when idle. Talking stays on ClearCast. Impact 0 keeps real
-              taps; raise it to strip desk / keyboard hits.
+              Background high = quiet when idle (fans gone). Impact high = typing / desk
+              taps muted. If you still hear keys, raise Impact toward 0.80–0.90.
             </p>
           </div>
         </section>

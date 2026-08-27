@@ -50,9 +50,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
-    private float strength = 72f;
-    private float background = 48f;
-    private float impact = 0f;
+    private float strength = 90f;
+    private float background = 78f;
+    private float impact = 72f;
     private float noiseGateThreshold = 40f;
     private float attack = 55f;
     private float release = 40f;
@@ -289,15 +289,16 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
         var frameImpulse = MeasureFrameImpulse(dryFrame);
         var blendImpulse = Math.Max(impulseAmount, frameImpulse);
-        // Strong desk taps only — speech plosives must still go through RNNoise.
-        var isDeskTap = blendImpulse > 0.62f;
+        // Keyboard + desk: catch softer typing, not only hard bumps.
+        var isDeskTap = blendImpulse > 0.38f;
 
         try
         {
             if (isDeskTap)
             {
-                // Fully dry: even a little RNNoise wet = “vrooom” overlay on the real tap.
-                var impactGain = 1f - (blendImpulse * (impact / 100f) * 0.97f);
+                // Dry path + Impact duck — RNNoise on taps = “vrooom”. High Impact ≈ mute.
+                var impactGain = 1f - (blendImpulse * (impact / 100f));
+                impactGain = Math.Clamp(impactGain, 0f, 1f);
                 for (var index = 0; index < Native.FRAME_SIZE; index++)
                 {
                     var tap = dryFrame[index] * impactGain;
@@ -312,12 +313,21 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
             var dryMix = 1f - wet;
             var makeup = 1f + ((RnnoiseMakeup - 1f) * wet);
+            // Soft key-clacks that didn't trip desk-tap still get Impact ducking.
+            var softImpactGain = 1f;
+            if (impact > 0.5f && blendImpulse > 0.1f)
+            {
+                softImpactGain = 1f - (blendImpulse * (impact / 100f) * 0.9f);
+                softImpactGain = Math.Clamp(softImpactGain, 0.05f, 1f);
+            }
+
             for (var index = 0; index < Native.FRAME_SIZE; index++)
             {
                 var mixed = ((dryFrame[index] * dryMix) + (processFrame[index] * wet)) * makeup;
+                mixed *= softImpactGain;
                 if (float.IsNaN(mixed) || float.IsInfinity(mixed))
                 {
-                    mixed = dryFrame[index];
+                    mixed = dryFrame[index] * softImpactGain;
                 }
 
                 outputQueue.Enqueue(mixed);
@@ -346,16 +356,13 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet. Cap below full wet so voice keeps natural air/timbre;
-    /// full RNNoise (1.0) sounds robotic / under-water. Leave enough dry to
-    /// keep consonants, but still kill most fan fuzz under speech.
-    /// 50→0.58, 70→0.74, 85→0.84, 100→0.92
+    /// UI 0–100 → wet. Strong enough to beat Sonar-style fan bleed under voice,
+    /// soft-capped so Max isn't fully robotic. 70→0.88, 88→0.95, 100→0.97
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        // Mild curve, hard ceiling — never 100% wet even at slider max.
-        return 0.92f * (1f - MathF.Pow(1f - normalized, 1.45f));
+        return 0.97f * (1f - MathF.Pow(1f - normalized, 1.85f));
     }
 
     /// <summary>
@@ -369,11 +376,11 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         var voiceLearn = abs > channelEnvelope ? SpeechLearnRate : NoiseLearnRate;
         channelEnvelope = Math.Max(MinEnvelope, channelEnvelope + ((abs - channelEnvelope) * voiceLearn));
 
-        // Speech rises together; taps jump far above the voice follower.
-        var excess = peakEnvelope - (channelEnvelope * 3.6f);
-        var targetImpulse = Math.Clamp(excess / 0.22f, 0f, 1f);
+        // Speech rises together; taps/keys jump far above the voice follower.
+        var excess = peakEnvelope - (channelEnvelope * 2.8f);
+        var targetImpulse = Math.Clamp(excess / 0.16f, 0f, 1f);
         // Fast open on real taps; release fast enough that talk isn't latched as a tap.
-        var coeff = targetImpulse > impulseAmount ? 0.45f : 0.08f;
+        var coeff = targetImpulse > impulseAmount ? 0.55f : 0.1f;
         impulseAmount += (targetImpulse - impulseAmount) * coeff;
         impulseAmount = Math.Clamp(impulseAmount, 0f, 1f);
     }
@@ -400,8 +407,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
         }
 
         var crest = peak / Math.Max(rms, MinEnvelope);
-        // Desk taps are much peakier than speech (typically crest > ~10).
-        return Math.Clamp((crest - 9.5f) / 12f, 0f, 1f);
+        // Keyboards are peaky but softer than desk bumps — catch crest > ~6.5.
+        return Math.Clamp((crest - 6.5f) / 10f, 0f, 1f);
     }
 
     /// <summary>
@@ -412,22 +419,29 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     {
         var sampleRate = Math.Max(8000, WaveFormat.SampleRate);
         var echo = Math.Clamp(deEchoAmount / 100f, 0f, 1f);
-        // 0 Echo → 220 ms hangover; 100 Echo → ~55 ms (close sooner into tail kill).
-        var hangoverSeconds = deEchoActive ? (0.22f - (echo * 0.165f)) : 0.22f;
+        var bg = Math.Clamp(background / 100f, 0f, 1f);
+        // High Background closes sooner so fans/room die between words (Sonar-like).
+        var hangoverSeconds = 0.18f - (bg * 0.1f);
+        if (deEchoActive)
+        {
+            hangoverSeconds = Math.Min(hangoverSeconds, 0.22f - (echo * 0.165f));
+        }
+        hangoverSeconds = Math.Clamp(hangoverSeconds, 0.05f, 0.22f);
         var hangoverSamples = Math.Max(1, (int)(sampleRate * hangoverSeconds));
         var floor = Math.Max(noiseFloor, MinEnvelope);
         var snr = channelEnvelope / floor;
-        var openThreshold = Math.Max(0.008f, floor * 1.9f);
-        var closeThreshold = Math.Max(0.0035f, floor * 1.25f);
+        // Slightly harder open — idle fan shouldn't count as speech.
+        var openThreshold = Math.Max(0.01f, floor * (2.15f + (bg * 0.4f)));
+        var closeThreshold = Math.Max(0.004f, floor * (1.35f + (bg * 0.2f)));
 
         var wasOpen = residualSpeechOpen;
-        if (channelEnvelope >= openThreshold && snr >= 1.75f)
+        if (channelEnvelope >= openThreshold && snr >= 2.0f)
         {
             residualSpeechOpen = true;
             quietHoldSamples = 0;
             echoTailSamples = 0;
         }
-        else if (residualSpeechOpen && (channelEnvelope < closeThreshold || snr < 1.22f))
+        else if (residualSpeechOpen && (channelEnvelope < closeThreshold || snr < 1.35f))
         {
             quietHoldSamples++;
             if (quietHoldSamples >= hangoverSamples)
@@ -516,13 +530,13 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float QuietRoomGain()
     {
         var amount = Math.Clamp(background / 100f, 0f, 1f);
-        // Softer idle duck — hard silence between phrases sounded gated/robotic.
-        return MathF.Pow(1f - amount, 1.65f);
+        // Steeper idle duck — Sonar-like silence between phrases when Background is high.
+        return MathF.Pow(1f - amount, 2.55f);
     }
 
     /// <summary>
-    /// Duck leftover fan / room swirl. Echo bar scales post-speech tail crush —
-    /// mid values clear rooms; max can sound gated/robotic.
+    /// Crush leftover fan / room / keyboard wash. Strong when idle or Background high;
+    /// lighter while talking so consonants survive.
     /// </summary>
     private float ExpandResidual(float sample)
     {
@@ -537,36 +551,41 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
 
         if (residualSpeechOpen && !inEchoTail)
         {
-            var talkAmount = deEchoActive ? Math.Min(1f, amount + (echo * 0.35f)) : amount;
-            var talkThresh = Math.Max(noiseFloor * (0.7f + (talkAmount * 1.1f)), 0.00055f);
+            // While talking: still kill under-voice fan/hum that rides under speech.
+            var talkAmount = Math.Min(1f, amount + 0.15f + (echo * 0.2f));
+            var talkThresh = Math.Max(noiseFloor * (0.95f + (talkAmount * 1.6f)), 0.0007f);
             if (abs >= talkThresh)
             {
                 return sample;
             }
 
-            var talkRatio = 1.2f + (talkAmount * 0.75f);
-            var talkFloor = deEchoActive ? (0.35f - (echo * 0.18f)) : 0.35f;
+            var talkRatio = 1.45f + (talkAmount * 1.4f);
+            var talkFloor = 0.22f - (talkAmount * 0.12f);
             var talkGain = MathF.Pow(Math.Max(abs, MinEnvelope) / talkThresh, talkRatio - 1f);
-            return sample * Math.Clamp(talkGain, Math.Max(0.12f, talkFloor), 1f);
+            return sample * Math.Clamp(talkGain, Math.Max(0.06f, talkFloor), 1f);
         }
 
         var floorScale = inEchoTail
-            ? (1.4f + (amount * 2.2f) + (echo * 2.8f))
-            : (1.25f + (amount * 2.6f));
-        var thresh = Math.Max(noiseFloor * floorScale, inEchoTail ? (0.0007f + (echo * 0.0012f)) : 0.0006f);
+            ? (1.6f + (amount * 2.6f) + (echo * 2.8f))
+            : (1.55f + (amount * 3.4f));
+        var thresh = Math.Max(
+            noiseFloor * floorScale,
+            inEchoTail ? (0.0009f + (echo * 0.0014f)) : (0.0008f + (amount * 0.0015f)));
         if (abs >= thresh)
         {
             if (inEchoTail && abs < thresh * (1.8f + (echo * 1.2f)))
             {
                 var taper = Math.Clamp((abs - thresh) / Math.Max(MinEnvelope, thresh * 1.4f), 0f, 1f);
-                var floorGain = 0.35f - (echo * 0.25f);
-                return sample * (Math.Max(0.05f, floorGain) + ((1f - Math.Max(0.05f, floorGain)) * taper));
+                var floorGain = 0.28f - (echo * 0.2f);
+                return sample * (Math.Max(0.04f, floorGain) + ((1f - Math.Max(0.04f, floorGain)) * taper));
             }
 
             return sample;
         }
 
-        var ratio = inEchoTail ? (1.6f + (amount * 2.0f) + (echo * 2.8f)) : (1.4f + (amount * 2.4f));
+        var ratio = inEchoTail
+            ? (1.8f + (amount * 2.4f) + (echo * 2.8f))
+            : (1.9f + (amount * 3.2f));
         var gain = MathF.Pow(Math.Max(abs, MinEnvelope) / thresh, ratio - 1f);
         return sample * Math.Clamp(gain, 0f, 1f);
     }
