@@ -12,6 +12,7 @@ import {
 import type { ClipControlApi, ClipRecordingStatus, ClipSource } from '../../shared/clipApi'
 import { clipChannels } from '../../shared/clipApi'
 import { playClipChime } from '../audio/playClipChime'
+import { captureClipAudioStream } from './captureClipAudio'
 
 interface TimedChunk {
   blob: Blob
@@ -61,7 +62,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 17
+export const CLIPS_PICKER_BUILD = 18
 
 function flushRecorderBuffer(
   recorder: MediaRecorder,
@@ -256,6 +257,8 @@ export function useClipRecorder() {
   const [keybinds, setKeybinds] = useState<string[]>(['F8'])
   const [voiceCommandsEnabled, setVoiceCommandsEnabledState] = useState(true)
   const [bufferingEnabled, setBufferingEnabledState] = useState(true)
+  const [audioApplicationIds, setAudioApplicationIdsState] = useState<string[]>([])
+  const [audioMicrophoneIds, setAudioMicrophoneIdsState] = useState<string[]>([])
   const [status, setStatus] = useState<ClipRecordingStatus>({
     recording: false,
     buffering: false,
@@ -276,9 +279,12 @@ export function useClipRecorder() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const audioCleanupRef = useRef<(() => void) | undefined>(undefined)
   const chunksRef = useRef<TimedChunk[]>([])
   const lookbackRef = useRef<ClipLookbackSeconds>(60)
   const resolutionRef = useRef<ClipResolution>('1080p')
+  const audioApplicationIdsRef = useRef<string[]>([])
+  const audioMicrophoneIdsRef = useRef<string[]>([])
   const clippingRef = useRef(false)
   const forwardTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const clipItRef = useRef<() => Promise<void>>(async () => {})
@@ -291,6 +297,8 @@ export function useClipRecorder() {
   const stopTracks = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
+    audioCleanupRef.current?.()
+    audioCleanupRef.current = undefined
   }, [])
 
   const syncStatus = useCallback(
@@ -381,6 +389,12 @@ export function useClipRecorder() {
       setKeybinds(clipSettings.keybinds)
       setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
       setBufferingEnabledState(clipSettings.bufferingEnabled)
+      const nextAudioApps = clipSettings.audioApplicationIds ?? []
+      const nextAudioMics = clipSettings.audioMicrophoneIds ?? []
+      setAudioApplicationIdsState(nextAudioApps)
+      setAudioMicrophoneIdsState(nextAudioMics)
+      audioApplicationIdsRef.current = nextAudioApps
+      audioMicrophoneIdsRef.current = nextAudioMics
 
       // Screens + live games/apps (process list). No desktopCapturer freeze on open.
       const nextSources = await control.listSources({ includeWindows: false })
@@ -495,10 +509,35 @@ export function useClipRecorder() {
         streamRef.current = stream
         chunksRef.current = []
 
+        const includeAppMix = audioApplicationIdsRef.current.length > 0
+        const microphoneIds = [...audioMicrophoneIdsRef.current]
+        if (includeAppMix || microphoneIds.length > 0) {
+          try {
+            const audio = await captureClipAudioStream({
+              includeAppMix,
+              microphoneIds,
+            })
+            if (audio) {
+              audioCleanupRef.current = audio.cleanup
+              for (const track of audio.stream.getAudioTracks()) {
+                stream.addTrack(track)
+              }
+            }
+          } catch (audioError) {
+            // Video buffer can still run; surface why audio is missing.
+            setError(
+              audioError instanceof Error
+                ? audioError.message
+                : 'Unable to capture clip audio from the selected apps/mics.',
+            )
+          }
+        }
+
+        const hasAudio = stream.getAudioTracks().length > 0
         const recorder = new MediaRecorder(stream, {
           mimeType,
           videoBitsPerSecond,
-          audioBitsPerSecond: 96_000,
+          ...(hasAudio ? { audioBitsPerSecond: 160_000 } : {}),
         })
         mediaRecorderRef.current = recorder
 
@@ -651,7 +690,6 @@ export function useClipRecorder() {
       title: 'Clipping…',
       body: 'Saving lookback plus a short forward roll.',
       kind: 'clipping',
-      holdMs: 2800,
     })
     await syncStatus(
       {
@@ -742,6 +780,38 @@ export function useClipRecorder() {
     [clipControl],
   )
 
+  const setAudioApplicationIds = useCallback(
+    async (ids: string[]) => {
+      const next = [...new Set(ids.filter(Boolean))]
+      audioApplicationIdsRef.current = next
+      setAudioApplicationIdsState(next)
+      if (clipControl) {
+        await clipControl.setSettings({ audioApplicationIds: next })
+      }
+      if (bufferingEnabled) {
+        await stopBuffering()
+        await startBuffering()
+      }
+    },
+    [bufferingEnabled, clipControl, startBuffering, stopBuffering],
+  )
+
+  const setAudioMicrophoneIds = useCallback(
+    async (ids: string[]) => {
+      const next = [...new Set(ids.filter(Boolean))]
+      audioMicrophoneIdsRef.current = next
+      setAudioMicrophoneIdsState(next)
+      if (clipControl) {
+        await clipControl.setSettings({ audioMicrophoneIds: next })
+      }
+      if (bufferingEnabled) {
+        await stopBuffering()
+        await startBuffering()
+      }
+    },
+    [bufferingEnabled, clipControl, startBuffering, stopBuffering],
+  )
+
   const selectSource = useCallback(
     async (sourceId: string) => {
       setSelectedSourceId(sourceId)
@@ -790,6 +860,12 @@ export function useClipRecorder() {
         resolutionRef.current = clipSettings.resolution
         setKeybinds(clipSettings.keybinds)
         setVoiceCommandsEnabledState(clipSettings.voiceCommandsEnabled !== false)
+        const nextAudioApps = clipSettings.audioApplicationIds ?? []
+        const nextAudioMics = clipSettings.audioMicrophoneIds ?? []
+        setAudioApplicationIdsState(nextAudioApps)
+        setAudioMicrophoneIdsState(nextAudioMics)
+        audioApplicationIdsRef.current = nextAudioApps
+        audioMicrophoneIdsRef.current = nextAudioMics
         const bufferOn = clipSettings.bufferingEnabled !== false
         setBufferingEnabledState(bufferOn)
         let sourceId = clipSettings.sourceId ?? ''
@@ -928,6 +1004,10 @@ export function useClipRecorder() {
     setVoiceCommandsEnabled,
     bufferingEnabled,
     setBufferingEnabled,
+    audioApplicationIds,
+    setAudioApplicationIds,
+    audioMicrophoneIds,
+    setAudioMicrophoneIds,
     status,
     error,
     isBusy,

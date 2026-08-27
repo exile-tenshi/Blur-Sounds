@@ -1,16 +1,25 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import {
   CLIP_RESOLUTION_SPECS,
   type ClipLookbackSeconds,
   type ClipResolution,
 } from '../../shared/appSettings'
+import type { AudioApplication, AudioDevice } from '../../shared/audioTypes'
+import { isHifiCableDeviceName } from '../../shared/hifiCable'
 import { useClipRecorderContext } from '../context/ClipRecorderContext'
 import { CLIPS_PICKER_BUILD } from '../hooks/useClipRecorder'
 
 export const ClipRecordingPanel = memo(function ClipRecordingPanel({
   isActive = false,
+  applications = [],
+  microphoneDevices = [],
+  onEnsureAppRouted,
 }: {
   isActive?: boolean
+  applications?: AudioApplication[]
+  microphoneDevices?: AudioDevice[]
+  /** When an app is checked for clip audio, keep it routed into the Blur mix. */
+  onEnsureAppRouted?: (appId: string) => void
 }) {
   const {
     sources,
@@ -33,6 +42,10 @@ export const ClipRecordingPanel = memo(function ClipRecordingPanel({
     setVoiceCommandsEnabled,
     bufferingEnabled,
     setBufferingEnabled,
+    audioApplicationIds,
+    setAudioApplicationIds,
+    audioMicrophoneIds,
+    setAudioMicrophoneIds,
     status,
     error,
     isBusy,
@@ -50,12 +63,37 @@ export const ClipRecordingPanel = memo(function ClipRecordingPanel({
   const refreshSourcesRef = useRef(refreshSources)
   refreshSourcesRef.current = refreshSources
 
+  const clipMicrophones = useMemo(
+    () =>
+      microphoneDevices.filter(
+        (device) => device.id && !isHifiCableDeviceName(device.name || ''),
+      ),
+    [microphoneDevices],
+  )
+
   useEffect(() => {
     if (!isActive) {
       return
     }
     void refreshSourcesRef.current()
   }, [isActive])
+
+  const toggleAudioApp = (appId: string, checked: boolean) => {
+    const next = checked
+      ? [...audioApplicationIds, appId]
+      : audioApplicationIds.filter((id) => id !== appId)
+    if (checked) {
+      onEnsureAppRouted?.(appId)
+    }
+    void setAudioApplicationIds(next)
+  }
+
+  const toggleAudioMic = (deviceId: string, checked: boolean) => {
+    const next = checked
+      ? [...audioMicrophoneIds, deviceId]
+      : audioMicrophoneIds.filter((id) => id !== deviceId)
+    void setAudioMicrophoneIds(next)
+  }
 
   return (
     <section className="panel clip-panel">
@@ -97,7 +135,7 @@ export const ClipRecordingPanel = memo(function ClipRecordingPanel({
 
         <div className="clip-controls">
           <label className="field-label" htmlFor="clip-source">
-            Source
+            Video source
           </label>
           <select
             id="clip-source"
@@ -131,6 +169,86 @@ export const ClipRecordingPanel = memo(function ClipRecordingPanel({
             Games come from apps currently running on your PC. Click <strong>Refresh games</strong>{' '}
             after launching a new title.
           </p>
+
+          <div className="clip-audio-block">
+            <p className="field-label">Clip audio</p>
+            <p className="muted">
+              Choose which <strong>applications</strong> and <strong>microphones</strong> are mixed
+              into the clip. App sound comes from the Blur / Hi-Fi Cable mix — keep the stream
+              running and those apps routed in Mixer.
+            </p>
+
+            <div className="clip-audio-columns">
+              <div className="clip-audio-column">
+                <p className="field-label">Applications</p>
+                {applications.length === 0 ? (
+                  <p className="muted">No running apps found. Open a game, then refresh Mixer.</p>
+                ) : (
+                  <ul className="clip-audio-list">
+                    {applications.map((app) => {
+                      const checked = audioApplicationIds.includes(app.id)
+                      return (
+                        <li key={app.id}>
+                          <label className="clip-audio-item">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={isBusy || clipping}
+                              onChange={(event) => toggleAudioApp(app.id, event.target.checked)}
+                            />
+                            <span>{app.displayName || app.processName || app.name}</span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+
+              <div className="clip-audio-column">
+                <p className="field-label">Microphones</p>
+                {clipMicrophones.length === 0 ? (
+                  <p className="muted">No microphones found.</p>
+                ) : (
+                  <ul className="clip-audio-list">
+                    {clipMicrophones.map((device) => {
+                      const checked = audioMicrophoneIds.includes(device.id)
+                      return (
+                        <li key={device.id}>
+                          <label className="clip-audio-item">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={isBusy || clipping}
+                              onChange={(event) => toggleAudioMic(device.id, event.target.checked)}
+                            />
+                            <span>{device.name}</span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            {audioApplicationIds.length === 0 && audioMicrophoneIds.length === 0 ? (
+              <p className="muted clip-audio-warning">
+                No clip audio selected — clips will be video-only until you check apps and/or mics.
+              </p>
+            ) : (
+              <p className="muted">
+                Recording:{' '}
+                {audioApplicationIds.length > 0
+                  ? `${audioApplicationIds.length} app${audioApplicationIds.length === 1 ? '' : 's'} (via Hi-Fi Cable)`
+                  : 'no apps'}
+                {' · '}
+                {audioMicrophoneIds.length > 0
+                  ? `${audioMicrophoneIds.length} mic${audioMicrophoneIds.length === 1 ? '' : 's'}`
+                  : 'no mics'}
+              </p>
+            )}
+          </div>
 
           <div className="clip-duration-block">
             <p className="field-label">Remember prior</p>
@@ -277,23 +395,21 @@ export const ClipRecordingPanel = memo(function ClipRecordingPanel({
             {status.voiceListener === 'ready'
               ? 'listening'
               : status.voiceListener === 'error'
-                ? `failed${status.voiceListenerError ? ` — ${status.voiceListenerError}` : ''}`
+                ? `error — ${status.voiceListenerError ?? 'check speech pack / default mic'}`
                 : status.voiceListener === 'starting'
                   ? 'starting…'
                   : voiceCommandsEnabled
-                    ? 'starting…'
-                    : 'off'}
+                    ? 'off'
+                    : 'disabled'}
           </p>
 
-          <p className="muted clip-folder">
-            Save folder: {status.outputFolder || 'Desktop/Blur Sounds Clips'}
-          </p>
-          <p className="muted">Clips picker build {CLIPS_PICKER_BUILD}</p>
-          {lastSavedPath ? <p className="notice success">Saved clip: {lastSavedPath}</p> : null}
-          {error ? <p className="notice error">{error}</p> : null}
-          {status.error && status.error !== error ? (
-            <p className="notice error">{status.error}</p>
+          {error ? <p className="error-text">{error}</p> : null}
+          {lastSavedPath ? (
+            <p className="muted">
+              Last clip: <code>{lastSavedPath}</code>
+            </p>
           ) : null}
+          <p className="muted">Clips build {CLIPS_PICKER_BUILD}</p>
         </div>
       </div>
     </section>

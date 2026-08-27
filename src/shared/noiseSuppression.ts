@@ -28,20 +28,20 @@ export interface NoiseSuppressionSettings {
 }
 
 /**
- * Sonar-competitive defaults: strong AI + Background kills room/fans,
- * Impact kills keyboard/desk. Echo mid so rooms don't ring.
+ * Defaults tuned against SteelSeries Sonar: high AI wet, strong Background
+ * (fans/room), strong Impact (keyboard). Re-pick Streaming/Balanced after update.
  */
 export const DEFAULT_NOISE_SUPPRESSION: NoiseSuppressionSettings = {
   enabled: false,
-  strength: 90,
-  threshold: 78,
-  impact: 72,
-  highPassHz: 95,
-  attack: 58,
-  release: 44,
-  deEcho: 48,
+  strength: 94,
+  threshold: 86,
+  impact: 82,
+  highPassHz: 100,
+  attack: 60,
+  release: 46,
+  deEcho: 50,
   noiseGateEnabled: false,
-  noiseGateThreshold: 40,
+  noiseGateThreshold: 42,
   compressorEnabled: false,
   compressorLevel: 28,
 }

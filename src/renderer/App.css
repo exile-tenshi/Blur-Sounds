@@ -1307,6 +1307,61 @@ progress {
   color: #94a3b8;
 }
 
+.clip-audio-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.clip-audio-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.clip-audio-column {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.clip-audio-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.clip-audio-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: #e2e8f0;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.clip-audio-item input {
+  margin-top: 3px;
+  accent-color: #38bdf8;
+}
+
+.clip-audio-warning {
+  color: #fcd34d;
+}
+
+@media (max-width: 900px) {
+  .clip-audio-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .clip-folder {
   word-break: break-all;
 }
