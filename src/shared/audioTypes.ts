@@ -1,3 +1,8 @@
+import type { NoiseSuppressionSettings } from './noiseSuppression.js'
+import type { RouteEqualizerSettings } from './audioConstants.js'
+
+export type { NoiseSuppressionSettings }
+
 export type AudioDeviceKind = 'input' | 'output'
 
 export type RouteTarget = 'hifi-cable'
@@ -55,6 +60,11 @@ export interface MicrophoneSlot {
   deviceId?: string
   muted: boolean
   volume: number
+  /** @deprecated use noiseSuppressionSettings.enabled */
+  noiseSuppression?: boolean
+  noiseSuppressionSettings?: NoiseSuppressionSettings
+  /** Six-band mic equalizer (ClearCast / Sonar-style). */
+  equalizer?: RouteEqualizerSettings
 }
 
 export interface DeviceSelection {
@@ -112,6 +122,17 @@ export interface EngineSessionLevel {
   peak: number
 }
 
+export interface EngineAudioFormatInfo {
+  mixSampleRate?: number
+  streamSampleRate?: number
+  deviceSampleRate?: number
+  deviceBitsPerSample?: number
+  outputBinding?: string
+  renderError?: string
+  underrunCount?: number
+  policy?: string
+}
+
 export interface EngineStatus {
   state: EngineState
   helperConnected: boolean
@@ -120,11 +141,21 @@ export interface EngineStatus {
   underrunCount: number
   selectedMicrophoneReady: boolean
   selectedInputReady: boolean
+  /** True when Hi-Fi Cable Output keep-alive capture is open (Input→Output loop). */
+  hifiOutputActive?: boolean
+  hifiOutputError?: string
+  /** True when Setup → Listen is playing Cable Output on speakers/headphones. */
+  hifiListenActive?: boolean
+  hifiListenDeviceName?: string
+  hifiListenError?: string
+  hifiListenLevel?: number
   outputLevel: number
+  /** Peak of bytes actually written to the Output/WASAPI render client. */
   outputPullLevel?: number
   mixPullLevel?: number
   microphoneLevel: number
   sessionLevels: EngineSessionLevel[]
+  audioFormat?: EngineAudioFormatInfo
 }
 
 export interface EngineRouteTelemetry {
@@ -160,12 +191,21 @@ export interface SetMicrophoneVolumePayload {
   volume: number
 }
 
+export interface SetMicrophoneNoiseSuppressionPayload {
+  slotId?: string
+  noiseSuppression?: boolean
+  settings?: Partial<NoiseSuppressionSettings>
+}
+
+export interface SetMicrophoneEqualizerPayload {
+  slotId?: string
+  equalizer: RouteEqualizerSettings
+}
+
 export interface SetRouteVolumePayload {
   routeId: string
   volume: number
 }
-
-import type { RouteEqualizerSettings } from './audioConstants.js'
 
 export interface SetRouteEqualizerPayload {
   routeId: string
@@ -186,4 +226,5 @@ export interface SetRouteAssignmentPayload {
 export interface EngineCommandPayload {
   selection: DeviceSelection
   routes: RoutedInput[]
+  enabled?: boolean
 }

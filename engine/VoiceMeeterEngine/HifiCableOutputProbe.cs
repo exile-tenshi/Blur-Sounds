@@ -49,27 +49,45 @@ internal static class HifiCableOutputProbe
         Exception? lastError = null;
         foreach (var attempt in attempts)
         {
-            WasapiRenderBroadcast? render = null;
+            WasapiOutBroadcast? output = null;
             WasapiCapture? capture = null;
+            MMDevice? attemptPlayback = null;
             var capturedPeak = 0f;
             try
             {
-                ISampleProvider outputSource = attempt.Format.SampleRate == HifiStreamingPolicy.EngineMixSampleRate
+                attemptPlayback = enumerator.GetDevice(playback.ID);
+                HifiCableEndpointVolume.EnsurePlaybackAudible(attemptPlayback);
+                if (recording is not null)
+                {
+                    HifiCableEndpointVolume.EnsureCaptureUnmuted(recording);
+                }
+
+                var bindFormat = WaveFormatUtility.IsFloatFormat(attempt.Format)
+                    ? attempt.Format
+                    : WaveFormat.CreateIeeeFloatWaveFormat(
+                        attempt.Format.SampleRate,
+                        Math.Max(1, attempt.Format.Channels));
+
+                ISampleProvider outputSource = bindFormat.SampleRate == HifiStreamingPolicy.EngineMixSampleRate
                     ? tone
-                    : new StudioRateOutputSampleProvider(tone, attempt.Format.SampleRate);
-                var waveProvider = OutputWaveProviderFactory.Create(outputSource, attempt.Format);
-                render = new WasapiRenderBroadcast();
-                render.Configure(
-                    playback,
-                    attempt.ShareMode,
-                    attempt.UseEventSync,
-                    LatencyTuning.HiFiOutputLatencyMilliseconds,
+                    : new StudioRateOutputSampleProvider(tone, bindFormat.SampleRate);
+
+                var waveProvider = new PeakReportingWaveProvider(
+                    OutputWaveProviderFactory.Create(outputSource, bindFormat));
+                output = new WasapiOutBroadcast();
+                output.Configure(
+                    attemptPlayback,
                     waveProvider,
-                    attempt.AllowAutoConvert);
+                    LatencyTuning.HiFiOutputLatencyMilliseconds,
+                    useEventSync: false);
+                attemptPlayback = null;
 
                 if (recording is not null)
                 {
-                    capture = new WasapiCapture(recording);
+                    capture = new WasapiCapture(recording)
+                    {
+                        ShareMode = AudioClientShareMode.Shared,
+                    };
                     capture.DataAvailable += (_, args) =>
                     {
                         if (args.BytesRecorded <= 0)
@@ -83,7 +101,8 @@ internal static class HifiCableOutputProbe
                     capture.StartRecording();
                 }
 
-                render.Play();
+                OutputPullMeter.Reset();
+                output.Play();
                 var recordMeterPeak = 0f;
                 var deadline = DateTime.UtcNow.AddMilliseconds(durationMilliseconds);
                 while (DateTime.UtcNow < deadline)
@@ -104,11 +123,11 @@ internal static class HifiCableOutputProbe
                 }
 
                 var peak = OutputPullMeter.Peak;
-                render.Stop();
+                output.Stop();
                 capture?.StopRecording();
 
                 report.AppendLine(
-                    $"OK {attempt.ShareMode} event={attempt.UseEventSync} {DescribeFormat(attempt.Format)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
+                    $"OK WasapiOut {DescribeFormat(bindFormat)} pullPeak={peak:0.000} meterPeak={recordMeterPeak:0.000} capturePeak={capturedPeak:0.000}");
 
                 if (peak > 0.001f && (capturedPeak > 0.001f || recordMeterPeak > 0.001f))
                 {
@@ -118,13 +137,13 @@ internal static class HifiCableOutputProbe
             catch (Exception ex)
             {
                 lastError = ex;
-                report.AppendLine(
-                    $"FAIL {attempt.ShareMode} event={attempt.UseEventSync} {DescribeFormat(attempt.Format)}: {ex.Message}");
+                report.AppendLine($"FAIL WasapiOut {DescribeFormat(attempt.Format)}: {ex.Message}");
             }
             finally
             {
                 capture?.Dispose();
-                render?.Dispose();
+                output?.Dispose();
+                attemptPlayback?.Dispose();
             }
         }
 

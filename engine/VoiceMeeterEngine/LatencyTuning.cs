@@ -7,7 +7,7 @@ internal static class LatencyTuning
     /// <summary>Minimum milliseconds per audio event.</summary>
     public const int MinEventMilliseconds = HifiCableFormat.MinEventMilliseconds;
 
-    /// <summary>Shared-mode WASAPI capture period (Hi-Fi).</summary>
+    /// <summary>Shared-mode WASAPI capture period.</summary>
     public const int CaptureBufferMilliseconds = 48;
 
     /// <summary>Maximum audio kept in the live-edge queue before discarding stale samples.</summary>
@@ -17,19 +17,19 @@ internal static class LatencyTuning
     public const int LiveEdgeRingMilliseconds = 240;
 
     /// <summary>Hard cap on the in-memory capture ring.</summary>
-    public const int CaptureRingMilliseconds = 120;
+    public const int CaptureRingMilliseconds = 200;
 
-    /// <summary>Shared-mode WASAPI microphone capture period (Hi-Fi).</summary>
+    /// <summary>Shared-mode WASAPI microphone capture period.</summary>
     public const int MicCaptureBufferMilliseconds = 64;
 
     /// <summary>FIFO cap for microphone capture before discarding oldest samples.</summary>
-    public const int MicCaptureMaxMilliseconds = 500;
+    public const int MicCaptureMaxMilliseconds = 400;
 
     /// <summary>In-memory ring size for microphone capture.</summary>
-    public const int MicCaptureRingMilliseconds = 600;
+    public const int MicCaptureRingMilliseconds = 520;
 
     /// <summary>Audio to buffer before a capture source joins the live mix.</summary>
-    public const int CaptureWarmupMilliseconds = 120;
+    public const int CaptureWarmupMilliseconds = 80;
 
     /// <summary>Fade duration when a capture source enters the mix.</summary>
     public const int CaptureFadeInMilliseconds = 20;
@@ -37,10 +37,10 @@ internal static class LatencyTuning
     /// <summary>Fade duration when a capture source leaves the mix.</summary>
     public const int CaptureFadeOutMilliseconds = 25;
 
-    /// <summary>Larger playback buffer at 48 kHz to avoid WASAPI underruns.</summary>
+    /// <summary>WASAPI playback buffer — stable enough to avoid silent underruns.</summary>
     public const int OutputLatencyMilliseconds = 256;
 
-    /// <summary>Larger playback buffer for Hi-Fi Cable studio rate output.</summary>
+    /// <summary>Hi-Fi Cable WASAPI playback buffer (matches main's stable path).</summary>
     public const int HiFiOutputLatencyMilliseconds = 512;
 
     /// <summary>Shared-mode WASAPI capture period at Hi-Fi Cable studio rate.</summary>
@@ -56,53 +56,56 @@ internal static class LatencyTuning
     public const int HiFiMicCaptureMaxMilliseconds = MicCaptureMaxMilliseconds;
 
     /// <summary>FIFO target for application loopback (steady music playback).</summary>
-    public const int LoopbackCaptureMaxMilliseconds = 500;
+    public const int LoopbackCaptureMaxMilliseconds = 480;
 
     /// <summary>In-memory ring size for application loopback capture.</summary>
-    public const int LoopbackCaptureRingMilliseconds = 600;
+    public const int LoopbackCaptureRingMilliseconds = 640;
 
     /// <summary>Shared-mode WASAPI buffer for process loopback capture.</summary>
     public const int AppLoopbackCaptureBufferMilliseconds = 80;
 
     /// <summary>Audio to buffer before an app loopback source joins the mix.</summary>
-    public const int AppLoopbackWarmupMilliseconds = 200;
+    public const int AppLoopbackWarmupMilliseconds = 160;
 
-    /// <summary>Mic standby buffer before joining the live mix.</summary>
+    /// <summary>Mic standby buffer before joining the live mix (0 = pull immediately).</summary>
     public const int MicCaptureJitterBufferMilliseconds = 0;
 
     /// <summary>App loopback standby buffer before joining the live mix.</summary>
-    public const int LoopbackCaptureJitterBufferMilliseconds = 128;
+    public const int LoopbackCaptureJitterBufferMilliseconds = 96;
 
     /// <summary>Process loopback is often quieter than mic; keep unity to avoid clipping.</summary>
     public const float LoopbackMakeupGain = 1.0f;
 
     /// <summary>Maximum audio discarded per trim pass to avoid audible skips.</summary>
-    public const int MaxTrimPassMilliseconds = 8;
+    public const int MaxTrimPassMilliseconds = 12;
+
+    /// <summary>Extra mix→WASAPI staging ring when sample rates already match.</summary>
+    public const int OutputStageBufferMilliseconds = 120;
 
     public static int GetOutputLatencyMilliseconds(bool isHiFiCable) =>
         AudioTuningPolicy.UseHiFiBuffers(isHiFiCable)
             ? HiFiOutputLatencyMilliseconds
-            : HiFiOutputLatencyMilliseconds;
+            : OutputLatencyMilliseconds;
 
     public static int GetCaptureBufferMilliseconds(bool isHiFiCable) =>
         AudioTuningPolicy.UseHiFiBuffers(isHiFiCable)
             ? HiFiCaptureBufferMilliseconds
-            : HiFiCaptureBufferMilliseconds;
+            : CaptureBufferMilliseconds;
 
     public static int GetMicCaptureBufferMilliseconds(bool isHiFiCable) =>
         AudioTuningPolicy.UseHiFiBuffers(isHiFiCable)
             ? HiFiMicCaptureBufferMilliseconds
-            : HiFiMicCaptureBufferMilliseconds;
+            : MicCaptureBufferMilliseconds;
 
     public static int GetLiveEdgeMaxMilliseconds(bool isHiFiCable) =>
         AudioTuningPolicy.UseHiFiBuffers(isHiFiCable)
             ? HiFiLiveEdgeMaxMilliseconds
-            : HiFiLiveEdgeMaxMilliseconds;
+            : LiveEdgeMaxMilliseconds;
 
     public static int GetMicCaptureMaxMilliseconds(bool isHiFiCable) =>
         AudioTuningPolicy.UseHiFiBuffers(isHiFiCable)
             ? HiFiMicCaptureMaxMilliseconds
-            : HiFiMicCaptureMaxMilliseconds;
+            : MicCaptureMaxMilliseconds;
 
     public static int GetLoopbackPacketFrames(int sampleRate) =>
         sampleRate * MinEventMilliseconds / 1000;

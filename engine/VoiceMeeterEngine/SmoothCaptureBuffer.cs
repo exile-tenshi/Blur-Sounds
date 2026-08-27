@@ -12,10 +12,14 @@ internal sealed class FloatCaptureRing
     private int head;
     private int count;
     private readonly int capacity;
+    private readonly int channels;
 
-    public FloatCaptureRing(int capacitySamples)
+    public FloatCaptureRing(int capacitySamples, int channelCount = 1)
     {
-        capacity = Math.Max(2, capacitySamples);
+        channels = Math.Max(1, channelCount);
+        // Keep capacity channel-aligned so overflow discards cannot desync L/R.
+        var alignedCapacity = Math.Max(channels * 2, capacitySamples - (capacitySamples % channels));
+        capacity = Math.Max(channels * 2, alignedCapacity);
         storage = new float[capacity];
     }
 
@@ -54,19 +58,27 @@ internal sealed class FloatCaptureRing
                 sampleCount = capacity;
             }
 
-            for (var index = 0; index < sampleCount; index++)
+            // Drop whole frames only — a non-aligned overflow permanently swaps channels.
+            var overflow = count + sampleCount - capacity;
+            if (overflow > 0)
             {
-                if (count < capacity)
+                overflow -= overflow % channels;
+                if (overflow > 0)
                 {
-                    storage[(head + count) % capacity] = samples[offset + index];
-                    count++;
-                }
-                else
-                {
-                    storage[head] = samples[offset + index];
-                    head = (head + 1) % capacity;
+                    head = (head + overflow) % capacity;
+                    count -= overflow;
                 }
             }
+
+            var writePos = (head + count) % capacity;
+            var firstPart = Math.Min(sampleCount, capacity - writePos);
+            Array.Copy(samples, offset, storage, writePos, firstPart);
+            if (firstPart < sampleCount)
+            {
+                Array.Copy(samples, offset + firstPart, storage, 0, sampleCount - firstPart);
+            }
+
+            count += sampleCount;
         }
     }
 
@@ -75,9 +87,16 @@ internal sealed class FloatCaptureRing
         lock (gate)
         {
             var samplesToRead = Math.Min(sampleCount, count);
-            for (var index = 0; index < samplesToRead; index++)
+            if (samplesToRead <= 0)
             {
-                destination[offset + index] = storage[(head + index) % capacity];
+                return 0;
+            }
+
+            var firstPart = Math.Min(samplesToRead, capacity - head);
+            Array.Copy(storage, head, destination, offset, firstPart);
+            if (firstPart < samplesToRead)
+            {
+                Array.Copy(storage, 0, destination, offset + firstPart, samplesToRead - firstPart);
             }
 
             head = (head + samplesToRead) % capacity;
@@ -168,7 +187,7 @@ internal sealed class SmoothCaptureBuffer
                 CaptureDeviceTuning.GetJitterBufferMilliseconds(deviceName) / 1000)
             : jitterSamples;
 
-        ring = new FloatCaptureRing(ringSamples);
+        ring = new FloatCaptureRing(ringSamples, floatFormat.Channels);
         lastFrame = new float[floatFormat.Channels];
     }
 
@@ -256,6 +275,8 @@ internal sealed class SmoothCaptureBuffer
         }
 
         var channels = Math.Max(1, floatFormat.Channels);
+        // Require meaningful backlog before trimming — MaxTrimPass alone (12 ms) was
+        // trimming continuously and sounded like digital breakup on busy captures.
         var minExcessBeforeTrim = Math.Max(
             channels,
             floatFormat.SampleRate * channels * 200 / 1000);
@@ -356,7 +377,7 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
             var buffered = ring.BufferedSamples;
             if (minPlayoutSamples > 0 && buffered < minPlayoutSamples)
             {
-                EmitStandby(samples, offset, count);
+                Array.Clear(samples, offset, count);
                 return count;
             }
 
@@ -369,7 +390,7 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
                     CaptureDiagnostics.NoteCaptureUnderrun();
                 }
 
-                Array.Clear(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
+                gapFill.FillGap(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
                 return count;
             }
 
@@ -381,10 +402,5 @@ internal sealed class SmoothCaptureSampleProvider : ISampleProvider
 
             return count;
         }
-    }
-
-    private void EmitStandby(float[] buffer, int offset, int count)
-    {
-        Array.Clear(buffer, offset, count);
     }
 }

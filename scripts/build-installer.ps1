@@ -11,7 +11,7 @@ try {
         throw "npm run build failed with exit code $LASTEXITCODE"
     }
 
-    npx electron-builder --win --config.directories.output="$staging"
+    npx electron-builder --win --publish never --config.directories.output="$staging"
     if ($LASTEXITCODE -ne 0) {
         throw "electron-builder failed with exit code $LASTEXITCODE"
     }

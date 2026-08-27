@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { audioChannels, type AudioControlApi } from '../shared/audioApi.js'
+import { clipChannels, type ClipControlApi } from '../shared/clipApi.js'
+import { settingsChannels, type SettingsControlApi } from '../shared/settingsApi.js'
+import { videoStudioChannels, type VideoStudioApi } from '../shared/videoStudio.js'
 
 const audioControlApi: AudioControlApi = {
   getSnapshot: () => ipcRenderer.invoke(audioChannels.getSnapshot),
@@ -20,9 +23,16 @@ const audioControlApi: AudioControlApi = {
     ipcRenderer.invoke(audioChannels.setMicrophoneMuted, payload),
   setMicrophoneVolume: (payload: Parameters<AudioControlApi['setMicrophoneVolume']>[0]) =>
     ipcRenderer.invoke(audioChannels.setMicrophoneVolume, payload),
+  setMicrophoneNoiseSuppression: (
+    payload: Parameters<AudioControlApi['setMicrophoneNoiseSuppression']>[0],
+  ) => ipcRenderer.invoke(audioChannels.setMicrophoneNoiseSuppression, payload),
+  setMicrophoneEqualizer: (payload: Parameters<AudioControlApi['setMicrophoneEqualizer']>[0]) =>
+    ipcRenderer.invoke(audioChannels.setMicrophoneEqualizer, payload),
   openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
   openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
   applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
+  probeHifiCable: () => ipcRenderer.invoke(audioChannels.probeHifiCable),
+  setHifiListen: (enabled: boolean) => ipcRenderer.invoke(audioChannels.setHifiListen, enabled),
   subscribeSnapshot: (listener: Parameters<AudioControlApi['subscribeSnapshot']>[0]) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, snapshot: Parameters<typeof listener>[0]) => {
       listener(snapshot)
@@ -36,4 +46,59 @@ const audioControlApi: AudioControlApi = {
   },
 }
 
+const clipControlApi: ClipControlApi = {
+  listSources: (options) => ipcRenderer.invoke(clipChannels.listSources, options),
+  getStatus: () => ipcRenderer.invoke(clipChannels.getStatus),
+  ensureOutputFolder: () => ipcRenderer.invoke(clipChannels.ensureOutputFolder),
+  saveClip: (payload) => ipcRenderer.invoke(clipChannels.saveClip, payload),
+  openOutputFolder: () => ipcRenderer.invoke(clipChannels.openOutputFolder),
+  notifyRecordingState: (payload) => ipcRenderer.invoke(clipChannels.notifyRecordingState, payload),
+  getSettings: () => ipcRenderer.invoke(clipChannels.getSettings),
+  setSettings: (patch) => ipcRenderer.invoke(clipChannels.setSettings, patch),
+  addKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.addKeybind, accelerator),
+  removeKeybind: (accelerator) => ipcRenderer.invoke(clipChannels.removeKeybind, accelerator),
+  showOverlay: (payload) => ipcRenderer.invoke(clipChannels.showOverlay, payload),
+  onTriggerClip: (listener) => {
+    const wrapped = () => listener()
+    ipcRenderer.on(clipChannels.subscribeTrigger, wrapped)
+    return () => {
+      ipcRenderer.removeListener(clipChannels.subscribeTrigger, wrapped)
+    }
+  },
+}
+
+const settingsControlApi: SettingsControlApi = {
+  get: () => ipcRenderer.invoke(settingsChannels.get),
+  set: (patch) => ipcRenderer.invoke(settingsChannels.set, patch),
+  subscribe: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, settings: Parameters<typeof listener>[0]) => {
+      listener(settings)
+    }
+    ipcRenderer.on(settingsChannels.subscribe, wrapped)
+    return () => {
+      ipcRenderer.removeListener(settingsChannels.subscribe, wrapped)
+    }
+  },
+}
+
+const videoStudioApi: VideoStudioApi = {
+  getRecordingSettings: () => ipcRenderer.invoke(videoStudioChannels.getRecordingSettings),
+  setRecordingSettings: (patch) =>
+    ipcRenderer.invoke(videoStudioChannels.setRecordingSettings, patch),
+  saveRecording: (payload) => ipcRenderer.invoke(videoStudioChannels.saveRecording, payload),
+  openRecordingsFolder: () => ipcRenderer.invoke(videoStudioChannels.openRecordingsFolder),
+  probeMedia: (path) => ipcRenderer.invoke(videoStudioChannels.probeMedia, path),
+  pickMediaFile: () => ipcRenderer.invoke(videoStudioChannels.pickMediaFile),
+  pickLutFile: () => ipcRenderer.invoke(videoStudioChannels.pickLutFile),
+  readTextFile: (path) => ipcRenderer.invoke(videoStudioChannels.readTextFile, path),
+  readMediaFile: (path) => ipcRenderer.invoke(videoStudioChannels.readMediaFile, path),
+  exportClip: (request) => ipcRenderer.invoke(videoStudioChannels.exportClip, request),
+  saveProject: (project) => ipcRenderer.invoke(videoStudioChannels.saveProject, project),
+  loadProject: () => ipcRenderer.invoke(videoStudioChannels.loadProject),
+  detectEncoders: () => ipcRenderer.invoke(videoStudioChannels.detectEncoders),
+}
+
 contextBridge.exposeInMainWorld('audioControl', audioControlApi)
+contextBridge.exposeInMainWorld('clipControl', clipControlApi)
+contextBridge.exposeInMainWorld('settingsControl', settingsControlApi)
+contextBridge.exposeInMainWorld('videoStudioControl', videoStudioApi)

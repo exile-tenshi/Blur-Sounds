@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import type { AudioDevice, DeviceSelection, EngineStatus, HifiCableInfo, MicrophoneSlot } from '../../shared/audioTypes'
+import type { AudioDevice, DeviceSelection, EngineStatus, MicrophoneSlot } from '../../shared/audioTypes'
 import { groupMicrophoneDevices, groupPlaybackDevices, groupRecordingDevices } from '../../shared/deviceGroups'
 import {
   describeInputDevice,
@@ -12,7 +12,6 @@ import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots'
 import { getVoicemeeterRoutingSteps, isVoicemeeterInputDevice } from '../../shared/voicemeeterBus'
 import {
   getHifiCableSelectionDefaults,
-  getHifiCableSetupSteps,
   HIFI_CABLE_QUALITY,
   isHifiCablePlaybackDevice,
 } from '../../shared/hifiCable'
@@ -26,15 +25,12 @@ interface AudioRoutingPanelProps {
   recordingDevices: AudioDevice[]
   engine: EngineStatus
   engineActive: boolean
-  hifiCable: HifiCableInfo
-  onApplyStudioSettings: () => void
-  onOpenPlaybackSettings: () => void
-  onOpenRecordingSettings: () => void
   onSelectMicrophoneSlot: (slotId: string, deviceId: string) => Promise<void>
   onAddMicrophoneSlot: () => Promise<void>
   onRemoveMicrophoneSlot: (slotId: string) => Promise<void>
   onSelectInput: (deviceId: string) => Promise<void>
   onSelectRecording: (deviceId: string) => Promise<void>
+  onOpenSetup: () => void
 }
 
 function AudioRoutingPanelInner({
@@ -44,15 +40,12 @@ function AudioRoutingPanelInner({
   recordingDevices,
   engine,
   engineActive,
-  hifiCable,
-  onApplyStudioSettings,
-  onOpenPlaybackSettings,
-  onOpenRecordingSettings,
   onSelectMicrophoneSlot,
   onAddMicrophoneSlot,
   onRemoveMicrophoneSlot,
   onSelectInput,
   onSelectRecording,
+  onOpenSetup,
 }: AudioRoutingPanelProps) {
   const microphoneGroups = groupMicrophoneDevices(microphoneDevices)
   const inputGroups = groupPlaybackDevices(playbackDevices)
@@ -81,65 +74,22 @@ function AudioRoutingPanelInner({
   const voicemeeterRoutingSteps = selectedInput
     ? getVoicemeeterRoutingSteps(selectedInput.name, recordingDeviceName)
     : []
-  const hifiSetupSteps = getHifiCableSetupSteps()
   const hasSelectedMicrophone = microphoneSlots.some((slot) => Boolean(slot.deviceId))
 
   return (
     <section className="panel routing-section audio-routing-panel">
       <div className="panel-header routing-header">
         <div>
-          <p className="eyebrow">Audio route</p>
-          <h2>Microphone → Hi-Fi Cable Input → Hi-Fi Cable Output</h2>
+          <p className="eyebrow">Mixer</p>
+          <h2>Route devices</h2>
           <p className="muted section-help">
-            Blur Sounds uses VB-Audio Hi-Fi Cable only. Configure both sides to{' '}
-            {HIFI_CABLE_QUALITY.label} for clean routing.
+            Choose the mic(s) and Hi-Fi Cable endpoints for this mix. Install and format Hi-Fi Cable
+            in <strong>Setup</strong>.
           </p>
         </div>
-      </div>
-
-      <div className="cable-product-summary">
-        <strong>Hi-Fi Cable route</strong>
-        <p className="muted">
-          Input → <span>{selectedInput?.name ?? cableDefaults.inputDeviceName}</span> · Recording →{' '}
-          <span>{selectedRecording?.name ?? cableDefaults.recordingDeviceName}</span> · {hifiCable.formatSpec}
-        </p>
-        {hifiCable.playbackFormatLabel || hifiCable.recordingFormatLabel ? (
-          <ul className="hifi-format-status">
-            <li className={hifiCable.playbackAtStudioQuality ? 'is-ready' : 'needs-attention'}>
-              Input: {hifiCable.playbackFormatLabel ?? 'unknown'}
-              {hifiCable.playbackAtStudioQuality ? ' · ready' : ''}
-            </li>
-            <li className={hifiCable.recordingAtStudioQuality ? 'is-ready' : 'needs-attention'}>
-              Output: {hifiCable.recordingFormatLabel ?? 'unknown'}
-              {hifiCable.recordingAtStudioQuality ? ' · ready' : ''}
-            </li>
-          </ul>
-        ) : null}
-        <div className="button-row hifi-settings-buttons">
-          <button type="button" className="primary-button" onClick={onApplyStudioSettings}>
-            Apply clean audio settings
-          </button>
-          <button type="button" className="secondary-button" onClick={onOpenPlaybackSettings}>
-            Open Playback sound settings
-          </button>
-          <button type="button" className="secondary-button" onClick={onOpenRecordingSettings}>
-            Open Recording sound settings
-          </button>
-        </div>
-      </div>
-
-      <div className="routing-checklist hifi-setup-checklist">
-        <strong>Hi-Fi Cable setup</strong>
-        <p className="muted">
-          Click <strong>Apply clean audio settings</strong> to reset Hi-Fi Cable Input and Output to{' '}
-          <strong>{HIFI_CABLE_QUALITY.label}</strong> with exclusive mode enabled. Use the buttons
-          below to verify in Windows Sound if needed.
-        </p>
-        <ol>
-          {hifiSetupSteps.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
+        <button type="button" className="secondary-button" onClick={onOpenSetup}>
+          Open Setup
+        </button>
       </div>
 
       <div className="routing-flow">
@@ -244,28 +194,29 @@ function AudioRoutingPanelInner({
 
       <div className="playback-meter">
         <div className="playback-meter-copy">
-          <strong>Transport level</strong>
+          <strong>Cable Input write level</strong>
           <p className="muted">
-            Level being sent from the mix to Hi-Fi Cable Input. Blur Sounds also opens Hi-Fi Cable
-            Output while streaming so other apps can capture it.
+            Bytes actually written to Hi-Fi Cable Input. If this stays at 0 while sources are live,
+            the mix is silent. If it moves but Discord is silent, check Output format / device
+            selection (Pass-Through needs matching Input/Output rates).
           </p>
         </div>
         <LevelMeter
-          level={
-            engineActive
-              ? Math.max(engine.outputPullLevel ?? 0, engine.mixPullLevel ?? 0, engine.outputLevel)
-              : 0
-          }
-          label="Route output level"
+          level={engineActive ? (engine.outputPullLevel ?? 0) : 0}
+          label="Hi-Fi Cable Input write level"
+          idleLabel={!engineActive ? 'Start stream' : undefined}
         />
+        {engineActive && engine.audioFormat?.outputBinding ? (
+          <p className="muted device-footnote">Bound: {engine.audioFormat.outputBinding}</p>
+        ) : null}
       </div>
 
       {showHifiRoutingHelp ? (
         <div className="routing-checklist">
           <strong>Hi-Fi Cable is live</strong>
           <p className="muted">
-            Blur Sounds streams clean {HIFI_CABLE_QUALITY.shortLabel} audio to your Hi-Fi Cable Input. Other apps should
-            capture from Hi-Fi Cable Output at {HIFI_CABLE_QUALITY.label}.
+            Streaming clean {HIFI_CABLE_QUALITY.shortLabel} audio to Hi-Fi Cable Input. Other apps
+            should capture from Hi-Fi Cable Output.
           </p>
         </div>
       ) : null}

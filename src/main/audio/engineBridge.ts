@@ -12,7 +12,7 @@ import type {
   MicrophoneSlot,
   RoutedInput,
 } from '../../shared/audioTypes.js'
-import { readRouteEqualizer } from '../../shared/audioConstants.js'
+import { readRouteEqualizer, normalizeMicEqualizer } from '../../shared/audioConstants.js'
 import { normalizeMicrophoneSlots } from '../../shared/microphoneSlots.js'
 
 interface EngineTelemetryEvent {
@@ -62,7 +62,18 @@ interface EngineHifiCableFormatEvent {
   }
 }
 
-type EngineEvent = EngineTelemetryEvent | EngineDevicesEvent | EngineHifiCableFormatEvent
+interface EngineProbeEvent {
+  type: 'probe'
+  payload: {
+    report: string
+  }
+}
+
+type EngineEvent =
+  | EngineTelemetryEvent
+  | EngineDevicesEvent
+  | EngineHifiCableFormatEvent
+  | EngineProbeEvent
 
 type TelemetryListener = (status: EngineStatus, routes: EngineRouteTelemetry[]) => void
 
@@ -92,6 +103,8 @@ export class NativeEngineBridge {
   private pendingDevicesRejectors: Array<(error: Error) => void> = []
   private pendingHifiFormatResolvers: Array<(result: EngineHifiCableFormatEvent['payload']) => void> = []
   private pendingHifiFormatRejectors: Array<(error: Error) => void> = []
+  private pendingProbeResolvers: Array<(report: string) => void> = []
+  private pendingProbeRejectors: Array<(error: Error) => void> = []
 
   constructor() {
     const runtime = resolveEngineRuntime()
@@ -135,8 +148,9 @@ export class NativeEngineBridge {
   async updateMix(selection: DeviceSelection, routes: RoutedInput[]): Promise<void> {
     return this.enqueueEngineOperation(async () => {
       await this.ensureHelper()
+      // Volume/EQ/NS updates are fire-and-forget — waiting 80ms per change freezes the UI
+      // when sliders or rapid toggles queue many commands.
       this.sendCommand('updateVolumes', toEngineVolumePayload(selection, routes))
-      await this.waitForCommandRoundTrip()
     })
   }
 
@@ -220,6 +234,40 @@ export class NativeEngineBridge {
 
       this.sendCommand('configureHifiCable', { selection: {}, routes: [] })
       return resultPromise
+    })
+  }
+
+  async probeHifiCable(): Promise<string> {
+    return this.enqueueEngineOperation(async () => {
+      await this.ensureHelper()
+
+      const resultPromise = new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.pendingProbeResolvers = []
+          this.pendingProbeRejectors = []
+          reject(new Error('Timed out while testing Hi-Fi Cable.'))
+        }, 15000)
+
+        this.pendingProbeResolvers.push((report) => {
+          clearTimeout(timeout)
+          resolve(report)
+        })
+        this.pendingProbeRejectors.push((error) => {
+          clearTimeout(timeout)
+          reject(error)
+        })
+      })
+
+      this.sendCommand('probeHifiOutput', { selection: {}, routes: [] })
+      return resultPromise
+    })
+  }
+
+  async setHifiListen(enabled: boolean): Promise<void> {
+    return this.enqueueEngineOperation(async () => {
+      await this.ensureHelper()
+      this.sendCommand('setHifiListen', { selection: {}, routes: [], enabled })
+      await this.waitForHifiListen(enabled, 8000)
     })
   }
 
@@ -332,6 +380,46 @@ export class NativeEngineBridge {
     })
   }
 
+  private waitForHifiListen(enabled: boolean, timeoutMs: number): Promise<void> {
+    const matches = (status: EngineStatus) =>
+      enabled
+        ? status.hifiListenActive === true || Boolean(status.hifiListenError)
+        : status.hifiListenActive !== true
+
+    return new Promise((resolve, reject) => {
+      let unsubscribe = () => {}
+      let skippedCurrent = false
+
+      const timeout = setTimeout(() => {
+        unsubscribe()
+        reject(
+          new Error(
+            this.status.hifiListenError ??
+              this.status.message ??
+              (enabled
+                ? 'Timed out while starting Hi-Fi Cable listen.'
+                : 'Timed out while stopping Hi-Fi Cable listen.'),
+          ),
+        )
+      }, timeoutMs)
+
+      unsubscribe = this.subscribe((status) => {
+        if (!skippedCurrent) {
+          skippedCurrent = true
+          return
+        }
+
+        if (!matches(status)) {
+          return
+        }
+
+        clearTimeout(timeout)
+        unsubscribe()
+        resolve()
+      })
+    })
+  }
+
   private enqueueEngineOperation<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.operationQueue.then(operation)
     this.operationQueue = run.then(
@@ -409,6 +497,16 @@ export class NativeEngineBridge {
           }
           this.pendingHifiFormatResolvers = []
           this.pendingHifiFormatRejectors = []
+          this.markHelperReady()
+          continue
+        }
+
+        if (event.type === 'probe') {
+          for (const resolve of this.pendingProbeResolvers) {
+            resolve(event.payload.report)
+          }
+          this.pendingProbeResolvers = []
+          this.pendingProbeRejectors = []
           this.markHelperReady()
         }
       } catch (error) {
@@ -501,6 +599,9 @@ function toEngineMicrophones(slots: MicrophoneSlot[]): MicrophoneSlot[] {
     deviceId: slot.deviceId,
     muted: slot.muted ?? false,
     volume: slot.volume ?? 1,
+    noiseSuppression: slot.noiseSuppressionSettings?.enabled ?? slot.noiseSuppression ?? false,
+    noiseSuppressionSettings: slot.noiseSuppressionSettings,
+    equalizer: normalizeMicEqualizer(slot.equalizer),
   }))
 }
 

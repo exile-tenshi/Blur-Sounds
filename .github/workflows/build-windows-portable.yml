@@ -1,0 +1,113 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches:
+      - cursor/clip-recordings-noise-suppression-e967
+      - main
+  workflow_dispatch:
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Publish engine and Vite app
+        run: npm run build
+
+      - name: Verify rebuilt noise engine
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'resources\engine\VoiceMeeterEngine.exe'
+          if (-not (Test-Path $exe)) {
+            throw "Engine was not published under resources\engine"
+          }
+          $printed = & $exe --dsp-markers 2>&1 | Out-String
+          Write-Host $printed
+          if ($printed -notmatch 'Never sum dry \+ RNNoise') {
+            throw "Engine binary is missing the Background exclusive-path marker"
+          }
+          if ($printed -notmatch 'idle leftover uses RNNoise') {
+            throw "Engine binary is missing the fan idle-path marker"
+          }
+          Write-Host "Engine markers OK"
+
+      - name: Package Windows portable and installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win dir nsis --publish never --config.directories.output=release
+
+      - name: Zip portable app
+        shell: pwsh
+        run: |
+          $src = Join-Path $PWD 'release\win-unpacked'
+          $zip = Join-Path $PWD 'release\Blur-Sounds-portable.zip'
+          if (-not (Test-Path (Join-Path $src 'Blur Sounds.exe'))) {
+            throw "Portable exe was not found in $src"
+          }
+          Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip -Force
+          Write-Host "Wrote $zip"
+
+      - name: Locate installer and write checksums
+        id: pack
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = Get-ChildItem -Path (Join-Path $PWD 'release') -Filter '*-Setup-*.exe' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw 'NSIS installer exe was not found in release/'
+          }
+          $portable = Join-Path $PWD 'release\Blur-Sounds-portable.zip'
+          if (-not (Test-Path $portable)) {
+            throw "Portable zip was not found at $portable"
+          }
+          $sums = Join-Path $PWD 'release\SHA256SUMS.txt'
+          $installerHash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLower()
+          $portableHash = (Get-FileHash -Algorithm SHA256 $portable).Hash.ToLower()
+          @(
+            "$installerHash  $($installer.Name)"
+            "$portableHash  Blur-Sounds-portable.zip"
+          ) | Set-Content -Path $sums -Encoding ASCII
+          Write-Host "Installer: $($installer.FullName) ($([math]::Round($installer.Length / 1MB, 1)) MB)"
+          Write-Host "Version: $version"
+          Get-Content $sums
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Do not publish a GitHub Release
+        shell: pwsh
+        run: |
+          Write-Host "Packaged Blur Sounds $($env:GITHUB_REF) as a tester build only."
+          Write-Host "Skipping gh release create / electron-builder GitHub publish so /releases/latest stays at v1.0.0 until it is tested."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blur-Sounds-${{ steps.pack.outputs.version }}-portable
+          path: release/Blur-Sounds-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Blur-Sounds-${{ steps.pack.outputs.version }}-Setup
+          path: |
+            release/*-Setup-*.exe
+            release/*-Setup-*.exe.blockmap
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

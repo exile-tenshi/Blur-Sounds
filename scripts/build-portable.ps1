@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $release = Join-Path $root 'release'
 $portableRoot = Join-Path $release 'portable'
+$desktopFolder = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Blur Sounds'
+$clipsFolder = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Blur Sounds Clips'
 
 Push-Location $root
 try {
@@ -11,7 +13,7 @@ try {
         throw "npm run build failed with exit code $LASTEXITCODE"
     }
 
-    npx electron-builder --win dir --config.directories.output="$portableRoot"
+    npx electron-builder --win dir --publish never --config.directories.output="$portableRoot"
     if ($LASTEXITCODE -ne 0) {
         throw "electron-builder failed with exit code $LASTEXITCODE"
     }
@@ -33,10 +35,40 @@ start "" "%~dp0portable\win-unpacked\Blur Sounds.exe"
 Start-Process -FilePath (Join-Path `$PSScriptRoot 'portable\win-unpacked\Blur Sounds.exe')
 "@ | Set-Content -Path $launcherPs1 -Encoding UTF8
 
+    Write-Host 'Stopping leftover Blur Sounds processes so Desktop copy is not locked...'
+    & (Join-Path $PSScriptRoot 'stop-blur-sounds.ps1')
+
+    $freshFolder = Join-Path $env:LOCALAPPDATA 'BlurSoundsApp'
+    New-Item -ItemType Directory -Force -Path $desktopFolder | Out-Null
+    New-Item -ItemType Directory -Force -Path $clipsFolder | Out-Null
+    if (Test-Path -LiteralPath $freshFolder) {
+        Remove-Item -LiteralPath $freshFolder -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Force -Path $freshFolder | Out-Null
+    Copy-Item -Path (Join-Path $portableRoot 'win-unpacked\*') -Destination $desktopFolder -Recurse -Force
+    & robocopy.exe (Join-Path $portableRoot 'win-unpacked') $freshFolder /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+    if ($LASTEXITCODE -ge 8) {
+        throw "Failed to copy launch folder to $freshFolder (robocopy $LASTEXITCODE)"
+    }
+    Get-ChildItem -LiteralPath $freshFolder -Recurse -File -ErrorAction SilentlyContinue |
+        Unblock-File -ErrorAction SilentlyContinue
+
+    $desktopLauncher = Join-Path $desktopFolder 'Run Blur Sounds.bat'
+    @"
+@echo off
+start "" "%~dp0Blur Sounds.exe"
+"@ | Set-Content -Path $desktopLauncher -Encoding ASCII
+
     Write-Host ""
     Write-Host "Portable app ready (no installer):"
     Write-Host "  $appExe"
     Write-Host "  $launcherBat"
+    Write-Host "Desktop folder copy:"
+    Write-Host "  $desktopFolder"
+    Write-Host "Launch from this copy (not Desktop):"
+    Write-Host "  $(Join-Path $freshFolder 'Blur Sounds.exe')"
+    Write-Host "Clips folder:"
+    Write-Host "  $clipsFolder"
 }
 finally {
     Pop-Location

@@ -21,6 +21,25 @@ if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE"
 }
 
+# Ensure RNNoise native DLL sits beside the engine for DllImport("rnnoise").
+$rnnoiseCandidates = @(
+    (Join-Path $output 'rnnoise.dll'),
+    (Join-Path $output 'runtimes\win-x64\native\rnnoise.dll')
+)
+$rnnoiseSource = $rnnoiseCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $rnnoiseSource) {
+    $nugetRoot = Join-Path $env:USERPROFILE '.nuget\packages\yellowdogman.rrnoise.net'
+    $rnnoiseSource = Get-ChildItem -Path $nugetRoot -Recurse -Filter 'rnnoise.dll' -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match 'win-x64' } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if ($rnnoiseSource -and (Split-Path $rnnoiseSource -Parent) -ne $output) {
+    Copy-Item -Force $rnnoiseSource (Join-Path $output 'rnnoise.dll')
+}
+if (-not (Test-Path (Join-Path $output 'rnnoise.dll'))) {
+    throw 'rnnoise.dll was not found next to the engine - AI noise cancellation cannot load. Re-run nuget restore / publish.'
+}
+
 $exe = Join-Path $output 'VoiceMeeterEngine.exe'
 if (-not (Test-Path $exe)) {
     throw "Expected published executable was not found: $exe"
