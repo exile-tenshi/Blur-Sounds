@@ -355,7 +355,14 @@ const AppShell = memo(function AppShell() {
         {/* Heavy panels mount only while active — their state (clip buffer, in-progress
             recording, editor project + undo) lives in providers above, so nothing is lost
             on switch and no rendering/capture/decoding runs for inactive tabs. */}
-        {activeSection === 'clips' ? <ClipRecordingPanel isActive /> : null}
+        {activeSection === 'clips' ? (
+          <ClipRecordingPanel
+            isActive
+            applications={snapshot.applications}
+            microphoneDevices={microphoneDevices}
+            onEnsureAppRouted={(appId) => void toggleRoute(appId, true)}
+          />
+        ) : null}
         {activeSection === 'record' ? <VideoRecordingPanel isActive /> : null}
         {activeSection === 'editor' ? <ClipEditorPanel isActive /> : null}
 

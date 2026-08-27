@@ -8,6 +8,7 @@ import {
   DEFAULT_CLIP_SETTINGS,
   normalizeClipLookback,
   normalizeClipResolution,
+  normalizeStringIdList,
   type AppSettings,
   type AppSectionId,
   type ClipSettings,
@@ -61,6 +62,8 @@ function normalizeSettings(raw: unknown): AppSettings {
         ? clipInput.voiceCommandsEnabled
         : DEFAULT_CLIP_SETTINGS.voiceCommandsEnabled,
     resolution: normalizeClipResolution(clipInput.resolution),
+    audioApplicationIds: normalizeStringIdList(clipInput.audioApplicationIds),
+    audioMicrophoneIds: normalizeStringIdList(clipInput.audioMicrophoneIds),
   }
 
   return {

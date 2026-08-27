@@ -249,16 +249,27 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function ensureOverlay(interactive: boolean): BrowserWindow {
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.setIgnoreMouseEvents(!interactive, { forward: !interactive })
-    if (interactive) {
-      overlayWindow.setFocusable(true)
-      overlayWindow.webPreferences.nodeIntegration = true
-      overlayWindow.webPreferences.contextIsolation = false
-    }
-    return overlayWindow
+function destroyOverlayWindow(): void {
+  if (hideTimer) {
+    clearTimeout(hideTimer)
+    hideTimer = undefined
   }
+  const existing = overlayWindow
+  overlayWindow = undefined
+  if (!existing || existing.isDestroyed()) {
+    return
+  }
+  try {
+    existing.removeAllListeners('closed')
+    // destroy() is synchronous — close() left the old “Clipping…” window on screen.
+    existing.destroy()
+  } catch {
+    // Ignore destroy races.
+  }
+}
+
+function ensureOverlay(interactive: boolean): BrowserWindow {
+  destroyOverlayWindow()
 
   const display = screen.getPrimaryDisplay()
   const width = interactive ? 460 : 420
@@ -297,16 +308,16 @@ function ensureOverlay(interactive: boolean): BrowserWindow {
 export function showClipOverlay(payload: ClipOverlayPayload): void {
   registerOverlayIpc()
 
-  const isSaved = payload.kind === 'saved' && payload.clipPath
-  const holdMs = isSaved
-    ? (payload.holdMs ?? 12000)
-    : (payload.holdMs ?? (payload.kind === 'clipping' || payload.kind === 'heard' ? 2500 : 4200))
+  const isSaved = payload.kind === 'saved' && Boolean(payload.clipPath)
+  // Clipping can last for the full forward roll + encode — keep it until saved/error
+  // replaces it (safety timeout only). Short holds left a stale “Clipping…” card up.
+  const holdMs =
+    payload.kind === 'clipping'
+      ? (payload.holdMs ?? 45_000)
+      : isSaved
+        ? (payload.holdMs ?? 12_000)
+        : (payload.holdMs ?? (payload.kind === 'heard' ? 2500 : 4200))
   const interactive = Boolean(isSaved)
-
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.close()
-    overlayWindow = undefined
-  }
 
   const window = ensureOverlay(interactive)
   if (interactive) {
@@ -356,11 +367,5 @@ export function showClipOverlay(payload: ClipOverlayPayload): void {
 }
 
 export function hideClipOverlay(): void {
-  if (hideTimer) {
-    clearTimeout(hideTimer)
-    hideTimer = undefined
-  }
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.hide()
-  }
+  destroyOverlayWindow()
 }

@@ -75,6 +75,13 @@ export interface ClipSettings {
   voiceCommandsEnabled: boolean
   /** Capture / encode resolution for Clip it. */
   resolution: ClipResolution
+  /**
+   * Application ids whose audio should be in the clip (via the Blur / Hi-Fi Cable mix).
+   * Keep these apps routed in Mixer and the stream running.
+   */
+  audioApplicationIds: string[]
+  /** Microphone device ids to mix into the clip (raw capture). */
+  audioMicrophoneIds: string[]
 }
 
 export interface AppSettings {
@@ -84,7 +91,7 @@ export interface AppSettings {
   clip: ClipSettings
 }
 
-export const APP_SETTINGS_VERSION = 3
+export const APP_SETTINGS_VERSION = 4
 
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   lookbackSeconds: 60,
@@ -93,6 +100,8 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   keybinds: ['F8'],
   voiceCommandsEnabled: true,
   resolution: '1080p',
+  audioApplicationIds: [],
+  audioMicrophoneIds: [],
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -135,4 +144,24 @@ export function formatLookbackLabel(seconds: number): string {
   }
   const minutes = seconds / 60
   return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`
+}
+
+export function normalizeStringIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue
+    }
+    const id = entry.trim()
+    if (!id || seen.has(id)) {
+      continue
+    }
+    seen.add(id)
+    result.push(id)
+  }
+  return result
 }

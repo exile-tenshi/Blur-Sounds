@@ -50,9 +50,9 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float limiterEnvelope = MinEnvelope;
     private bool enabled;
     private bool noiseGateEnabled;
-    private float strength = 90f;
-    private float background = 78f;
-    private float impact = 72f;
+    private float strength = 94f;
+    private float background = 86f;
+    private float impact = 82f;
     private float noiseGateThreshold = 40f;
     private float attack = 55f;
     private float release = 40f;
@@ -356,13 +356,13 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     }
 
     /// <summary>
-    /// UI 0–100 → wet. Strong enough to beat Sonar-style fan bleed under voice,
-    /// soft-capped so Max isn't fully robotic. 70→0.88, 88→0.95, 100→0.97
+    /// UI 0–100 → wet. Near-full wet at Streaming defaults so fans don't ride under voice.
+    /// Soft-cap at 0.99 (full 1.0 is robotic). 70→0.92, 90→0.98, 100→0.99
     /// </summary>
     private static float StrengthToWet(float strengthPercent)
     {
         var normalized = Math.Clamp(strengthPercent / 100f, 0f, 1f);
-        return 0.97f * (1f - MathF.Pow(1f - normalized, 1.85f));
+        return 0.99f * (1f - MathF.Pow(1f - normalized, 2.2f));
     }
 
     /// <summary>
@@ -530,8 +530,8 @@ internal sealed class NoiseSuppressionSampleProvider : ISampleProvider, IDisposa
     private float QuietRoomGain()
     {
         var amount = Math.Clamp(background / 100f, 0f, 1f);
-        // Steeper idle duck — Sonar-like silence between phrases when Background is high.
-        return MathF.Pow(1f - amount, 2.55f);
+        // Near-silence between phrases when Background is high (Sonar-like).
+        return MathF.Pow(1f - amount, 3.1f);
     }
 
     /// <summary>
