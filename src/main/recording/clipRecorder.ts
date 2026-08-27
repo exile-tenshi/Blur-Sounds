@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, desktopCapturer, screen, shell } from 'electron'
 import {
@@ -14,6 +14,7 @@ import type {
 } from '../../shared/clipApi.js'
 import type { AudioApplication } from '../../shared/audioTypes.js'
 import { listActiveApplications } from '../audio/windowsAudioService.js'
+import { remuxClipToMp4 } from '../video/ffmpegRunner.js'
 import type { SettingsStore } from '../settings/settingsStore.js'
 
 const CLIPS_FOLDER_NAME = 'Blur Sounds Clips'
@@ -412,7 +413,7 @@ export class ClipRecorderService {
     return this.getStatus()
   }
 
-  saveClip(payload: SaveClipPayload): SaveClipResult {
+  async saveClip(payload: SaveClipPayload): Promise<SaveClipResult> {
     const folder = this.ensureOutputFolder()
     const stamp = new Date()
       .toISOString()
@@ -420,15 +421,34 @@ export class ClipRecorderService {
       .replace('T', '_')
       .replace(/Z$/, '')
     const sourcePart = sanitizeFilePart(payload.sourceName ?? 'desktop')
-    const extension = extensionForMime(payload.mimeType)
     const lookback = this.settings.get().clip.lookbackSeconds
-    const fileName = `Blur-Clip_${sourcePart}_${lookback}s_${stamp}.${extension}`
+    const fileName = `Blur-Clip_${sourcePart}_${lookback}s_${stamp}.mp4`
     const filePath = join(folder, fileName)
     const bytes = Buffer.from(
       payload.data instanceof Uint8Array ? payload.data : new Uint8Array(payload.data),
     )
 
-    writeFileSync(filePath, bytes)
+    if (bytes.length < 4096) {
+      throw new Error('Clip had no video data — keep the buffer running a few seconds before clipping.')
+    }
+
+    const extension = extensionForMime(payload.mimeType)
+    if (extension === 'mp4') {
+      writeFileSync(filePath, bytes)
+    } else {
+      const tempPath = join(folder, `_temp_${stamp}.webm`)
+      writeFileSync(tempPath, bytes)
+      try {
+        await remuxClipToMp4(tempPath, filePath)
+      } finally {
+        try {
+          rmSync(tempPath, { force: true })
+        } catch {
+          // Ignore temp cleanup failures.
+        }
+      }
+    }
+
     this.lastClipPath = filePath
     this.recording = false
     this.bufferState = this.buffering ? 'buffering' : 'idle'
