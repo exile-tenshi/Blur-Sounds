@@ -61,7 +61,7 @@ function resolveClipControl(): ClipControlApi | undefined {
 }
 
 /** Bump when Clips picker behavior changes — shown in UI so we know the build is current. */
-export const CLIPS_PICKER_BUILD = 16
+export const CLIPS_PICKER_BUILD = 17
 
 function flushRecorderBuffer(
   recorder: MediaRecorder,
@@ -230,8 +230,14 @@ async function captureDesktopStream(
 }
 
 function pruneChunks(chunks: TimedChunk[], lookbackSeconds: number): TimedChunk[] {
+  if (chunks.length <= 1) {
+    return chunks
+  }
   const cutoff = Date.now() - lookbackSeconds * 1000
-  return chunks.filter((chunk) => chunk.at >= cutoff)
+  // Always keep the first chunk — it holds the WebM init segment. Dropping it
+  // makes concatenated clips unplayable in Media Player / Editor.
+  const [init, ...rest] = chunks
+  return [init, ...rest.filter((chunk) => chunk.at >= cutoff)]
 }
 
 function estimateBufferedSeconds(chunks: TimedChunk[]): number {
@@ -577,6 +583,9 @@ export function useClipRecorder() {
       chunksRef.current.map((chunk) => chunk.blob),
       { type: mimeType },
     )
+    if (blob.size < 4096) {
+      throw new Error('Clip had no video frames — wait a few seconds after starting the buffer.')
+    }
     chunksRef.current = pruneChunks(chunksRef.current, lookbackRef.current)
     clippingRef.current = false
 

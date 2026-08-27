@@ -134,7 +134,7 @@ export function registerClipIpc(
   ipcMain.handle(clipChannels.getStatus, () => withVoiceStatus())
   ipcMain.handle(clipChannels.ensureOutputFolder, () => recorder.ensureOutputFolder())
   ipcMain.handle(clipChannels.openOutputFolder, () => recorder.openOutputFolder())
-  ipcMain.handle(clipChannels.saveClip, (_event, payload: SaveClipPayload) =>
+  ipcMain.handle(clipChannels.saveClip, async (_event, payload: SaveClipPayload) =>
     recorder.saveClip(payload),
   )
   ipcMain.handle(clipChannels.notifyRecordingState, (_event, payload) => {

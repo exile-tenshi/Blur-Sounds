@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createRequire } from 'node:module'
 import type {
   ClearCastOptions,
   ColorGrade,
@@ -9,13 +8,11 @@ import type {
   MediaInfo,
 } from '../../shared/videoStudio.js'
 import { buildClearCastFilter } from './clearCast.js'
+import { resolveFfmpegPath, resolveFfprobePath } from './ffmpegPaths.js'
 
 const execFileAsync = promisify(execFile)
-const require = createRequire(import.meta.url)
-
-// ffmpeg-static exports the binary path as its default export; ffprobe-static exports { path }.
-const ffmpegPath: string = require('ffmpeg-static')
-const ffprobePath: string = require('ffprobe-static').path
+const ffmpegPath = resolveFfmpegPath()
+const ffprobePath = resolveFfprobePath()
 
 const CODEC_BY_PREFERENCE: Record<Exclude<EncoderPreference, 'auto'>, string> = {
   nvenc: 'h264_nvenc',
@@ -335,4 +332,53 @@ export async function transcodeToMp4(
     throw error
   }
   return { encoderUsed: codec, command }
+}
+
+/**
+ * Turn a raw MediaRecorder WebM blob into a Windows-friendly MP4.
+ * Tries stream copy first; re-encodes if the rolling buffer produced a broken file.
+ */
+export async function remuxClipToMp4(inputPath: string, outputPath: string): Promise<void> {
+  const copyArgs = [
+    '-y',
+    '-fflags',
+    '+genpts',
+    '-i',
+    inputPath,
+    '-c',
+    'copy',
+    '-movflags',
+    '+faststart',
+    outputPath,
+  ]
+  try {
+    await execFileAsync(ffmpegPath, copyArgs, { maxBuffer: 1024 * 1024 * 32 })
+    return
+  } catch {
+    // Rolling-buffer WebM often needs a full re-encode.
+  }
+
+  const encodeArgs = [
+    '-y',
+    '-fflags',
+    '+genpts',
+    '-i',
+    inputPath,
+    '-c:v',
+    'libx264',
+    '-preset',
+    'fast',
+    '-crf',
+    '22',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
+    '-movflags',
+    '+faststart',
+    outputPath,
+  ]
+  await execFileAsync(ffmpegPath, encodeArgs, { maxBuffer: 1024 * 1024 * 32 })
 }
