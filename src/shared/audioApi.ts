@@ -1,7 +1,10 @@
 import type {
   AudioSnapshot,
+  HifiCableEndpointStatus,
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
+  SetMicrophoneNoiseSuppressionPayload,
+  SetMicrophoneEqualizerPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteMutedPayload,
@@ -21,10 +24,14 @@ export const audioChannels = {
   setRouteMuted: 'audio:setRouteMuted',
   setMicrophoneMuted: 'audio:setMicrophoneMuted',
   setMicrophoneVolume: 'audio:setMicrophoneVolume',
+  setMicrophoneNoiseSuppression: 'audio:setMicrophoneNoiseSuppression',
+  setMicrophoneEqualizer: 'audio:setMicrophoneEqualizer',
   subscribeSnapshot: 'audio:subscribeSnapshot',
   openHifiCablePlaybackSettings: 'system:openHifiCablePlaybackSettings',
   openHifiCableRecordingSettings: 'system:openHifiCableRecordingSettings',
   applyHifiCableStudioSettings: 'audio:applyHifiCableStudioSettings',
+  probeHifiCable: 'audio:probeHifiCable',
+  setHifiListen: 'audio:setHifiListen',
 } as const
 
 export interface HifiCableFormatResult {
@@ -49,8 +56,12 @@ export interface AudioControlApi {
   setRouteMuted: (payload: SetRouteMutedPayload) => Promise<AudioSnapshot>
   setMicrophoneMuted: (payload: SetMicrophoneMutedPayload) => Promise<AudioSnapshot>
   setMicrophoneVolume: (payload: SetMicrophoneVolumePayload) => Promise<AudioSnapshot>
+  setMicrophoneNoiseSuppression: (payload: SetMicrophoneNoiseSuppressionPayload) => Promise<AudioSnapshot>
+  setMicrophoneEqualizer: (payload: SetMicrophoneEqualizerPayload) => Promise<AudioSnapshot>
   subscribeSnapshot: (listener: (snapshot: AudioSnapshot) => void) => () => void
   openHifiCablePlaybackSettings: () => Promise<void>
   openHifiCableRecordingSettings: () => Promise<void>
   applyHifiCableStudioSettings: () => Promise<HifiCableFormatResult>
+  probeHifiCable: () => Promise<string>
+  setHifiListen: (enabled: boolean) => Promise<AudioSnapshot>
 }

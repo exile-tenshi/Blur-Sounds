@@ -1,15 +1,22 @@
-import { DEFAULT_INPUT_GAIN } from './audioConstants.js'
+import { DEFAULT_INPUT_GAIN, normalizeMicEqualizer } from './audioConstants.js'
+import { normalizeNoiseSuppression } from './noiseSuppression.js'
 import type { DeviceSelection, MicrophoneSlot } from './audioTypes.js'
 
 let slotCounter = 0
 
 export function createMicrophoneSlot(partial?: Partial<MicrophoneSlot>): MicrophoneSlot {
   slotCounter += 1
+  const noiseSuppressionSettings = normalizeNoiseSuppression(
+    partial?.noiseSuppressionSettings ?? partial?.noiseSuppression,
+  )
   return {
     id: partial?.id ?? `mic-slot-${slotCounter}`,
     deviceId: partial?.deviceId,
     muted: partial?.muted ?? false,
     volume: partial?.volume ?? DEFAULT_INPUT_GAIN,
+    noiseSuppression: noiseSuppressionSettings.enabled,
+    noiseSuppressionSettings,
+    equalizer: normalizeMicEqualizer(partial?.equalizer),
   }
 }
 
@@ -19,22 +26,30 @@ export function createDefaultMicrophoneSlots(): MicrophoneSlot[] {
 
 export function normalizeMicrophoneSlots(selection: DeviceSelection): MicrophoneSlot[] {
   if (selection.microphones && selection.microphones.length > 0) {
-    return selection.microphones.map((slot) => ({
-      id: slot.id,
-      deviceId: slot.deviceId,
-      muted: slot.muted ?? false,
-      volume: slot.volume ?? DEFAULT_INPUT_GAIN,
-    }))
+    return selection.microphones.map((slot) => {
+      const noiseSuppressionSettings = normalizeNoiseSuppression(
+        slot.noiseSuppressionSettings ?? slot.noiseSuppression,
+      )
+      return {
+        id: slot.id,
+        deviceId: slot.deviceId,
+        muted: slot.muted ?? false,
+        volume: slot.volume ?? DEFAULT_INPUT_GAIN,
+        noiseSuppression: noiseSuppressionSettings.enabled,
+        noiseSuppressionSettings,
+        equalizer: normalizeMicEqualizer(slot.equalizer),
+      }
+    })
   }
 
   if (selection.microphoneId) {
     return [
-      {
+      createMicrophoneSlot({
         id: 'mic-slot-legacy',
         deviceId: selection.microphoneId,
         muted: selection.microphoneMuted ?? false,
         volume: selection.microphoneVolume ?? DEFAULT_INPUT_GAIN,
-      },
+      }),
     ]
   }
 
@@ -63,5 +78,25 @@ export function updateMicrophoneSlot(
   slotId: string,
   patch: Partial<MicrophoneSlot>,
 ): MicrophoneSlot[] {
-  return slots.map((slot) => (slot.id === slotId ? { ...slot, ...patch, id: slot.id } : slot))
+  return slots.map((slot) => {
+    if (slot.id !== slotId) {
+      return slot
+    }
+
+    const merged = { ...slot, ...patch, id: slot.id }
+    const noiseSuppressionSettings = normalizeNoiseSuppression(
+      patch.noiseSuppressionSettings ??
+        (patch.noiseSuppression !== undefined
+          ? { ...slot.noiseSuppressionSettings, enabled: patch.noiseSuppression }
+          : slot.noiseSuppressionSettings ?? slot.noiseSuppression),
+    )
+    return {
+      ...merged,
+      noiseSuppression: noiseSuppressionSettings.enabled,
+      noiseSuppressionSettings,
+      equalizer: normalizeMicEqualizer(
+        patch.equalizer !== undefined ? patch.equalizer : slot.equalizer,
+      ),
+    }
+  })
 }

@@ -122,6 +122,7 @@ internal sealed class FifoCaptureSampleProvider : ISampleProvider
     private readonly object gate;
     private readonly BufferedWaveProvider buffer;
     private readonly WaveFormat floatFormat;
+    private readonly SampleGapFill gapFill;
     private readonly int minPlayoutSamples;
     private byte[] readScratch = [];
 
@@ -131,6 +132,7 @@ internal sealed class FifoCaptureSampleProvider : ISampleProvider
         this.buffer = buffer;
         this.floatFormat = floatFormat;
         this.minPlayoutSamples = Math.Max(0, minPlayoutSamples);
+        gapFill = new SampleGapFill(Math.Max(1, floatFormat.Channels));
         WaveFormat = floatFormat;
     }
 
@@ -142,7 +144,7 @@ internal sealed class FifoCaptureSampleProvider : ISampleProvider
         {
             if (minPlayoutSamples > 0 && buffer.BufferedBytes / sizeof(float) < minPlayoutSamples)
             {
-                Array.Clear(samples, offset, count);
+                gapFill.FillGap(samples, offset, count);
                 return count;
             }
 
@@ -159,6 +161,7 @@ internal sealed class FifoCaptureSampleProvider : ISampleProvider
             if (samplesRead > 0)
             {
                 Buffer.BlockCopy(readScratch, 0, samples, offset * sizeof(float), bytesRead);
+                gapFill.NoteSamplesRead(samples, offset, samplesRead);
             }
 
             if (samplesRead < count)
@@ -168,7 +171,7 @@ internal sealed class FifoCaptureSampleProvider : ISampleProvider
                     CaptureDiagnostics.NoteCaptureUnderrun();
                 }
 
-                Array.Clear(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
+                gapFill.FillGap(samples, offset + Math.Max(0, samplesRead), count - Math.Max(0, samplesRead));
             }
 
             return count;

@@ -10,6 +10,15 @@ export default defineConfig({
     electron({
       main: {
         entry: 'src/main/index.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              // These packages resolve their bundled binaries via their own __dirname,
+              // so they must stay external and be required from node_modules at runtime.
+              external: ['ffmpeg-static', 'ffprobe-static'],
+            },
+          },
+        },
       },
       preload: {
         input: resolve(__dirname, 'src/preload/index.ts'),
