@@ -1,0 +1,104 @@
+{
+  "name": "blur-sounds-pro",
+  "version": "2.1.0",
+  "description": "Sonar-style per-app audio mixer for Windows with virtual-cable routing, voice-activated clips, platform export presets and a built-in VRChat chatbox.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "fetch-deps": "node scripts/fetch-deps.cjs",
+    "build:renderer": "vite build",
+    "build:helper": "dotnet publish helper -c Release -r win-x64 --self-contained false -o helper-bin && node scripts/fetch-deps.cjs --natives",
+    "build": "npm run fetch-deps && npm run build:helper && vite build && electron-builder --win dir --x64 && node scripts/zip.cjs",
+    "dist": "npm run build",
+    "dist:nsis": "vite build && electron-builder --win nsis --x64"
+  },
+  "keywords": [],
+  "author": "Blur Sounds contributors",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.4.6"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "electron@33.4.11": true
+  },
+  "productName": "Blur Sounds Pro",
+  "private": true,
+  "build": {
+    "appId": "com.blursounds.pro",
+    "productName": "Blur Sounds Pro",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**",
+      "renderer/**",
+      "assets/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "helper-bin",
+        "to": "helper",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "executableName": "BlurSoundsPro"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Blur Sounds Pro",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "BlurSoundsPro-Setup-${version}.exe"
+    },
+    "compression": "maximum"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/exile-tenshi/Blur-Sounds.git"
+  }
+}

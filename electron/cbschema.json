@@ -1,0 +1,1973 @@
+{
+ "categories": [
+  {
+   "id": "weather",
+   "label": "Weather"
+  },
+  {
+   "id": "system",
+   "label": "PC & system"
+  },
+  {
+   "id": "time",
+   "label": "Time & timers"
+  },
+  {
+   "id": "music",
+   "label": "Music"
+  },
+  {
+   "id": "vrchat",
+   "label": "VRChat"
+  },
+  {
+   "id": "stream",
+   "label": "Streaming"
+  },
+  {
+   "id": "style",
+   "label": "Text & style"
+  },
+  {
+   "id": "behavior",
+   "label": "Behavior"
+  }
+ ],
+ "modules": [
+  {
+   "id": "status",
+   "label": "Status"
+  },
+  {
+   "id": "message",
+   "label": "Message"
+  },
+  {
+   "id": "nowPlaying",
+   "label": "Now playing"
+  },
+  {
+   "id": "focus",
+   "label": "Focused app"
+  },
+  {
+   "id": "time",
+   "label": "Time"
+  },
+  {
+   "id": "date",
+   "label": "Date"
+  },
+  {
+   "id": "tz",
+   "label": "Second clock"
+  },
+  {
+   "id": "weather",
+   "label": "Weather"
+  },
+  {
+   "id": "pc",
+   "label": "PC stats"
+  },
+  {
+   "id": "net",
+   "label": "Ping"
+  },
+  {
+   "id": "uptime",
+   "label": "Uptime"
+  },
+  {
+   "id": "battery",
+   "label": "Battery"
+  },
+  {
+   "id": "countdown",
+   "label": "Countdown"
+  },
+  {
+   "id": "stopwatch",
+   "label": "Stopwatch"
+  },
+  {
+   "id": "session",
+   "label": "Session timer"
+  },
+  {
+   "id": "afk",
+   "label": "AFK"
+  },
+  {
+   "id": "vrcWorld",
+   "label": "VRChat world"
+  },
+  {
+   "id": "vrcPlayers",
+   "label": "Player count"
+  },
+  {
+   "id": "vrcMute",
+   "label": "Mic mute"
+  },
+  {
+   "id": "hr",
+   "label": "Heart rate"
+  },
+  {
+   "id": "twitch",
+   "label": "Twitch"
+  },
+  {
+   "id": "tiktok",
+   "label": "TikTok"
+  },
+  {
+   "id": "quote",
+   "label": "Quote"
+  },
+  {
+   "id": "fact",
+   "label": "Fun fact"
+  },
+  {
+   "id": "marquee",
+   "label": "Marquee"
+  }
+ ],
+ "groups": [
+  {
+   "id": "weather",
+   "cat": "weather",
+   "label": "Weather",
+   "icon": "weather",
+   "module": "weather",
+   "widget": "weather",
+   "fields": [
+    {
+     "id": "weather.enabled",
+     "type": "bool",
+     "label": "Show weather",
+     "default": true,
+     "help": ""
+    },
+    {
+     "id": "weather.units",
+     "type": "select",
+     "label": "Temperature",
+     "default": "F",
+     "options": [
+      {
+       "value": "F",
+       "label": "°F"
+      },
+      {
+       "value": "C",
+       "label": "°C"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "weather.wind",
+     "type": "select",
+     "label": "Wind speed",
+     "default": "mph",
+     "options": [
+      {
+       "value": "mph",
+       "label": "mph"
+      },
+      {
+       "value": "kmh",
+       "label": "km/h"
+      },
+      {
+       "value": "ms",
+       "label": "m/s"
+      },
+      {
+       "value": "kn",
+       "label": "knots"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "weather.auto",
+     "type": "bool",
+     "label": "Detect location from my IP",
+     "default": true,
+     "help": "Free IP lookup (ipwho.is, falls back to ip-api.com). No key."
+    },
+    {
+     "id": "weather.city",
+     "type": "text",
+     "label": "City override",
+     "default": "",
+     "help": "Type a city to use it instead of the IP location (e.g. \"Orlando\" or \"Orlando, FL\").",
+     "placeholder": "Auto"
+    },
+    {
+     "id": "weather.preset",
+     "type": "select",
+     "label": "Format",
+     "default": "auto",
+     "options": [
+      {
+       "value": "auto",
+       "label": "Auto — most detail that fits"
+      },
+      {
+       "value": "full",
+       "label": "Full — everything"
+      },
+      {
+       "value": "standard",
+       "label": "Standard"
+      },
+      {
+       "value": "short",
+       "label": "Short — temp, sky, high/low"
+      },
+      {
+       "value": "compact",
+       "label": "Compact"
+      },
+      {
+       "value": "minimal",
+       "label": "Minimal (icon + temp)"
+      },
+      {
+       "value": "custom",
+       "label": "Custom template"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "weather.template",
+     "type": "text",
+     "label": "Custom template",
+     "default": "{icon} {temp} {cond} · H{hi} L{lo} · feels {feels}",
+     "help": "Tokens: {icon} {temp} {cond} {hi} {lo} {feels} {wind} {hum} {city} {rain}",
+     "placeholder": ""
+    },
+    {
+     "id": "weather.showCity",
+     "type": "bool",
+     "label": "Show city name",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "weather.refreshMin",
+     "type": "num",
+     "label": "Refresh every",
+     "default": 10,
+     "min": 5,
+     "max": 60,
+     "step": 1,
+     "unit": "min",
+     "help": ""
+    },
+    {
+     "id": "weather.tomorrow",
+     "type": "bool",
+     "label": "Add tomorrow's high/low",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "weather.rain",
+     "type": "bool",
+     "label": "Add chance of rain today",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "weather.sun",
+     "type": "bool",
+     "label": "Add next sunrise / sunset",
+     "default": false,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "pc",
+   "cat": "system",
+   "label": "PC stats",
+   "icon": "pc",
+   "module": "pc",
+   "fields": [
+    {
+     "id": "pc.enabled",
+     "type": "bool",
+     "label": "Show PC stats",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "pc.cpu",
+     "type": "bool",
+     "label": "CPU usage",
+     "default": true,
+     "help": ""
+    },
+    {
+     "id": "pc.gpu",
+     "type": "bool",
+     "label": "GPU usage",
+     "default": true,
+     "help": ""
+    },
+    {
+     "id": "pc.ram",
+     "type": "bool",
+     "label": "RAM usage",
+     "default": true,
+     "help": ""
+    },
+    {
+     "id": "pc.ramMode",
+     "type": "select",
+     "label": "RAM as",
+     "default": "percent",
+     "options": [
+      {
+       "value": "percent",
+       "label": "Percent"
+      },
+      {
+       "value": "gb",
+       "label": "Used / total GB"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "pc.vram",
+     "type": "bool",
+     "label": "GPU memory (VRAM)",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "pc.temps",
+     "type": "bool",
+     "label": "Temperatures (where Windows/driver exposes them)",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "pc.gpuName",
+     "type": "text",
+     "label": "GPU label",
+     "default": "",
+     "help": "Shown in front of the GPU numbers. Empty = \"GPU\".",
+     "placeholder": ""
+    },
+    {
+     "id": "pc.style",
+     "type": "select",
+     "label": "Style",
+     "default": "text",
+     "options": [
+      {
+       "value": "text",
+       "label": "Numbers (CPU 12%)"
+      },
+      {
+       "value": "bars",
+       "label": "Bars (CPU ▰▰▱▱▱)"
+      }
+     ],
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "net",
+   "cat": "system",
+   "label": "Network ping",
+   "icon": "net",
+   "module": "net",
+   "fields": [
+    {
+     "id": "net.enabled",
+     "type": "bool",
+     "label": "Show ping",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "net.host",
+     "type": "text",
+     "label": "Ping host",
+     "default": "1.1.1.1",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "net.quality",
+     "type": "bool",
+     "label": "Quality dot (🟢🟡🔴)",
+     "default": true,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "sys",
+   "cat": "system",
+   "label": "Uptime & battery",
+   "icon": "pc",
+   "fields": [
+    {
+     "id": "uptime.enabled",
+     "type": "bool",
+     "label": "PC uptime",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "battery.enabled",
+     "type": "bool",
+     "label": "Battery level (hidden when there is no battery)",
+     "default": false,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "afk",
+   "cat": "system",
+   "label": "AFK detection",
+   "icon": "afk",
+   "module": "afk",
+   "fields": [
+    {
+     "id": "afk.enabled",
+     "type": "bool",
+     "label": "Show AFK when idle",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "afk.minutes",
+     "type": "num",
+     "label": "Idle after",
+     "default": 5,
+     "min": 1,
+     "max": 60,
+     "step": 1,
+     "unit": "min",
+     "help": ""
+    },
+    {
+     "id": "afk.text",
+     "type": "text",
+     "label": "AFK text",
+     "default": "💤 AFK {dur}",
+     "help": "{dur} = how long you have been idle. Also triggers from the VRChat AFK parameter when OSC input is on.",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "focus",
+   "cat": "system",
+   "label": "Focused app",
+   "icon": "window",
+   "module": "focus",
+   "fields": [
+    {
+     "id": "legacy:chatbox.modules.focus.enabled",
+     "path": [
+      "chatbox",
+      "modules",
+      "focus",
+      "enabled"
+     ],
+     "type": "bool",
+     "label": "Show focused app",
+     "legacy": true
+    },
+    {
+     "id": "legacy:chatbox.modules.focus.template",
+     "path": [
+      "chatbox",
+      "modules",
+      "focus",
+      "template"
+     ],
+     "type": "text",
+     "label": "Format ({app})",
+     "legacy": true
+    },
+    {
+     "id": "focus.playtime",
+     "type": "bool",
+     "label": "Add playtime in the current app/game",
+     "default": false,
+     "help": "Time since the focused program started."
+    },
+    {
+     "id": "focus.ignore",
+     "type": "text",
+     "label": "Never show these apps",
+     "default": "explorer, BlurSoundsPro, ShellExperienceHost, SearchHost",
+     "help": "Comma separated process names.",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "time",
+   "cat": "time",
+   "label": "Clock",
+   "icon": "clock",
+   "module": "time",
+   "fields": [
+    {
+     "id": "legacy:chatbox.modules.time.enabled",
+     "path": [
+      "chatbox",
+      "modules",
+      "time",
+      "enabled"
+     ],
+     "type": "bool",
+     "label": "Show time",
+     "legacy": true
+    },
+    {
+     "id": "legacy:chatbox.modules.time.h24",
+     "path": [
+      "chatbox",
+      "modules",
+      "time",
+      "h24"
+     ],
+     "type": "bool",
+     "label": "24-hour",
+     "legacy": true
+    },
+    {
+     "id": "legacy:chatbox.modules.time.showSeconds",
+     "path": [
+      "chatbox",
+      "modules",
+      "time",
+      "showSeconds"
+     ],
+     "type": "bool",
+     "label": "Seconds",
+     "legacy": true
+    },
+    {
+     "id": "legacy:chatbox.modules.time.prefix",
+     "path": [
+      "chatbox",
+      "modules",
+      "time",
+      "prefix"
+     ],
+     "type": "text",
+     "label": "Prefix",
+     "legacy": true
+    },
+    {
+     "id": "time.emojiClock",
+     "type": "bool",
+     "label": "Clock emoji follows the hour (🕐…🕛)",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "time.blink",
+     "type": "bool",
+     "label": "Blinking colon",
+     "default": false,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "date",
+   "cat": "time",
+   "label": "Date",
+   "icon": "clock",
+   "module": "date",
+   "fields": [
+    {
+     "id": "date.enabled",
+     "type": "bool",
+     "label": "Show date",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "date.format",
+     "type": "select",
+     "label": "Date format",
+     "default": "short",
+     "options": [
+      {
+       "value": "short",
+       "label": "Sun, Nov 22"
+      },
+      {
+       "value": "long",
+       "label": "Sunday, November 22"
+      },
+      {
+       "value": "us",
+       "label": "11/22/2026"
+      },
+      {
+       "value": "eu",
+       "label": "22/11/2026"
+      },
+      {
+       "value": "iso",
+       "label": "2026-11-22"
+      },
+      {
+       "value": "day",
+       "label": "Sunday"
+      }
+     ],
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "tz",
+   "cat": "time",
+   "label": "Second time zone",
+   "icon": "clock",
+   "module": "tz",
+   "fields": [
+    {
+     "id": "tz.enabled",
+     "type": "bool",
+     "label": "Show a second clock",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "tz.zone",
+     "type": "select",
+     "label": "Time zone",
+     "default": "Europe/London",
+     "options": [
+      {
+       "value": "America/New_York",
+       "label": "America/New York"
+      },
+      {
+       "value": "America/Chicago",
+       "label": "America/Chicago"
+      },
+      {
+       "value": "America/Denver",
+       "label": "America/Denver"
+      },
+      {
+       "value": "America/Los_Angeles",
+       "label": "America/Los Angeles"
+      },
+      {
+       "value": "America/Anchorage",
+       "label": "America/Anchorage"
+      },
+      {
+       "value": "Pacific/Honolulu",
+       "label": "Pacific/Honolulu"
+      },
+      {
+       "value": "America/Toronto",
+       "label": "America/Toronto"
+      },
+      {
+       "value": "America/Mexico_City",
+       "label": "America/Mexico City"
+      },
+      {
+       "value": "America/Sao_Paulo",
+       "label": "America/Sao Paulo"
+      },
+      {
+       "value": "Europe/London",
+       "label": "Europe/London"
+      },
+      {
+       "value": "Europe/Paris",
+       "label": "Europe/Paris"
+      },
+      {
+       "value": "Europe/Berlin",
+       "label": "Europe/Berlin"
+      },
+      {
+       "value": "Europe/Madrid",
+       "label": "Europe/Madrid"
+      },
+      {
+       "value": "Europe/Moscow",
+       "label": "Europe/Moscow"
+      },
+      {
+       "value": "Africa/Johannesburg",
+       "label": "Africa/Johannesburg"
+      },
+      {
+       "value": "Asia/Dubai",
+       "label": "Asia/Dubai"
+      },
+      {
+       "value": "Asia/Kolkata",
+       "label": "Asia/Kolkata"
+      },
+      {
+       "value": "Asia/Singapore",
+       "label": "Asia/Singapore"
+      },
+      {
+       "value": "Asia/Shanghai",
+       "label": "Asia/Shanghai"
+      },
+      {
+       "value": "Asia/Tokyo",
+       "label": "Asia/Tokyo"
+      },
+      {
+       "value": "Asia/Seoul",
+       "label": "Asia/Seoul"
+      },
+      {
+       "value": "Australia/Sydney",
+       "label": "Australia/Sydney"
+      },
+      {
+       "value": "Pacific/Auckland",
+       "label": "Pacific/Auckland"
+      },
+      {
+       "value": "UTC",
+       "label": "UTC"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "tz.label",
+     "type": "text",
+     "label": "Label",
+     "default": "UK",
+     "help": "",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "countdown",
+   "cat": "time",
+   "label": "Countdown",
+   "icon": "clock",
+   "module": "countdown",
+   "fields": [
+    {
+     "id": "countdown.enabled",
+     "type": "bool",
+     "label": "Show countdown",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "countdown.target",
+     "type": "datetime",
+     "label": "Count down to",
+     "default": ""
+    },
+    {
+     "id": "countdown.label",
+     "type": "text",
+     "label": "Event name",
+     "default": "New Year",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "countdown.format",
+     "type": "text",
+     "label": "Format",
+     "default": "⏳ {label} in {left}",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "countdown.done",
+     "type": "text",
+     "label": "When finished",
+     "default": "🎉 {label}!",
+     "help": "",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "stopwatch",
+   "cat": "time",
+   "label": "Stopwatch",
+   "icon": "clock",
+   "module": "stopwatch",
+   "widget": "stopwatch",
+   "fields": [
+    {
+     "id": "stopwatch.enabled",
+     "type": "bool",
+     "label": "Show stopwatch",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "stopwatch.format",
+     "type": "text",
+     "label": "Format",
+     "default": "⏱ {time}",
+     "help": "",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "session",
+   "cat": "time",
+   "label": "Session timer",
+   "icon": "clock",
+   "module": "session",
+   "fields": [
+    {
+     "id": "session.enabled",
+     "type": "bool",
+     "label": "Time since I went live",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "session.format",
+     "type": "text",
+     "label": "Format",
+     "default": "⌛ live {time}",
+     "help": "",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "music",
+   "cat": "music",
+   "label": "Now playing",
+   "icon": "media",
+   "module": "nowPlaying",
+   "fields": [
+    {
+     "id": "legacy:chatbox.modules.nowPlaying.enabled",
+     "path": [
+      "chatbox",
+      "modules",
+      "nowPlaying",
+      "enabled"
+     ],
+     "type": "bool",
+     "label": "Show now playing",
+     "legacy": true
+    },
+    {
+     "id": "np.preset",
+     "type": "select",
+     "label": "Layout",
+     "default": "custom",
+     "options": [
+      {
+       "value": "custom",
+       "label": "My template"
+      },
+      {
+       "value": "default",
+       "label": "🎵 Title ᵇʸ Artist"
+      },
+      {
+       "value": "compact",
+       "label": "Title - Artist"
+      },
+      {
+       "value": "artist",
+       "label": "Artist — Title"
+      },
+      {
+       "value": "title",
+       "label": "Title only"
+      },
+      {
+       "value": "fancy",
+       "label": "「Title」 ⁻ Artist"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "legacy:chatbox.modules.nowPlaying.template",
+     "path": [
+      "chatbox",
+      "modules",
+      "nowPlaying",
+      "template"
+     ],
+     "type": "text",
+     "label": "My template ({title} {artist} {album})",
+     "legacy": true
+    },
+    {
+     "id": "legacy:chatbox.modules.nowPlaying.progress",
+     "path": [
+      "chatbox",
+      "modules",
+      "nowPlaying",
+      "progress"
+     ],
+     "type": "bool",
+     "label": "Show time 2:04/6:26",
+     "legacy": true
+    },
+    {
+     "id": "legacy:chatbox.modules.nowPlaying.showPaused",
+     "path": [
+      "chatbox",
+      "modules",
+      "nowPlaying",
+      "showPaused"
+     ],
+     "type": "bool",
+     "label": "Show when paused",
+     "legacy": true
+    },
+    {
+     "id": "np.icon",
+     "type": "select",
+     "label": "Icon",
+     "default": "🎵",
+     "options": [
+      {
+       "value": "🎵",
+       "label": "🎵"
+      },
+      {
+       "value": "🎧",
+       "label": "🎧"
+      },
+      {
+       "value": "🎶",
+       "label": "🎶"
+      },
+      {
+       "value": "💿",
+       "label": "💿"
+      },
+      {
+       "value": "🔊",
+       "label": "🔊"
+      },
+      {
+       "value": "",
+       "label": "None"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "np.bar",
+     "type": "bool",
+     "label": "Progress bar",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "np.barStyle",
+     "type": "select",
+     "label": "Bar style",
+     "default": "line",
+     "options": [
+      {
+       "value": "line",
+       "label": "▬▬▬●───"
+      },
+      {
+       "value": "heavy",
+       "label": "━━━╸───"
+      },
+      {
+       "value": "blocks",
+       "label": "▰▰▰▱▱▱"
+      },
+      {
+       "value": "dots",
+       "label": "●●●○○○"
+      },
+      {
+       "value": "shade",
+       "label": "███░░░"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "np.barLength",
+     "type": "num",
+     "label": "Bar length",
+     "default": 10,
+     "min": 4,
+     "max": 16,
+     "step": 1,
+     "unit": "chars",
+     "help": ""
+    },
+    {
+     "id": "np.album",
+     "type": "bool",
+     "label": "Add album name",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "np.maxTitle",
+     "type": "num",
+     "label": "Shorten titles longer than",
+     "default": 40,
+     "min": 10,
+     "max": 100,
+     "step": 1,
+     "unit": "chars",
+     "help": ""
+    },
+    {
+     "id": "np.source",
+     "type": "bool",
+     "label": "Add player name (on Spotify)",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "np.paused",
+     "type": "text",
+     "label": "Paused text",
+     "default": "⏸ {title}",
+     "help": "Used when \"Show when paused\" is on.",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "vrcworld",
+   "cat": "vrchat",
+   "label": "World & instance",
+   "icon": "vr",
+   "module": "vrcWorld",
+   "fields": [
+    {
+     "id": "vrc.world",
+     "type": "bool",
+     "label": "Show world name",
+     "default": false,
+     "help": "Read from your VRChat log file (no login needed)."
+    },
+    {
+     "id": "vrc.instance",
+     "type": "bool",
+     "label": "Instance type & region",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "vrc.timeInWorld",
+     "type": "bool",
+     "label": "Time in this world",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "vrc.privacy",
+     "type": "bool",
+     "label": "Hide world in private / invite instances",
+     "default": true,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "vrcplayers",
+   "cat": "vrchat",
+   "label": "Players",
+   "icon": "vr",
+   "module": "vrcPlayers",
+   "fields": [
+    {
+     "id": "vrc.players",
+     "type": "bool",
+     "label": "Player count",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "vrc.joinNotice",
+     "type": "bool",
+     "label": "Show who just joined (8 s)",
+     "default": false,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "vrcosc",
+   "cat": "vrchat",
+   "label": "Avatar OSC (mute, heart rate)",
+   "icon": "vr",
+   "module": "vrcMute",
+   "fields": [
+    {
+     "id": "vrc.mute",
+     "type": "bool",
+     "label": "Show when my mic is muted (MuteSelf)",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "vrc.muteText",
+     "type": "text",
+     "label": "Muted text",
+     "default": "🔇 muted",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "hr.enabled",
+     "type": "bool",
+     "label": "Heart rate from avatar parameter",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "hr.param",
+     "type": "text",
+     "label": "Heart-rate parameter",
+     "default": "",
+     "help": "Empty = auto (HR, Heartrate, HeartRateInt, BPM…).",
+     "placeholder": "auto"
+    },
+    {
+     "id": "hr.format",
+     "type": "text",
+     "label": "Heart-rate format",
+     "default": "❤️ {bpm} bpm",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "osc.port",
+     "type": "num",
+     "label": "Listen for VRChat OSC on port",
+     "default": 9001,
+     "min": 1024,
+     "max": 65535,
+     "step": 1,
+     "unit": "",
+     "help": "VRChat sends avatar parameters to 9001. If another OSC app owns that port, use an OSC router."
+    }
+   ]
+  },
+  {
+   "id": "twitch",
+   "cat": "stream",
+   "label": "Twitch",
+   "icon": "stream",
+   "module": "twitch",
+   "fields": [
+    {
+     "id": "twitch.enabled",
+     "type": "bool",
+     "label": "Show Twitch status",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "twitch.channel",
+     "type": "text",
+     "label": "Channel",
+     "default": "",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "twitch.viewers",
+     "type": "bool",
+     "label": "Viewer count",
+     "default": true,
+     "help": ""
+    },
+    {
+     "id": "twitch.uptime",
+     "type": "bool",
+     "label": "Stream uptime",
+     "default": true,
+     "help": ""
+    },
+    {
+     "id": "twitch.game",
+     "type": "bool",
+     "label": "Category / game",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "twitch.offline",
+     "type": "text",
+     "label": "When offline show",
+     "default": "",
+     "help": "Empty hides the line while offline.",
+     "placeholder": "hidden"
+    }
+   ]
+  },
+  {
+   "id": "tiktok",
+   "cat": "stream",
+   "label": "TikTok",
+   "icon": "stream",
+   "module": "tiktok",
+   "fields": [
+    {
+     "id": "tiktok.enabled",
+     "type": "bool",
+     "label": "Show TikTok handle",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "tiktok.handle",
+     "type": "text",
+     "label": "Handle",
+     "default": "",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "tiktok.format",
+     "type": "text",
+     "label": "Format",
+     "default": "📱 tiktok @{handle}",
+     "help": "",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "font",
+   "cat": "style",
+   "label": "Font & case",
+   "icon": "text",
+   "fields": [
+    {
+     "id": "style.font",
+     "type": "select",
+     "label": "Unicode font",
+     "default": "normal",
+     "options": [
+      {
+       "value": "normal",
+       "label": "Normal"
+      },
+      {
+       "value": "smallcaps",
+       "label": "ꜱᴍᴀʟʟ ᴄᴀᴘꜱ"
+      },
+      {
+       "value": "superscript",
+       "label": "ˢᵘᵖᵉʳˢᶜʳᶦᵖᵗ"
+      },
+      {
+       "value": "bold",
+       "label": "𝐁𝐨𝐥𝐝"
+      },
+      {
+       "value": "italic",
+       "label": "𝐼𝑡𝑎𝑙𝑖𝑐"
+      },
+      {
+       "value": "bolditalic",
+       "label": "𝑩𝒐𝒍𝒅 𝒊𝒕𝒂𝒍𝒊𝒄"
+      },
+      {
+       "value": "sansbold",
+       "label": "𝗦𝗮𝗻𝘀 𝗯𝗼𝗹𝗱"
+      },
+      {
+       "value": "script",
+       "label": "𝓢𝓬𝓻𝓲𝓹𝓽"
+      },
+      {
+       "value": "fraktur",
+       "label": "𝕱𝖗𝖆𝖐𝖙𝖚𝖗"
+      },
+      {
+       "value": "double",
+       "label": "𝔻𝕠𝕦𝕓𝕝𝕖"
+      },
+      {
+       "value": "mono",
+       "label": "𝙼𝚘𝚗𝚘"
+      },
+      {
+       "value": "wide",
+       "label": "Ｗｉｄｅ"
+      },
+      {
+       "value": "circled",
+       "label": "Ⓒⓘⓡⓒⓛⓔⓓ"
+      },
+      {
+       "value": "strike",
+       "label": "S̶t̶r̶i̶k̶e̶"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "style.fontScope",
+     "type": "select",
+     "label": "Apply font to",
+     "default": "all",
+     "options": [
+      {
+       "value": "all",
+       "label": "Everything"
+      },
+      {
+       "value": "status",
+       "label": "Status & messages only"
+      },
+      {
+       "value": "labels",
+       "label": "Everything except music titles"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "style.case",
+     "type": "select",
+     "label": "Letter case",
+     "default": "normal",
+     "options": [
+      {
+       "value": "normal",
+       "label": "As typed"
+      },
+      {
+       "value": "upper",
+       "label": "UPPERCASE"
+      },
+      {
+       "value": "lower",
+       "label": "lowercase"
+      },
+      {
+       "value": "title",
+       "label": "Title Case"
+      }
+     ],
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "layout",
+   "cat": "style",
+   "label": "Layout & decoration",
+   "icon": "text",
+   "fields": [
+    {
+     "id": "legacy:chatbox.separator",
+     "path": [
+      "chatbox",
+      "separator"
+     ],
+     "type": "select",
+     "label": "Separator",
+     "legacy": true,
+     "options": [
+      {
+       "value": "newline",
+       "label": "New line"
+      },
+      {
+       "value": " | ",
+       "label": " | "
+      },
+      {
+       "value": " • ",
+       "label": " • "
+      },
+      {
+       "value": " ┆ ",
+       "label": " ┆ "
+      },
+      {
+       "value": " ⋆ ",
+       "label": " ⋆ "
+      },
+      {
+       "value": " ~ ",
+       "label": " ~ "
+      },
+      {
+       "value": "custom",
+       "label": "Custom…"
+      }
+     ]
+    },
+    {
+     "id": "style.customSep",
+     "type": "text",
+     "label": "Custom separator",
+     "default": " ✧ ",
+     "help": "Used when Separator is \"Custom…\".",
+     "placeholder": ""
+    },
+    {
+     "id": "style.layout",
+     "type": "select",
+     "label": "Line layout",
+     "default": "lines",
+     "options": [
+      {
+       "value": "lines",
+       "label": "Use separator"
+      },
+      {
+       "value": "pairs",
+       "label": "Two modules per line"
+      },
+      {
+       "value": "single",
+       "label": "Everything on one line"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "style.border",
+     "type": "select",
+     "label": "Border",
+     "default": "none",
+     "options": [
+      {
+       "value": "none",
+       "label": "None"
+      },
+      {
+       "value": "lines",
+       "label": "━━━ top & bottom"
+      },
+      {
+       "value": "stars",
+       "label": "✦ · ✧ top & bottom"
+      },
+      {
+       "value": "cute",
+       "label": "⋆｡˚☁︎˚｡⋆ top & bottom"
+      },
+      {
+       "value": "arrows",
+       "label": "➤ before each line"
+      },
+      {
+       "value": "bullets",
+       "label": "• before each line"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "style.wrap",
+     "type": "text",
+     "label": "Wrap the whole box with",
+     "default": "",
+     "help": "e.g. ✧ adds it at the start and end.",
+     "placeholder": ""
+    },
+    {
+     "id": "style.emojiPack",
+     "type": "select",
+     "label": "Emoji pack",
+     "default": "default",
+     "options": [
+      {
+       "value": "default",
+       "label": "Default 💻🌍❤️"
+      },
+      {
+       "value": "cute",
+       "label": "Cute 🌸🫧💗"
+      },
+      {
+       "value": "gamer",
+       "label": "Gamer 🎮⚡🔥"
+      },
+      {
+       "value": "minimal",
+       "label": "Minimal ▸"
+      },
+      {
+       "value": "none",
+       "label": "No icons"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "style.randomEmoji",
+     "type": "bool",
+     "label": "Random sparkle emoji at the end",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "style.prefix",
+     "type": "widget",
+     "widget": "affix",
+     "label": "Per-module prefix",
+     "default": {},
+     "help": ""
+    },
+    {
+     "id": "style.suffix",
+     "type": "widget",
+     "widget": "affix",
+     "label": "Per-module suffix",
+     "default": {},
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "quotes",
+   "cat": "style",
+   "label": "Quotes & facts",
+   "icon": "bubble",
+   "module": "quote",
+   "fields": [
+    {
+     "id": "quotes.enabled",
+     "type": "bool",
+     "label": "Random quotes",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "quotes.pack",
+     "type": "select",
+     "label": "Quote pack",
+     "default": "all",
+     "options": [
+      {
+       "value": "all",
+       "label": "All"
+      },
+      {
+       "value": "motivation",
+       "label": "Motivational"
+      },
+      {
+       "value": "funny",
+       "label": "Funny"
+      },
+      {
+       "value": "chill",
+       "label": "Chill / vibes"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "quotes.rotateSec",
+     "type": "num",
+     "label": "New quote every",
+     "default": 60,
+     "min": 10,
+     "max": 600,
+     "step": 5,
+     "unit": "s",
+     "help": ""
+    },
+    {
+     "id": "facts.enabled",
+     "type": "bool",
+     "label": "Random fun facts",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "facts.rotateSec",
+     "type": "num",
+     "label": "New fact every",
+     "default": 90,
+     "min": 10,
+     "max": 600,
+     "step": 5,
+     "unit": "s",
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "marquee",
+   "cat": "style",
+   "label": "Marquee & typewriter",
+   "icon": "text",
+   "module": "marquee",
+   "fields": [
+    {
+     "id": "marquee.enabled",
+     "type": "bool",
+     "label": "Scrolling marquee line",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "marquee.text",
+     "type": "text",
+     "label": "Marquee text",
+     "default": "✦ thanks for hanging out ✦",
+     "help": "",
+     "placeholder": ""
+    },
+    {
+     "id": "marquee.width",
+     "type": "num",
+     "label": "Visible width",
+     "default": 24,
+     "min": 8,
+     "max": 60,
+     "step": 1,
+     "unit": "chars",
+     "help": ""
+    },
+    {
+     "id": "marquee.step",
+     "type": "num",
+     "label": "Scroll per update",
+     "default": 3,
+     "min": 1,
+     "max": 12,
+     "step": 1,
+     "unit": "chars",
+     "help": ""
+    },
+    {
+     "id": "typewriter.enabled",
+     "type": "bool",
+     "label": "Typewriter effect for messages",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "typewriter.step",
+     "type": "num",
+     "label": "Letters per update",
+     "default": 8,
+     "min": 2,
+     "max": 40,
+     "step": 1,
+     "unit": "",
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "rotation",
+   "cat": "behavior",
+   "label": "Pages & rotation",
+   "icon": "status",
+   "fields": [
+    {
+     "id": "pages.enabled",
+     "type": "bool",
+     "label": "Rotate modules in pages",
+     "default": false,
+     "help": "Modules set to page 1, 2 or 3 take turns; \"Always\" stays on every page."
+    },
+    {
+     "id": "pages.seconds",
+     "type": "num",
+     "label": "Switch page every",
+     "default": 8,
+     "min": 3,
+     "max": 120,
+     "step": 1,
+     "unit": "s",
+     "help": ""
+    },
+    {
+     "id": "pages.map",
+     "type": "widget",
+     "widget": "pages",
+     "label": "Page per module",
+     "default": {},
+     "help": ""
+    },
+    {
+     "id": "order",
+     "type": "widget",
+     "widget": "order",
+     "label": "Priority order",
+     "default": null,
+     "help": "Top shows first. When text is too long, \"Drop lowest priority\" removes from the bottom."
+    },
+    {
+     "id": "overflow",
+     "type": "select",
+     "label": "When longer than 144",
+     "default": "truncate",
+     "options": [
+      {
+       "value": "truncate",
+       "label": "Cut with …"
+      },
+      {
+       "value": "drop",
+       "label": "Drop lowest-priority modules"
+      },
+      {
+       "value": "split",
+       "label": "Split into pages"
+      }
+     ],
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "schedule",
+   "cat": "behavior",
+   "label": "Status schedule",
+   "icon": "clock",
+   "fields": [
+    {
+     "id": "sched.enabled",
+     "type": "bool",
+     "label": "Scheduled statuses",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "sched.items",
+     "type": "list",
+     "label": "Schedule",
+     "default": "Mon-Fri 09:00-15:00 | 📚 at school\n22:30-23:59 | 😴 almost bedtime",
+     "help": "One per line: [days] HH:MM-HH:MM | text. Days optional (Mon-Fri, Sat,Sun). Overrides the status rotator while active.",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "presets",
+   "cat": "behavior",
+   "label": "Quick messages",
+   "icon": "send",
+   "widget": "presets",
+   "fields": [
+    {
+     "id": "presets.items",
+     "type": "list",
+     "label": "Presets",
+     "default": "brb 🚶\ngg wp 🏆\nlagging, one sec 🐢\nmuted, typing instead ⌨️",
+     "help": "One per line. Click to send from the Chatbox page.",
+     "placeholder": ""
+    },
+    {
+     "id": "presets.hotkeys",
+     "type": "bool",
+     "label": "Hotkeys Ctrl+Shift+1…9 send presets 1–9",
+     "default": false,
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "filter",
+   "cat": "behavior",
+   "label": "Profanity filter",
+   "icon": "status",
+   "fields": [
+    {
+     "id": "filter.enabled",
+     "type": "bool",
+     "label": "Filter swear words",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "filter.mode",
+     "type": "select",
+     "label": "Mode",
+     "default": "mask",
+     "options": [
+      {
+       "value": "mask",
+       "label": "Mask (f***)"
+      },
+      {
+       "value": "remove",
+       "label": "Remove the word"
+      },
+      {
+       "value": "block",
+       "label": "Block typed messages that contain one"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "filter.words",
+     "type": "text",
+     "label": "Extra words",
+     "default": "",
+     "help": "Comma separated.",
+     "placeholder": ""
+    }
+   ]
+  },
+  {
+   "id": "sending",
+   "cat": "behavior",
+   "label": "Sending",
+   "icon": "bubble",
+   "fields": [
+    {
+     "id": "legacy:chatbox.sendIntervalSec",
+     "path": [
+      "chatbox",
+      "sendIntervalSec"
+     ],
+     "type": "num",
+     "label": "Seconds between updates (min 1.5)",
+     "legacy": true,
+     "min": 1.5,
+     "max": 30,
+     "step": 0.5
+    },
+    {
+     "id": "typing.mode",
+     "type": "select",
+     "label": "Typing indicator",
+     "default": "typing",
+     "options": [
+      {
+       "value": "typing",
+       "label": "While I type"
+      },
+      {
+       "value": "pulse",
+       "label": "Also flash before each new update"
+      },
+      {
+       "value": "off",
+       "label": "Never"
+      }
+     ],
+     "help": ""
+    },
+    {
+     "id": "notify.messagesOnly",
+     "type": "bool",
+     "label": "Notification sound only for typed messages",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "keepAlive",
+     "type": "num",
+     "label": "Re-send unchanged text every",
+     "default": 20,
+     "min": 0,
+     "max": 120,
+     "step": 5,
+     "unit": "s",
+     "help": "0 = never. VRChat hides the bubble after a while without updates."
+    },
+    {
+     "id": "clear.afk",
+     "type": "bool",
+     "label": "Clear the chatbox while AFK",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "clear.vrcClosed",
+     "type": "bool",
+     "label": "Pause sending while VRChat isn't running",
+     "default": false,
+     "help": ""
+    },
+    {
+     "id": "history.size",
+     "type": "num",
+     "label": "Remember last",
+     "default": 25,
+     "min": 5,
+     "max": 100,
+     "step": 5,
+     "unit": "messages",
+     "help": ""
+    }
+   ]
+  },
+  {
+   "id": "profiles",
+   "cat": "behavior",
+   "label": "Profiles",
+   "icon": "status",
+   "widget": "profiles",
+   "fields": [
+    {
+     "id": "profiles.save",
+     "type": "widget",
+     "widget": "profiles",
+     "label": "Save & switch profiles",
+     "default": null,
+     "help": ""
+    },
+    {
+     "id": "profiles.export",
+     "type": "widget",
+     "widget": "export",
+     "label": "Export profile to a file",
+     "default": null,
+     "help": ""
+    },
+    {
+     "id": "profiles.import",
+     "type": "widget",
+     "widget": "import",
+     "label": "Import profile from a file",
+     "default": null,
+     "help": ""
+    }
+   ]
+  }
+ ],
+ "count": 120
+}

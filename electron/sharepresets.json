@@ -1,0 +1,148 @@
+{
+ "presets": [
+  {
+   "id": "discord10",
+   "label": "Discord",
+   "sub": "10 MB (free)",
+   "group": "Discord",
+   "sizeBytes": 10000000,
+   "shape": "native",
+   "maxH": 1080,
+   "fps": 60,
+   "url": "discord://-/channels/@me"
+  },
+  {
+   "id": "discord50",
+   "label": "Discord",
+   "sub": "50 MB (Nitro Basic)",
+   "group": "Discord",
+   "sizeBytes": 50000000,
+   "shape": "native",
+   "maxH": 1080,
+   "fps": 60,
+   "url": "discord://-/channels/@me"
+  },
+  {
+   "id": "discord500",
+   "label": "Discord",
+   "sub": "500 MB (Nitro)",
+   "group": "Discord",
+   "sizeBytes": 500000000,
+   "shape": "native",
+   "maxH": 1080,
+   "fps": 60,
+   "url": "discord://-/channels/@me",
+   "vKbpsCap": 16000
+  },
+  {
+   "id": "tiktok",
+   "label": "TikTok",
+   "sub": "9:16 · 1080×1920",
+   "group": "Vertical",
+   "shape": "v-blur",
+   "vertical": true,
+   "maxH": 1920,
+   "fps": 60,
+   "vKbps": 12000,
+   "maxSec": 600,
+   "url": "https://www.tiktok.com/tiktokstudio/upload"
+  },
+  {
+   "id": "shorts",
+   "label": "YouTube Shorts",
+   "sub": "9:16 · ≤3 min",
+   "group": "Vertical",
+   "shape": "v-blur",
+   "vertical": true,
+   "maxH": 1920,
+   "fps": 60,
+   "vKbps": 12000,
+   "maxSec": 180,
+   "url": "https://www.youtube.com/upload"
+  },
+  {
+   "id": "reels",
+   "label": "Instagram Reels",
+   "sub": "9:16 · ≤3 min",
+   "group": "Vertical",
+   "shape": "v-blur",
+   "vertical": true,
+   "maxH": 1920,
+   "fps": 30,
+   "vKbps": 8000,
+   "maxSec": 180,
+   "url": "https://www.instagram.com/"
+  },
+  {
+   "id": "youtube",
+   "label": "YouTube",
+   "sub": "16:9 · 1080p60",
+   "group": "Widescreen",
+   "shape": "w-pad",
+   "maxH": 1080,
+   "fps": 60,
+   "vKbps": 12000,
+   "url": "https://www.youtube.com/upload"
+  },
+  {
+   "id": "twitch",
+   "label": "Twitch",
+   "sub": "16:9 · 1080p60",
+   "group": "Widescreen",
+   "shape": "w-pad",
+   "maxH": 1080,
+   "fps": 60,
+   "vKbps": 8000,
+   "url": "https://dashboard.twitch.tv/"
+  },
+  {
+   "id": "x",
+   "label": "X",
+   "sub": "512 MB · ≤2:20",
+   "group": "Widescreen",
+   "sizeBytes": 512000000,
+   "shape": "w-pad",
+   "maxH": 1080,
+   "fps": 60,
+   "vKbps": 10000,
+   "maxSec": 140,
+   "url": "https://x.com/compose/post"
+  },
+  {
+   "id": "custom",
+   "label": "Custom",
+   "sub": "your size, shape & codec",
+   "group": "Custom",
+   "shape": "native",
+   "maxH": 1080,
+   "fps": 60,
+   "vKbps": 10000
+  }
+ ],
+ "shapes": [
+  {
+   "id": "native",
+   "label": "Original shape"
+  },
+  {
+   "id": "w-pad",
+   "label": "16:9 — letterbox (keep whole frame)"
+  },
+  {
+   "id": "w-crop",
+   "label": "16:9 — crop sides"
+  },
+  {
+   "id": "v-blur",
+   "label": "9:16 — blurred background"
+  },
+  {
+   "id": "v-crop",
+   "label": "9:16 — crop center"
+  },
+  {
+   "id": "v-fit",
+   "label": "9:16 — black bars"
+  }
+ ]
+}
