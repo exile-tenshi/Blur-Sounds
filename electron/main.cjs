@@ -70,15 +70,66 @@ async function applySession(s, force) {
   if (force || e.muted !== s.muted) await helper.call('setSessionMute', { pid: s.pid, mute: e.muted });
 }
 
+// ---- v2.2 broadcast guard ----
+// Devices that carry the broadcast (stream mix cable, virtual-mic cable). No app may ever play straight into
+// one of these: it would be heard on stream / in VRChat / Discord whatever its broadcast toggle says.
+function guardedIds() {
+  const m = S().mixer; const mc = S().micChain; const g = new Set();
+  if (m.guard === false) return g;
+  if (m.streamOut) g.add(m.streamOut);
+  if (mc.enabled && mc.outId) g.add(mc.outId);
+  return g;
+}
+function isGuarded(id) { return !!id && guardedIds().has(id); }
+// A real, non-broadcast output to fall back to: the last safe Windows default, then "You hear", then any non-cable output.
+function safeOut() {
+  const m = S().mixer; const outs = (snapshot && snapshot.outputs) || [];
+  const ok = (id) => id && !isGuarded(id) && outs.some((o) => o.id === id);
+  const notCable = (o) => !CABLE_RX.test(o.name) && !isGuarded(o.id);
+  if (snapshot && ok(snapshot.defaultOutput)) return snapshot.defaultOutput;
+  if (ok(m.lastSafeDefault)) return m.lastSafeDefault;
+  if (ok(m.personalOut)) return m.personalOut;
+  for (const c of m.channelList) { const o = m.channels[c.id].output; if (ok(o)) return o; }
+  const f = outs.find(notCable); return f ? f.id : '';
+}
+const guardLog = [];
+function guardNote(msg) {
+  guardLog.unshift({ at: Date.now(), msg }); guardLog.length = Math.min(guardLog.length, 20);
+  send('guard:event', guardLog[0]);
+}
+let lastDefaultSeen = null, lastDefaultFix = 0;
+async function guardDefault() {
+  if (!snapshot) return;
+  const m = S().mixer; const def = snapshot.defaultOutput;
+  if (def !== lastDefaultSeen) { lastDefaultSeen = def; seenPids.clear(); } // re-evaluate every app after a device change
+  if (def && !isGuarded(def) && !CABLE_RX.test((snapshot.outputs.find((o) => o.id === def) || {}).name || '') && m.lastSafeDefault !== def) { m.lastSafeDefault = def; store.saveSoon(); }
+  if (!isGuarded(def) || Date.now() - lastDefaultFix < 4000) return;
+  const to = safeOut(); if (!to) return;
+  lastDefaultFix = Date.now();
+  try {
+    await helper.call('setDefaultDevice', { deviceId: to, communications: true });
+    const nm = (id) => (snapshot.outputs.find((o) => o.id === id) || {}).name || id;
+    guardNote(`Windows switched its default speakers to “${nm(def)}” (your stream cable). Moved it back to “${nm(to)}” so desktop audio can't leak into the broadcast.`);
+  } catch (e) { guardNote('Could not move the Windows default off the stream cable: ' + e.message); }
+}
+
 async function applyOutput(s) {
   if (s.system || !snapshot || !snapshot.routingSupported) return;
   const ch = S().mixer.channels[channelFor(s)];
-  const want = ch ? ((ch.mode === 'cable' && ch.cableId) ? ch.cableId : (ch.output || '')) : '';
+  let want = ch ? ((ch.mode === 'cable' && ch.cableId) ? ch.cableId : (ch.output || '')) : '';
+  if (isGuarded(want)) want = safeOut(); // never pin an app into the broadcast cable
+  // App follows the Windows default but the default is the stream cable: pin it somewhere safe.
+  if (!want && isGuarded(snapshot.defaultOutput)) want = safeOut();
   const key = want;
   if (seenPids.get(s.pid) === key) return;
   const prev = seenPids.get(s.pid);
   seenPids.set(s.pid, key);
-  if (!want && !prev) return; // nothing to route; leave Windows' own per-app choice alone
+  if (!want && !prev) {
+    // Leave Windows' own per-app choice alone, unless it points into the broadcast (stale route from an
+    // older setup / Windows remembering it per .exe) - then clear it.
+    try { const r = await helper.call('getAppOutput', { pid: s.pid }); const cur = r && r.ok !== false ? String(r.result || '') : ''; if (cur && [...guardedIds()].some((g) => cur.includes(g))) { await helper.call('setAppOutput', { pid: s.pid, deviceId: '' }); guardNote(`${s.process} was pinned to the stream cable by Windows; cleared it.`); } } catch {}
+    return;
+  }
   await helper.call('setAppOutput', { pid: s.pid, deviceId: want });
 }
 
@@ -91,6 +142,7 @@ function visibleSessions() {
 async function onSnapshot(snap) {
   snapshot = snap;
   const m = S().mixer; let dirty = false;
+  await guardDefault().catch(() => {});
   for (const s of visibleSessions()) {
     const key = (s.process || '').toLowerCase();
     if (!m.apps[key]) {
@@ -127,6 +179,7 @@ async function pushMixer() {
     outputs: snapshot.outputs, inputs: snapshot.inputs,
     defaultOutput: snapshot.defaultOutput, defaultInput: snapshot.defaultInput, defaultCommsInput: snapshot.defaultCommsInput,
     routingSupported: snapshot.routingSupported,
+    guarded: [...guardedIds()], guardOn: S().mixer.guard !== false, guardLog: guardLog.slice(0, 5), defaultIsGuarded: isGuarded(snapshot.defaultOutput),
     sessions: [...byProc.values()],
     settings: S().mixer, micChain: S().micChain,
   });
@@ -180,13 +233,26 @@ function engineConfig() {
       };
     }),
     mic: {
-      deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: mc.outId, gate: mc.gate, ns: mc.ns, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
+      deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: mc.outId, gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
+      hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && mc.aec.refId ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
       gainDb: mc.gainDb, muted: false, inStream: mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
     },
     voice: { enabled: !!(c.enabled && c.voice.enabled), phrase: c.voice.phrase || 'clip it', modelPath: voiceModelPath() },
     clip: { enabled: !!c.enabled, bufferSeconds: Math.max(30, (c.seconds || 30) + 5), source: c.audioSource || 'auto', systemDevice: c.systemDevice || null },
     record: { active: !!(media && media.rec) },
   };
+}
+function dfModelPath() {
+  const cands = [path.join(process.resourcesPath || '', 'models', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz'), path.join(__dirname, '..', 'models', 'deepfilter', 'DeepFilterNet3_onnx.tar.gz')];
+  return cands.find((p) => fs.existsSync(p)) || cands[0];
+}
+// Echo reference = what you actually hear: the game channel's device (VR headset), else "You hear", else the Windows default.
+function aecRefDefault() {
+  const m = S().mixer; const outs = (snapshot && snapshot.outputs) || [];
+  const ok = (id) => id && !isGuarded(id) && outs.some((o) => o.id === id);
+  for (const id of ['game', 'chat', 'media']) { const o = m.channels[id] && m.channels[id].output; if (ok(o)) return o; }
+  if (ok(m.personalOut)) return m.personalOut;
+  return safeOut() || null;
 }
 function voiceModelPath() {
   const cands = [path.join(process.resourcesPath || '', 'models', 'vosk-model-small-en-us-0.15'), path.join(__dirname, '..', 'models', 'vosk-model-small-en-us-0.15'), path.join(app.getPath('userData'), 'models', 'vosk-model-small-en-us-0.15')];
@@ -196,6 +262,7 @@ function voiceModelPath() {
 ipcMain.handle('mixer:channel', async (_e, ch, patch) => {
   const c = S().mixer.channels[ch]; if (!c) return;
   if (patch.mode === 'cable' && patch.cableId === undefined && !c.cableId) return { ok: false, error: 'pick a cable first' };
+  if (isGuarded(patch.cableId) || isGuarded(patch.output)) return { ok: false, error: 'That device carries your stream / virtual mic. Apps on it would always be broadcast, so Blur Sounds Pro blocks it.' };
   const routeChanged = ['output', 'mode', 'cableId'].some((k) => k in patch && patch[k] !== c[k]);
   Object.assign(c, patch); store.saveSoon();
   if (routeChanged) await rerouteChannel(ch); else await applyChannel(ch);

@@ -61,6 +61,8 @@ export default function Mixer() {
 
   return (
     <div className="page mixer-page">
+      {st.defaultIsGuarded && <div className="warn-box guard-banner"><b>Windows' default speakers are your stream cable.</b> Anything not routed by Blur Sounds Pro would be broadcast. Blur Sounds Pro is moving it back now.</div>}
+      {!st.defaultIsGuarded && st.guardLog?.[0] && Date.now() - st.guardLog[0].at < 10 * 60 * 1000 && <div className="hint guard-banner ok"><b>Broadcast guard:</b> {st.guardLog[0].msg}</div>}
       <section className="topbar panel three">
         <div className="topbar-block master">
           <div className="eyebrow">Master output</div>
@@ -200,7 +202,8 @@ function ChannelDrawer({ st, id, onClose }) {
   const [cfg, setCfg] = useState(st.settings.channels[id]);
   const [err, setErr] = useState('');
   const patch = async (p) => { const n = { ...cfg, ...p }; setCfg(n); const r = await window.bsp.invoke('mixer:channel', id, p); setErr(r && !r.ok ? r.error : ''); };
-  const cables = st.cables || [];
+  const guarded = new Set(st.guarded || []);
+  const cables = (st.cables || []).filter((c) => !guarded.has(c.id) || c.id === cfg.cableId);
   return (
     <Drawer title={`${meta.label} channel`} sub="Routing, equalizer and what this channel feeds" onClose={onClose} wide>
       <div className="seg">
@@ -216,9 +219,10 @@ function ChannelDrawer({ st, id, onClose }) {
       ) : (
         <div className="field-row">
           <span className="muted-text">Output device</span>
-          <Select className="grow" value={cfg.output} onChange={(v) => patch({ output: v })} options={[{ value: null, label: 'App default (don’t change)' }, ...st.outputs.map((o) => ({ value: o.id, label: o.name }))]} />
+          <Select className="grow" value={cfg.output} onChange={(v) => patch({ output: v })} options={[{ value: null, label: 'App default (don’t change)' }, ...st.outputs.filter((o) => !guarded.has(o.id)).map((o) => ({ value: o.id, label: o.name }))]} />
         </div>
       )}
+      {guarded.size > 0 && <p className="hint">Your stream cable{st.micChain?.enabled && st.micChain?.outId ? ' and virtual-mic cable are' : ' is'} hidden here: apps playing into {st.micChain?.enabled && st.micChain?.outId ? 'them' : 'it'} would always be broadcast. Use the Stream toggle on each channel instead.</p>}
       {cfg.mode === 'cable' && cables.find((c) => c.id === cfg.cableId)?.ownedBySonar && <p className="warn-box">SteelSeries Sonar is running and already listens to this device. Using it here too will double the audio — pick a VB-Audio cable or close Sonar first.</p>}
       {err && <p className="warn-box">{err}</p>}
       <div className="row-gap wrap">
@@ -238,6 +242,7 @@ function MicDrawer({ st, levels, mic, onClose }) {
   const patch = (p) => { const n = { ...mc, ...p }; setMc(n); window.bsp.invoke('mic:chain', p); };
   const sub = (k, p) => patch({ [k]: { ...mc[k], ...p } });
   const isSonarMic = /sonar/i.test(mic?.name || '');
+  const ns = levels.ns || {};
   const outs = st.outputs.filter((o) => /cable|vb-audio|voicemeeter/i.test(o.name));
   return (
     <Drawer title="Mic chain" sub={mic ? `Input: ${mic.name}` : ''} onClose={onClose} wide>
@@ -247,20 +252,54 @@ function MicDrawer({ st, levels, mic, onClose }) {
       <div className="field-row"><span className="muted-text">Send processed mic to</span>
         <Select className="grow" value={mc.outId} onChange={(v) => patch({ outId: v })} options={[{ value: null, label: 'Nowhere (meters, clips and stream only)' }, ...outs.map((o) => ({ value: o.id, label: o.name }))]} /></div>
       {mc.outId && <p className="hint">In Discord / VRChat choose “{(st.cables || []).find((c) => c.id === mc.outId)?.recordName || 'the matching cable output'}” as your microphone.</p>}
-      <div className="fx-grid">
-        <div className={`fx${mc.gate.enabled ? ' on' : ''}`}>
-          <div className="fx-head"><Toggle small on={mc.gate.enabled} onChange={(v) => sub('gate', { enabled: v })} /><b>Noise gate</b><span className={`led${levels.gate ? ' on' : ''}`} /></div>
-          <label>Threshold <span>{mc.gate.thresholdDb} dB</span><input type="range" min={-80} max={-10} value={mc.gate.thresholdDb} onChange={(e) => sub('gate', { thresholdDb: Number(e.target.value) })} /></label>
-          <label>Release <span>{mc.gate.releaseMs} ms</span><input type="range" min={20} max={600} value={mc.gate.releaseMs} onChange={(e) => sub('gate', { releaseMs: Number(e.target.value) })} /></label>
+      <div className="ab-bar">
+        <div className="seg ab">
+          <button className={!mc.bypass ? 'on' : ''} onClick={() => patch({ bypass: false })}><b>After</b><span>Processed voice</span></button>
+          <button className={mc.bypass ? 'on' : ''} onClick={() => patch({ bypass: true })}><b>Before</b><span>Raw mic, no processing</span></button>
         </div>
-        <div className={`fx${mc.ns.enabled ? ' on' : ''}`}>
-          <div className="fx-head"><Toggle small on={mc.ns.enabled} onChange={(v) => sub('ns', { enabled: v })} /><b>Noise suppression</b><span className="fx-tag">RNNoise</span></div>
-          <label>Strength <span>{Math.round(mc.ns.amount * 100)}%</span><input type="range" min={0} max={100} value={Math.round(mc.ns.amount * 100)} onChange={(e) => sub('ns', { amount: Number(e.target.value) / 100 })} /></label>
-          <p className="hint">Removes fans, keyboards and hum on the fly.</p>
+        <div className="ab-side">
+          <Toggle small on={!!mc.monitor?.enabled} onChange={(v) => sub('monitor', { enabled: v })} label="Hear myself" />
+          {mc.monitor?.enabled && <input type="range" min={0} max={100} value={Math.round((mc.monitor.volume ?? 0.8) * 100)} onChange={(e) => sub('monitor', { volume: Number(e.target.value) / 100 })} />}
+        </div>
+      </div>
+      {mc.bypass && <p className="warn-box">Compare mode: everyone (stream, VRChat, Discord) is hearing your raw mic right now. Flip back to After when you're done.</p>}
+      {mc.monitor?.enabled && <p className="hint">“Hear myself” plays your mic into {(st.outputs.find((o) => o.id === st.settings.personalOut) || {}).name || 'your headphones'}. Use headphones, not speakers, or it will feed back.</p>}
+      <div className="fx-grid">
+        <div className={`fx wide2${mc.ns.enabled ? ' on' : ''}`}>
+          <div className="fx-head"><Toggle small on={mc.ns.enabled} onChange={(v) => sub('ns', { enabled: v })} /><b>AI noise suppression</b><span className="fx-tag">{ns.engine && ns.engine !== 'off' ? ns.engine : (mc.ns.engine === 'rnnoise' ? 'RNNoise' : 'DeepFilterNet3')}</span></div>
+          <div className="seg mini">
+            <button className={mc.ns.engine !== 'rnnoise' ? 'on' : ''} onClick={() => sub('ns', { engine: 'deep' })}><b>DeepFilterNet3</b><span>Strongest · CPU, any GPU</span></button>
+            <button className={mc.ns.engine === 'rnnoise' ? 'on' : ''} onClick={() => sub('ns', { engine: 'rnnoise' })}><b>RNNoise</b><span>Lightest</span></button>
+          </div>
+          <label>Strength <span>{Math.round(mc.ns.amount * 100)}%{mc.ns.engine !== 'rnnoise' ? ` · up to ${Math.round(6 + mc.ns.amount * 94)} dB` : ''}</span><input type="range" min={0} max={100} value={Math.round(mc.ns.amount * 100)} onChange={(e) => sub('ns', { amount: Number(e.target.value) / 100 })} /></label>
+          <div className="ns-stats"><span>Removing <b>{ns.cutDb ?? 0} dB</b></span><span>Voice SNR <b>{ns.lsnr ?? '—'} dB</b></span><span>CPU <b>{ns.cpuMs ?? 0} ms</b>/10 ms</span></div>
+          {ns.error && <p className="warn-box">{ns.error}</p>}
+        </div>
+        <div className={`fx${mc.aec?.enabled ? ' on' : ''}`}>
+          <div className="fx-head"><Toggle small on={!!mc.aec?.enabled} onChange={(v) => sub('aec', { enabled: v })} /><b>Echo cancellation</b><span className={`led${ns.refActive ? ' on' : ''}`} /></div>
+          <label className="sel">Echo source<Select value={mc.aec?.refId || null} onChange={(v) => sub('aec', { refId: v })} options={[{ value: null, label: 'Auto (your game/headset output)' }, ...st.outputs.filter((o) => !(st.guarded || []).includes(o.id)).map((o) => ({ value: o.id, label: o.name }))]} /></label>
+          <div className="seg mini three">
+            {[['mild', 'Mild', 'Most natural'], ['strong', 'Strong', 'Recommended'], ['max', 'Max', 'Kills all echo']].map(([k, l, d]) => (
+              <button key={k} className={(mc.aec?.strength || 'strong') === k ? 'on' : ''} onClick={() => sub('aec', { strength: k })}><b>{l}</b><span>{d}</span></button>))}
+          </div>
+          <div className="ns-stats"><span>Removing <b>{ns.aecCutDb ?? 0} dB</b></span><span>Delay <b>{ns.aecDelayMs ? `${ns.aecDelayMs} ms` : 'measuring…'}</b></span><span className={ns.nearTalk ? 'on' : ''}>{ns.nearTalk ? 'You + echo: protecting voice' : ns.refActive ? 'Echo only' : 'Quiet'}</span></div>
+          <p className="hint">Subtracts what your headset plays from your mic, finds the delay automatically and backs off while you talk over it so your voice isn't chopped.</p>
+        </div>
+        <div className={`fx${mc.hpf?.enabled ? ' on' : ''}`}>
+          <div className="fx-head"><Toggle small on={!!mc.hpf?.enabled} onChange={(v) => sub('hpf', { enabled: v })} /><b>High-pass</b><span className="fx-tag">24 dB/oct</span></div>
+          <label>Cutoff <span>{mc.hpf?.freq ?? 90} Hz</span><input type="range" min={40} max={250} step={5} value={mc.hpf?.freq ?? 90} onChange={(e) => sub('hpf', { freq: Number(e.target.value) })} /></label>
+          <p className="hint">Removes rumble, desk bumps and AC hum below your voice.</p>
+        </div>
+        <div className={`fx${mc.gate.enabled ? ' on' : ''}`}>
+          <div className="fx-head"><Toggle small on={mc.gate.enabled} onChange={(v) => sub('gate', { enabled: v })} /><b>Voice gate</b><span className={`led${levels.gate ? ' on' : ''}`} /></div>
+          <label>Threshold <span>{mc.gate.thresholdDb} dB</span><input type="range" min={-80} max={-10} value={mc.gate.thresholdDb} onChange={(e) => sub('gate', { thresholdDb: Number(e.target.value) })} /></label>
+          <label>Hold <span>{mc.gate.holdMs ?? 150} ms</span><input type="range" min={0} max={800} step={10} value={mc.gate.holdMs ?? 150} onChange={(e) => sub('gate', { holdMs: Number(e.target.value) })} /></label>
+          <label>Release <span>{mc.gate.releaseMs} ms</span><input type="range" min={20} max={600} value={mc.gate.releaseMs} onChange={(e) => sub('gate', { releaseMs: Number(e.target.value) })} /></label>
+          <label>Floor <span>{mc.gate.rangeDb ?? -60} dB</span><input type="range" min={-80} max={-6} value={mc.gate.rangeDb ?? -60} onChange={(e) => sub('gate', { rangeDb: Number(e.target.value) })} /></label>
         </div>
         <div className={`fx${mc.clearcast ? ' on' : ''}`}>
           <div className="fx-head"><Toggle small on={mc.clearcast} onChange={(v) => patch({ clearcast: v })} /><b>ClearCast-style AI</b><span className="fx-tag">VAD {Math.round((levels.vad || 0) * 100)}%</span></div>
-          <p className="hint">Uses RNNoise's voice detection to duck everything that isn't speech (keyboard clacks, breathing between words).</p>
+          <p className="hint">Uses the AI's voice detection to duck everything that isn't speech (keyboard clacks, breathing between words).</p>
         </div>
         <div className={`fx${mc.comp.enabled ? ' on' : ''}`}>
           <div className="fx-head"><Toggle small on={mc.comp.enabled} onChange={(v) => sub('comp', { enabled: v })} /><b>Compressor</b><span className="fx-tag">GR {levels.gr || 0} dB</span></div>

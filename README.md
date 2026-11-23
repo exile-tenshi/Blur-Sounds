@@ -13,7 +13,9 @@ A SteelSeries Sonar–style audio app for Windows, built as the next version of 
   - Windows won't create new audio endpoints without a signed kernel driver, so Blur Sounds Pro uses cable devices that are already installed.
 - **Streamer mode.** Two mixes: a personal mix for your headphones and a stream mix sent to a cable for OBS, Discord or VRChat. Each channel has its own stream volume and mute.
 - **EQ.** A 7-band parametric EQ on every channel, with presets.
-- **Mic chain.** Noise gate, RNNoise noise suppression, compressor, EQ and a ClearCast-style voice preset. The processed mic can be sent to a cable.
+- **Mic chain.** High-pass filter, echo cancellation, AI noise suppression (DeepFilterNet3 or RNNoise), voice gate, compressor, EQ and a ClearCast-style voice preset, with a Before/After A/B switch. The processed mic can be sent to a cable.
+- **Echo cancellation (v2.2).** Removes the sound of your speakers/headset from your mic: automatic delay tracking (GCC-PHAT), a SpeexDSP adaptive filter with residual echo suppression, double-talk detection so your voice isn't cut while others talk, and Mild / Strong / Max strength. Adds about 10 ms (about 40 ms total with DeepFilterNet3).
+- **Broadcast guard (v2.2).** Keeps the Windows default output and per-app routes from pointing at the stream or virtual-mic cable, so muted apps can't leak into your broadcast. Includes a Reset routing option.
 - **Clips.** An instant-replay buffer (15 s to 5 min) captures the screen with AMD AMF or x264 and keeps desktop audio and the mic on separate tracks.
   - Save a clip with a hotkey or by saying **"clip it"**. Voice detection runs offline with Vosk.
   - The audio source can be your apps, a whole output device, or Auto, which falls back to the output device. Live meters show what is being recorded.
@@ -51,7 +53,7 @@ Your settings are stored in `%APPDATA%\Blur Sounds Pro\settings.json`. Nothing p
 
 ## Build from source
 
-You can build on Windows, or on Linux by cross-building with Wine for electron-builder and `x86_64-w64-mingw32-gcc` for RNNoise. You need Node 20+, the .NET 8 SDK and Python 3.
+You can build on Windows, or on Linux by cross-building with Wine for electron-builder and `x86_64-w64-mingw32-gcc` for RNNoise and SpeexDSP. You need Node 20+, the .NET 8 SDK and Python 3. DeepFilterNet3 (`df.dll`) is built with Rust (`cargo`, plus the `x86_64-pc-windows-gnu` target when cross-building); without Rust the app falls back to RNNoise.
 
 ```bash
 npm ci
@@ -63,7 +65,7 @@ That produces `release/win-unpacked/` and `release/BlurSoundsPro-<version>-win-x
 Individual steps:
 
 ```bash
-npm run fetch-deps     # Vosk model, FFmpeg, RNNoise (downloaded/built, not committed)
+npm run fetch-deps     # Vosk model, FFmpeg, RNNoise, SpeexDSP, DeepFilterNet3 (downloaded/built, not committed)
 npm run build:helper   # .NET audio helper -> helper-bin/
 npm run build:renderer # React UI -> renderer/
 npm run dev            # UI preview in a browser with mock data
@@ -78,6 +80,8 @@ Large and third-party binaries are **not** committed. `scripts/fetch-deps.cjs` d
 | FFmpeg 6.1.1 (GPL build) | [eugeneware/ffmpeg-static](https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1) | GPL-3.0 |
 | Vosk small English model 0.15 | [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models) | Apache-2.0 |
 | RNNoise 0.2 (built from source with MinGW) | [xiph/rnnoise](https://github.com/xiph/rnnoise) | BSD-3-Clause |
+| SpeexDSP 1.2.1 (built from source with MinGW) | [xiph/speexdsp](https://github.com/xiph/speexdsp) | BSD-3-Clause |
+| DeepFilterNet3 model + libDF (`df.dll`, built with Rust) | [Rikorose/DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | MIT / Apache-2.0 |
 | NAudio, Vosk API (NuGet) | restored by `dotnet publish` | MIT / Apache-2.0 |
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
@@ -109,4 +113,4 @@ Thank you for testing Blur Sounds when it was still breaking. This release exist
 
 ### Built with
 
-Electron, React, Vite, NAudio, Vosk, RNNoise, FFmpeg, open-meteo, and the VRChat OSC chatbox protocol. The chatbox is inspired by MagicChatbox.
+Electron, React, Vite, NAudio, Vosk, RNNoise, SpeexDSP, DeepFilterNet, FFmpeg, open-meteo, and the VRChat OSC chatbox protocol. The chatbox is inspired by MagicChatbox.

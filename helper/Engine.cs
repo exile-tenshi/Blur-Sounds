@@ -104,7 +104,8 @@ public sealed class Engine
     readonly FloatRing micRing = new(48000 * 2);
     // mic chain
     readonly NoiseGate gate = new(); readonly Compressor comp = new(); readonly Equalizer micEq = new(); readonly Limiter micLim = new();
-    RnNoise rn; double nsAmount = 1; bool nsOn, clearcast; double vadGain = 1; float micGain = 1; bool micMuted;
+    readonly VoiceChain vc = new(); bool nsOn, clearcast, bypass; float micGain = 1; bool micMuted;
+    DeviceSource aecRef; string aecRefId; OutputSink monitor; bool monitorOn; float monitorVol = 0.8f;
     bool micInStream = true, micInClip = true, micInRec = true, streamMode, chainOn;
     Resampler micRs; float[] micMono = new float[4096];
     public float MicPeakPre, MicPeakPost;
@@ -176,15 +177,32 @@ public sealed class Engine
             chainOn = (bool?)m?["chain"] ?? false;
             gate.Enabled = (bool?)m?["gate"]?["enabled"] ?? false; gate.ThresholdDb = (double?)m?["gate"]?["thresholdDb"] ?? -45;
             gate.ReleaseMs = (double?)m?["gate"]?["releaseMs"] ?? 120; gate.HoldMs = (double?)m?["gate"]?["holdMs"] ?? 150;
-            nsOn = (bool?)m?["ns"]?["enabled"] ?? false; nsAmount = Math.Clamp((double?)m?["ns"]?["amount"] ?? 1, 0, 1);
+            gate.AttackMs = (double?)m?["gate"]?["attackMs"] ?? 2; gate.RangeDb = (double?)m?["gate"]?["rangeDb"] ?? -60;
+            nsOn = (bool?)m?["ns"]?["enabled"] ?? false;
             clearcast = (bool?)m?["clearcast"] ?? false;
+            bypass = (bool?)m?["bypass"] ?? false;
+            vc.NsOn = nsOn || clearcast; vc.ClearCast = clearcast;
+            vc.NsAmount = nsOn ? Math.Clamp((double?)m?["ns"]?["amount"] ?? 0.9, 0, 1) : 0;
+            vc.NsEngine = (string)m?["ns"]?["engine"] ?? "deep"; vc.ModelPath = (string)m?["ns"]?["modelPath"];
+            vc.HpfOn = (bool?)m?["hpf"]?["enabled"] ?? true; vc.HpfFreq = Math.Clamp((double?)m?["hpf"]?["freq"] ?? 90, 40, 300);
+            bool aecOn = chainOn && ((bool?)m?["aec"]?["enabled"] ?? false);
+            vc.AecOn = aecOn; vc.AecStrength = ((string)m?["aec"]?["strength"] ?? "strong") switch { "mild" => 0, "max" => 2, _ => 1 };
+            vc.AecFixedDelayMs = (int?)m?["aec"]?["delayMs"] ?? -1;
+            string refWant = aecOn ? ((string)m?["aec"]?["refId"] ?? DefaultRender()) : null;
+            if (refWant != aecRefId)
+            {
+                try { aecRef?.Dispose(); } catch { }
+                aecRef = null; aecRefId = refWant; vc.Reference = null;
+                if (refWant != null) { try { aecRef = new DeviceSource(en, refWant, true); vc.Reference = aecRef.Ring; } catch (Exception e) { Err("echo reference", e); } }
+            }
+            monitorOn = chainOn && ((bool?)m?["monitor"]?["enabled"] ?? false); monitorVol = (float)Math.Clamp((double?)m?["monitor"]?["volume"] ?? 0.8, 0, 1.5);
+            monitor = Swap(monitor, monitorOn ? ((string)m?["monitor"]?["deviceId"] ?? personalId ?? DefaultRender()) : null, "mic monitor");
             comp.Enabled = (bool?)m?["comp"]?["enabled"] ?? false; comp.ThresholdDb = (double?)m?["comp"]?["thresholdDb"] ?? -18;
             comp.Ratio = (double?)m?["comp"]?["ratio"] ?? 3; comp.MakeupDb = (double?)m?["comp"]?["makeupDb"] ?? 4;
             comp.AttackMs = (double?)m?["comp"]?["attackMs"] ?? 5; comp.ReleaseMs = (double?)m?["comp"]?["releaseMs"] ?? 120;
             micEq.Configure(m?["eq"]);
             micGain = Db.ToLin((double?)m?["gainDb"] ?? 0); micMuted = (bool?)m?["muted"] ?? false;
             micInStream = (bool?)m?["inStream"] ?? true; micInClip = (bool?)m?["inClip"] ?? true; micInRec = (bool?)m?["inRec"] ?? true;
-            if ((nsOn || clearcast) && rn == null) { rn = new RnNoise(); if (!rn.Ok) Err("rnnoise", new Exception(RnNoise.LoadError ?? "rnnoise.dll failed to load")); }
             string micOutId = chainOn ? (string)m?["outId"] : null;
             micOut = Swap(micOut, micOutId, "mic out");
             // ----- voice -----
@@ -252,10 +270,11 @@ public sealed class Engine
         for (int i = 0; i < avail; i++) { float v = ch > 1 ? (micStereoTmp[i * 2] + micStereoTmp[i * 2 + 1]) * 0.5f : micStereoTmp[i * 2]; micMono[i] = v; if (Math.Abs(v) > pre) pre = Math.Abs(v); }
         if (pre > MicPeakPre) MicPeakPre = pre;
         if (voiceOn) { try { Voice.Feed(micMono, avail); } catch (Exception e) { Err("voice", e); } }
-        if (chainOn)
+        if (chainOn && !bypass)
         {
+            // HPF -> echo cancel -> DeepFilterNet/RNNoise, then the voice gate (much easier once the noise floor is gone)
+            try { vc.Process(micMono, avail); } catch (Exception e) { Err("voice chain", e); }
             gate.Process(micMono, avail);
-            if ((nsOn || clearcast) && rn != null && rn.Ok) rn.Process(micMono, avail, nsOn ? nsAmount : 0, clearcast, ref vadGain);
             micEq.Process(micMono, avail, 1);
             comp.Process(micMono, avail);
         }
@@ -267,6 +286,7 @@ public sealed class Engine
         for (int i = 0; i < avail; i++) { st[i * 2] = micMono[i]; st[i * 2 + 1] = micMono[i]; }
         micRing.Write(st, st.Length);
         micOut?.Write(st, st.Length);
+        if (monitor != null) { if (monitorVol != 1) for (int i = 0; i < st.Length; i++) st[i] *= monitorVol; monitor.Write(st, st.Length); }
     }
 
     void Start()
@@ -375,7 +395,9 @@ public sealed class Engine
             foreach (var c in chans.Values) { o[c.Id] = Math.Round(c.Peak, 3); }
             foreach (var p in procs.Values) p.Peak *= 0.5f;
         }
-        var r = new JsonObject { ["channels"] = o, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(rn?.LastVad ?? 0, 2) };
+        var r = new JsonObject { ["channels"] = o, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
+        r["ns"] = new JsonObject { ["engine"] = vc.NsActive, ["cutDb"] = Math.Round(vc.NsCutDb, 1), ["lsnr"] = Math.Round(vc.Lsnr, 1), ["cpuMs"] = Math.Round(vc.CpuMs, 2), ["error"] = vc.NsError,
+            ["aecCutDb"] = Math.Round(vc.AecCutDb, 1), ["refActive"] = vc.RefActive, ["nearTalk"] = vc.NearTalk, ["aecDelayMs"] = Math.Round(vc.AecDelayMs), ["aec"] = vc.AecOn && aecRef != null, ["bypass"] = bypass };
         MicPeakPre *= 0.5f; MicPeakPost *= 0.5f;
         r["clipDesk"] = Math.Round(ClipDeskPeak, 3); r["clipMic"] = Math.Round(ClipMicPeak, 3); r["clipUsing"] = ClipUsing;
         ClipDeskPeak *= 0.5f; ClipMicPeak *= 0.5f;
@@ -396,7 +418,7 @@ public sealed class Engine
             {
                 ["running"] = running, ["cables"] = cables.Count, ["appCaptures"] = new JsonArray(procs.Keys.Select(k => (JsonNode)k).ToArray()),
                 ["personalOut"] = personal?.DeviceId, ["streamOut"] = stream?.DeviceId, ["micOut"] = micOut?.DeviceId, ["mic"] = micId,
-                ["rnnoise"] = rn == null ? "off" : rn.Ok ? "ok" : "failed",
+                ["rnnoise"] = vc.NsActive, ["nsError"] = vc.NsError,
                 ["voice"] = new JsonObject { ["enabled"] = voiceOn, ["ready"] = Voice.Ready, ["error"] = Voice.Error, ["heard"] = Voice.LastHeard, ["phrase"] = voicePhrase },
                 ["clip"] = new JsonObject { ["source"] = clipSource, ["using"] = ClipUsing, ["systemDevice"] = sysLoop?.DeviceId, ["systemError"] = sysLoop?.Error, ["enabled"] = clipOn, ["buffered"] = Math.Round(Math.Min(clipWritten, clipRing.Length) / 96000.0, 1), ["capacity"] = clipRing.Length / 96000 },
                 ["record"] = new JsonObject { ["active"] = rec != null, ["seconds"] = Math.Round(recFrames / 48000.0, 1), ["path"] = recPath },
@@ -449,6 +471,7 @@ public sealed class Engine
             foreach (var c in cables.Values) c.Dispose(); cables.Clear();
             foreach (var p in procs.Values) p.Dispose(); procs.Clear(); procRings.Clear();
             personal?.Dispose(); personal = null; stream?.Dispose(); stream = null; micOut?.Dispose(); micOut = null;
+            monitor?.Dispose(); monitor = null; try { aecRef?.Dispose(); } catch { } aecRef = null; aecRefId = null; vc.Reference = null;
             chans.Clear(); streamMode = false;
             try { sysLoop?.Dispose(); } catch { } sysLoop = null; clipSysWant = null;
         }

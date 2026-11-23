@@ -66,8 +66,12 @@ function defaults() {
     soundboard: { outputLabel: '', monitor: true, volume: 0.8, stopHotkey: '', sounds: [] },
     micChain: {
       enabled: false, outId: null, gainDb: 0, clearcast: false, inStream: true,
-      gate: { enabled: true, thresholdDb: -48, holdMs: 150, releaseMs: 120 },
-      ns: { enabled: true, amount: 0.9 },
+      gate: { enabled: true, thresholdDb: -48, holdMs: 150, releaseMs: 120, attackMs: 2, rangeDb: -60 },
+      ns: { enabled: true, amount: 0.9, engine: 'rnnoise' },
+      hpf: { enabled: false, freq: 90 },
+      aec: { enabled: false, refId: null, strength: 'strong' },
+      bypass: false,
+      monitor: { enabled: false, volume: 0.8 },
       comp: { enabled: true, thresholdDb: -20, ratio: 3, makeupDb: 4, attackMs: 5, releaseMs: 120 },
       eq: { ...eqDefault(), preset: 'flat' },
     },
@@ -103,6 +107,16 @@ class Store {
     // v2 migration: every channel gets the new fields
     const m = this.data.mixer;
     for (const c of m.channelList) m.channels[c.id] = deepMerge(chDefault(), m.channels[c.id] || {});
+    // v2.2 broadcast guard: an app channel may never be routed straight into the stream cable or the
+    // virtual-mic cable; that would put the app into the broadcast no matter what its stream toggle says.
+    if (m.guard === undefined) m.guard = true;
+    for (const c of m.channelList) {
+      const ch = m.channels[c.id];
+      if (ch.mode === 'cable' && ch.cableId && (ch.cableId === m.streamOut || ch.cableId === this.data.micChain.outId)) { ch.mode = 'direct'; ch.cableId = null; m.guardFixed = (m.guardFixed || 0) + 1; }
+      if (ch.output && (ch.output === m.streamOut || ch.output === this.data.micChain.outId)) { ch.output = null; m.guardFixed = (m.guardFixed || 0) + 1; }
+    }
+    if (!this.data.micChain.aec.strength) this.data.micChain.aec.strength = 'strong';
+    if (!this.data.micChain.ns.engine) this.data.micChain.ns.engine = 'rnnoise'; // DeepFilterNet3 is opt-in in the Mic chain drawer
     // v2.1 chatbox migration: keep the user's order, add weather right after time, then any new modules
     const cb = this.data.chatbox; cb.order = Array.isArray(cb.order) ? cb.order : [];
     if (!cb.order.includes('weather')) { const i = cb.order.indexOf('time'); cb.order.splice(i >= 0 ? i + 1 : cb.order.length, 0, 'weather'); }

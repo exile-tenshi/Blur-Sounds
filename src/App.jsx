@@ -55,7 +55,7 @@ export default function App() {
             <n.icon size={20} /><span>{n.label}</span>
           </button>
         ))}
-        <div className="rail-foot">v2.1</div>
+        <div className="rail-foot">v2.2</div>
       </nav>
       <main className="content">
         {page === 'mixer' && <Mixer />}

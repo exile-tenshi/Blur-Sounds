@@ -40,11 +40,14 @@ static class Program
     {
         Console.OutputEncoding = new UTF8Encoding(false);
         Console.InputEncoding = new UTF8Encoding(false);
+        // v2.2: the helper must see the real Windows default, never a per-app route Windows remembered for it.
+        if (args.Length == 0) { try { AppRouting.Set(Environment.ProcessId, "", "render"); } catch { } }
         if (args.Length > 0 && args[0] == "--stats")
         {
             Console.WriteLine(SysStats.Get("1.1.1.1").ToJsonString()); Thread.Sleep(1500);
             Console.WriteLine(SysStats.Get("1.1.1.1").ToJsonString()); Console.WriteLine(Adl.Probe()); return 0;
         }
+        if (args.Length > 0 && args[0] == "--echorec") return EchoRec.Run(args);
         if (args.Length > 0 && args[0] == "--snapshot")
         {
             Enumerator = new MMDeviceEnumerator();
