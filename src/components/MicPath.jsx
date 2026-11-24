@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Icon } from './Icons.jsx';
-import { MiniMeter } from './Controls.jsx';
+import { MiniMeter, Toggle } from './Controls.jsx';
 import { useHifi } from './HifiCable.jsx';
 
 const db = (v) => (v > 0.00003 ? Math.round(20 * Math.log10(v)) : null);
@@ -29,7 +29,7 @@ async function micTest(recordName, onState) {
 }
 
 export function MicPath({ st, eng, onOpenChain }) {
-  const p = st.micPath; const h = useHifi(); const [t, setT] = useState(null);
+  const p = st.micPath; const h = useHifi(); const [t, setT] = useState(null); const [tgt, setTgt] = useState('');
   if (!p) return null;
   const outPk = p.out ? (p.out.via === 'stream' ? eng.streamPk : eng.micOutPk) : -1;
   const route = (id) => window.bsp.invoke('mic:route', id);
@@ -44,8 +44,16 @@ export function MicPath({ st, eng, onOpenChain }) {
         <button className={`mp-node mp-fx${p.processing ? ' on' : ''}`} onClick={onOpenChain} title="Open the mic chain"><Icon.settings size={14} /><div><b>{p.processing ? 'Processed' : 'Raw (no processing)'}</b><small>gate · noise · comp</small></div><MiniMeter level={eng.micPost || 0} /></button>
         <span className="mp-arrow">›</span>
         <div className={`mp-node${p.out ? '' : ' bad'}`}><Icon.cable size={14} /><div><b title={p.out?.name}>{p.out ? short(p.out.name) : 'Nowhere'}</b><small>{p.out ? (p.out.via === 'stream' ? 'via your stream mix' : 'virtual mic cable') : 'not sent to any cable'}</small></div><MiniMeter level={outPk > 0 ? outPk : 0} /></div>
+        {p.streamMode && <div className="mp-stream" title="Off: your mic is NOT mixed into the stream mix that Streamlabs / OBS capture. It still goes to your virtual mic for VRChat / Discord."><Toggle small on={!!p.onStream} onChange={(v) => window.bsp.invoke('mic:chain', { inStream: v })} label="Mic on stream" /></div>}
         <button className="ghost-btn" disabled={t && (t.phase === 'rec' || t.phase === 'play')} onClick={run}><Icon.play size={13} /> {t?.phase === 'rec' ? `Recording… ${t.left}` : t?.phase === 'play' ? 'Playing back…' : 'Mic test'}</button>
       </div>
+      {p.shared && !p.onStream && (
+        <div className="warn-box">Your stream mix also goes to <b>{short(p.stream?.name)}</b>, the same cable as your mic, so anything capturing “{p.stream?.recordName}” (Streamlabs / OBS) still hears your mic. Give the stream mix its own device:
+          {' '}<select value={tgt} onChange={(e) => setTgt(e.target.value)}><option value="">Choose…</option>{(p.streamTargets || []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
+          {' '}<button className="primary-btn" disabled={!tgt} onClick={() => window.bsp.invoke('stream:route', tgt)}>Move stream mix</button>
+          <div className="hint">Then in Streamlabs / OBS capture that device (an “Audio Output Capture” for a speaker/digital output, or its “… Output” recording device for a cable). For a dedicated stream cable you can also install the free standard VB-CABLE from vb-audio.com.</div>
+        </div>)}
+      {p.streamMode && p.stream && !p.shared && <p className="hint">Stream mix → <b>{short(p.stream.name)}</b>{p.onStream ? ' (includes your mic)' : ' (no mic)'}. Capture “{p.stream.recordName || p.stream.name}” in Streamlabs / OBS.</p>}
       {p.out && <p className="hint">In Discord / VRChat choose <b>“{p.out.recordName}”</b> as your microphone.</p>}
       {p.note && <p className="hint ok-text">{p.note}</p>}
       {t?.phase === 'done' && (t.peak > 0.003 ? <p className="hint ok-text">Mic test: “{t.device}” got your voice (peak {db(t.peak)} dB). You just heard what others hear.</p>

@@ -282,8 +282,18 @@ function micPath() {
   return { input: inDev ? { id: inDev.id, name: inDev.name, fallback: !micKnown || !m.mic.deviceId } : null, processing: !!mc.enabled && !mc.bypass,
     out: out ? { id: out.id, name: out.name, recordName: recordNameFor(out), via: presentOut(mc.outId) ? 'mic' : 'stream' } : null,
     savedOutName: mc.outId && !presentOut(mc.outId) ? (mc.outName || 'a cable that is not on this PC') : null,
-    cable: cable ? { id: cable.id, name: cable.name, recordName: recordNameFor(cable) } : null, warn, errors: errs.slice(0, 3), note: micPathNote };
+    cable: cable ? { id: cable.id, name: cable.name, recordName: recordNameFor(cable) } : null, warn, errors: errs.slice(0, 3), note: micPathNote,
+    onStream: !!mc.inStream, streamMode: !!m.streamMode,
+    stream: presentOut(m.streamOut) ? { id: m.streamOut, name: (outs.find((o) => o.id === m.streamOut) || {}).name, recordName: recordNameFor(outs.find((o) => o.id === m.streamOut)) } : null,
+    // mic cable == stream cable: whatever captures that cable (Streamlabs/OBS) also gets the mic
+    shared: !!(m.streamMode && presentOut(mc.outId) && presentOut(mc.outId) === presentOut(m.streamOut)),
+    // where the stream mix could go instead: another cable, or an unused output such as S/PDIF that Streamlabs/OBS can capture
+    streamTargets: outs.filter((o) => o.id !== presentOut(mc.outId) && o.id !== snapshot.defaultOutput && o.id !== m.personalOut && (CABLE_RX.test(o.name) || /digital|spdif|s\/pdif|line out/i.test(o.name))).map((o) => ({ id: o.id, name: o.name })) };
 }
+ipcMain.handle('stream:route', (_e, id) => {
+  const m = S().mixer; const o = snapshot && snapshot.outputs.find((x) => x.id === id); if (!o) return micPath();
+  m.streamOut = o.id; m.streamOutName = o.name; store.saveSoon(); pushEngine(); pushMixer(); return micPath();
+});
 ipcMain.handle('mic:route', (_e, id) => {
   const mc = S().micChain; const o = snapshot && snapshot.outputs.find((x) => x.id === id);
   mc.outId = o ? o.id : null; mc.outName = o ? o.name : ''; mc.autoCable = true; if (o) mc.enabled = true; micPathNote = null;
@@ -362,7 +372,10 @@ ipcMain.handle('mixer:removeChannel', async (_e, id) => {
   store.saveSoon(); await rerouteChannel('aux'); pushEngine(); pushMixer();
 });
 ipcMain.handle('mixer:renameChannel', (_e, id, label) => { const c = S().mixer.channelList.find((x) => x.id === id); if (c) c.label = String(label).slice(0, 24); store.saveSoon(); pushMixer(); });
-ipcMain.handle('mic:chain', (_e, patch) => { if (patch && 'outId' in patch) { const o = snapshot && snapshot.outputs.find((x) => x.id === patch.outId); patch = { ...patch, outName: o ? o.name : '', autoCable: true }; micPathNote = null; } Object.assign(S().micChain, patch); store.saveSoon(); pushEngine(); pushMixer(); return S().micChain; });
+ipcMain.handle('mic:chain', (_e, patch) => { if (patch && 'outId' in patch) { const o = snapshot && snapshot.outputs.find((x) => x.id === patch.outId); patch = { ...patch, outName: o ? o.name : '', autoCable: true }; micPathNote = null; }
+  // Turning "Mic on stream" off: if the mic only reached the cable through the stream mix, send it there directly so VRChat / Discord keep hearing it.
+  if (patch && patch.inStream === false) { const mc0 = S().micChain; const m0 = S().mixer; const so = presentOut(m0.streamOut); if (!presentOut(mc0.outId) && m0.streamMode && so) { patch = { ...patch, outId: so, outName: (snapshot.outputs.find((o) => o.id === so) || {}).name || '', autoCable: true }; } }
+  Object.assign(S().micChain, patch); store.saveSoon(); pushEngine(); pushMixer(); return S().micChain; });
 ipcMain.handle('mixer:app', async (_e, proc, patch) => {
   proc = proc.toLowerCase();
   S().mixer.apps[proc] = { ...(S().mixer.apps[proc] || { volume: 1, muted: false }), ...patch }; store.saveSoon();

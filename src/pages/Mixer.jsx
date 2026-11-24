@@ -316,7 +316,7 @@ function MicDrawer({ st, levels, mic, onClose }) {
         </div>
       </div>
       <div className="field-row"><span className="muted-text">Output gain</span><input type="range" className="grow" min={-12} max={12} step={0.5} value={mc.gainDb} onChange={(e) => patch({ gainDb: Number(e.target.value) })} /><span className="num">{mc.gainDb > 0 ? '+' : ''}{mc.gainDb}</span></div>
-      <Toggle small on={mc.inStream} onChange={(v) => patch({ inStream: v })} label="Include mic in the stream mix" />
+      <Toggle small on={mc.inStream} onChange={(v) => patch({ inStream: v })} label="Mic on stream (mix my mic into the stream mix)" />
       <h4 className="drawer-sub">Mic equalizer</h4>
       <EqEditor eq={mc.eq} onChange={(eq) => patch({ eq })} mic />
     </Drawer>

@@ -1389,6 +1389,44 @@
       }
      ],
      "help": ""
+    },
+    {
+     "id": "style.tiny",
+     "type": "select",
+     "label": "Tiny text",
+     "default": "normal",
+     "options": [
+      {
+       "value": "normal",
+       "label": "Normal"
+      },
+      {
+       "value": "superscript",
+       "label": "ˢᵘᵖᵉʳˢᶜʳⁱᵖᵗ"
+      },
+      {
+       "value": "smallcaps",
+       "label": "ꜱᴍᴀʟʟ ᴄᴀᴘꜱ"
+      }
+     ],
+     "help": "Shrinks letters and digits with Unicode look-alikes where one exists (others stay normal). Each still counts as 1 of the 144 characters."
+    },
+    {
+     "id": "style.tinyScope",
+     "type": "select",
+     "label": "Tiny text applies to",
+     "default": "secondary",
+     "options": [
+      {
+       "value": "secondary",
+       "label": "Only secondary lines (time, weather, stats…)"
+      },
+      {
+       "value": "all",
+       "label": "The whole chatbox"
+      }
+     ],
+     "help": ""
     }
    ]
   },
@@ -1543,6 +1581,13 @@
      "label": "Random sparkle emoji at the end",
      "default": false,
      "help": ""
+    },
+    {
+     "id": "style.slim",
+     "type": "bool",
+     "label": "Slim chatbox",
+     "default": false,
+     "help": "Adds two invisible characters (\\u0003\\u001f, the MagicChatbox “BlankEgg” trick) to every message so VRChat draws a slimmer bubble. They use 2 of the 144 characters. May no longer work since VRChat’s Unity 6 update."
     },
     {
      "id": "style.prefix",
@@ -1969,5 +2014,5 @@
    ]
   }
  ],
- "count": 120
+ "count": 123
 }

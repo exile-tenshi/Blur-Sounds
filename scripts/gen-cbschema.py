@@ -124,6 +124,8 @@ groups = [
      ('sansbold', '𝗦𝗮𝗻𝘀 𝗯𝗼𝗹𝗱'), ('script', '𝓢𝓬𝓻𝓲𝓹𝓽'), ('fraktur', '𝕱𝖗𝖆𝖐𝖙𝖚𝖗'), ('double', '𝔻𝕠𝕦𝕓𝕝𝕖'), ('mono', '𝙼𝚘𝚗𝚘'), ('wide', 'Ｗｉｄｅ'), ('circled', 'Ⓒⓘⓡⓒⓛⓔⓓ'), ('strike', 'S̶t̶r̶i̶k̶e̶')]),
    S('style.fontScope', 'Apply font to', 'all', [('all', 'Everything'), ('status', 'Status & messages only'), ('labels', 'Everything except music titles')]),
    S('style.case', 'Letter case', 'normal', [('normal', 'As typed'), ('upper', 'UPPERCASE'), ('lower', 'lowercase'), ('title', 'Title Case')]),
+   S('style.tiny', 'Tiny text', 'normal', [('normal', 'Normal'), ('superscript', 'ˢᵘᵖᵉʳˢᶜʳⁱᵖᵗ'), ('smallcaps', 'ꜱᴍᴀʟʟ ᴄᴀᴘꜱ')], 'Shrinks letters and digits with Unicode look-alikes where one exists (others stay normal). Each still counts as 1 of the 144 characters.'),
+   S('style.tinyScope', 'Tiny text applies to', 'secondary', [('secondary', 'Only secondary lines (time, weather, stats…)'), ('all', 'The whole chatbox')]),
  ]),
  dict(id='layout', cat='style', label='Layout & decoration', icon='text', fields=[
    LEG(['chatbox', 'separator'], 'select', 'Separator', options=[dict(value='newline', label='New line'), dict(value=' | ', label=' | '), dict(value=' • ', label=' • '), dict(value=' ┆ ', label=' ┆ '), dict(value=' ⋆ ', label=' ⋆ '), dict(value=' ~ ', label=' ~ '), dict(value='custom', label='Custom…')]),
@@ -133,6 +135,7 @@ groups = [
    T('style.wrap', 'Wrap the whole box with', '', 'e.g. ✧ adds it at the start and end.'),
    S('style.emojiPack', 'Emoji pack', 'default', [('default', 'Default 💻🌍❤️'), ('cute', 'Cute 🌸🫧💗'), ('gamer', 'Gamer 🎮⚡🔥'), ('minimal', 'Minimal ▸'), ('none', 'No icons')]),
    B('style.randomEmoji', 'Random sparkle emoji at the end'),
+   B('style.slim', 'Slim chatbox', False, 'Adds two invisible characters (\\u0003\\u001f, the MagicChatbox “BlankEgg” trick) to every message so VRChat draws a slimmer bubble. They use 2 of the 144 characters. May no longer work since VRChat’s Unity 6 update.'),
    W('style.prefix', 'Per-module prefix', 'affix', {}), W('style.suffix', 'Per-module suffix', 'affix', {}),
  ]),
  dict(id='quotes', cat='style', label='Quotes & facts', icon='bubble', module='quote', fields=[

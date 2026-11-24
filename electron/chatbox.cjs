@@ -24,6 +24,8 @@ function fmtLong(sec) {
 }
 function fmtClock(sec) { sec = Math.max(0, Math.floor(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec % 60; return `${h ? h + ':' + String(m).padStart(2, '0') : m}:${String(s).padStart(2, '0')}`; }
 const ulen = (s) => String(s).length; // UTF-16 units
+const SLIM = '\u0003\u001f'; // MagicChatbox "BlankEgg": invisible control chars that make VRChat draw a slimmer bubble
+const SECONDARY = new Set(['time', 'date', 'tz', 'weather', 'pc', 'net', 'uptime', 'battery', 'countdown', 'stopwatch', 'session', 'vrcWorld', 'vrcPlayers', 'hr']);
 function truncate(text, max = MAX) {
   if (ulen(text) <= max) return text;
   let out = ''; for (const c of Array.from(text)) { if (ulen(out + c) > max - 1) break; out += c; }
@@ -303,6 +305,7 @@ class Chatbox {
       let s = `${pre[k] || ''}${raw}${suf[k] || ''}`;
       const styled = scope === 'all' || (scope === 'status' && (k === 'status' || k === 'message')) || (scope === 'labels' && k !== 'nowPlaying');
       if (styled) s = T.applyFont(T.applyCase(s, o['style.case']), o['style.font']);
+      const tiny = o['style.tiny']; if (tiny && tiny !== 'normal' && (o['style.tinyScope'] === 'all' || SECONDARY.has(k))) s = T.applyTiny(s, tiny);
       return s;
     };
     for (const k of Object.keys(P)) P[k] = sty(k, P[k]);
@@ -333,21 +336,23 @@ class Chatbox {
       if (o['filter.enabled']) t = T.profanity(t, o['filter.mode'] === 'remove' ? 'remove' : 'mask', o['filter.words']).text;
       return t;
     };
+    const MAXC = o['style.slim'] ? MAX - SLIM.length : MAX; // slim reserves its 2 chars
     let text = decorate(join(order));
-    if (ulen(text) > MAX && P.weather && this.weatherVariants && order.includes('weather')) {
-      for (const v of this.weatherVariants.slice(1)) { P.weather = sty('weather', v); text = decorate(join(order)); if (ulen(text) <= MAX) break; }
+    if (ulen(text) > MAXC && P.weather && this.weatherVariants && order.includes('weather')) {
+      for (const v of this.weatherVariants.slice(1)) { P.weather = sty('weather', v); text = decorate(join(order)); if (ulen(text) <= MAXC) break; }
     }
-    if (ulen(text) > MAX) {
-      if (o['overflow'] === 'drop') { let keys = [...order]; while (keys.length > 1 && ulen(text) > MAX) { keys.pop(); text = decorate(join(keys)); } }
+    if (ulen(text) > MAXC) {
+      if (o['overflow'] === 'drop') { let keys = [...order]; while (keys.length > 1 && ulen(text) > MAXC) { keys.pop(); text = decorate(join(keys)); } }
       else if (o['overflow'] === 'split') {
         const chunks = []; let cur = [];
-        for (const k of order) { if (cur.length && ulen(decorate(join([...cur, k]))) > MAX) { chunks.push(cur); cur = []; } cur.push(k); }
+        for (const k of order) { if (cur.length && ulen(decorate(join([...cur, k]))) > MAXC) { chunks.push(cur); cur = []; } cur.push(k); }
         if (cur.length) chunks.push(cur);
         if (Date.now() - (this.splitAt || 0) > (Number(o['pages.seconds']) || 8) * 1000) { this.split++; this.splitAt = Date.now(); }
         text = decorate(join(chunks[this.split % chunks.length]));
       }
     }
-    return truncate(text);
+    text = truncate(text, MAXC);
+    return text && o['style.slim'] ? text + SLIM : text;
   }
 
   tick() {

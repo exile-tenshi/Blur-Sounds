@@ -28,6 +28,12 @@ function applyFont(s, font) {
   const m = FONTS[font]; if (!m) return s;
   return Array.from(s).map((c) => m[c] || c).join('');
 }
+// v2.3.1 "Tiny text": superscript / small caps where a look-alike exists, everything else unchanged (all BMP: 1 UTF-16 unit each).
+function applyTiny(s, mode) {
+  if (mode === 'superscript') return Array.from(s).map((c) => FONTS.superscript[c] || c).join('');
+  if (mode === 'smallcaps') return Array.from(s).map((c) => FONTS.smallcaps[c] || FONTS.smallcaps[c.toLowerCase()] || c).join('');
+  return s;
+}
 function applyCase(s, mode) {
   if (mode === 'upper') return s.toUpperCase();
   if (mode === 'lower') return s.toLowerCase();
@@ -62,4 +68,4 @@ function profanity(text, mode, extra) {
 const CLOCKS = ['🕛', '🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚'];
 const CLOCKS_HALF = ['🕧', '🕜', '🕝', '🕞', '🕟', '🕠', '🕡', '🕢', '🕣', '🕤', '🕥', '🕦'];
 function clockEmoji(d) { const h = d.getHours() % 12; return d.getMinutes() >= 30 ? CLOCKS_HALF[h] : CLOCKS[h]; }
-module.exports = { applyFont, applyCase, icon, PACKS, BORDERS, SPARKLES, QUOTES, FACTS, profanity, clockEmoji, FONTS };
+module.exports = { applyFont, applyTiny, applyCase, icon, PACKS, BORDERS, SPARKLES, QUOTES, FACTS, profanity, clockEmoji, FONTS };

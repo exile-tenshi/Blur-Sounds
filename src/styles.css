@@ -476,3 +476,4 @@ button.pill { cursor: pointer; }
 .mp-arrow { color: var(--red2); font-size: 18px; }
 .micpath .warn-box .primary-btn { margin-left: 8px; padding: 5px 12px; }
 button.mp-node { display: flex !important; flex-direction: row !important; align-items: center; justify-content: flex-start; text-align: left; } button.mp-node > div { align-items: flex-start; }
+.mp-stream { display: flex; align-items: center; padding: 0 4px; } .micpath .warn-box select { background: #0e1013; color: var(--silver); border: 1px solid var(--line2); border-radius: 4px; padding: 4px 6px; }
