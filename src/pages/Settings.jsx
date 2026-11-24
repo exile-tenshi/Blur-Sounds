@@ -9,6 +9,11 @@ export default function Settings({ settings, update }) {
   return (
     <div className="page settings-page">
       <section className="panel">
+        <div className="panel-head"><h3>Setup wizard</h3></div>
+        <div className="setting"><div><b>Run setup again</b><p className="muted-text">Walk through speakers, mic, virtual cable, Discord / VRChat, streaming and the VRChat chatbox again, with a check at each step.{settings.app.setup?.skipped ? ' (You skipped it last time.)' : ''}</p></div>
+          <button className="primary-btn" onClick={() => window.dispatchEvent(new Event('bsp-setup-open'))}>Open setup</button></div>
+      </section>
+      <section className="panel">
         <div className="panel-head"><h3>General</h3></div>
         <div className="setting"><div><b>Start with Windows</b><p className="muted-text">Open Blur Sounds Pro when you sign in.</p></div><Toggle on={settings.app.startWithWindows} onChange={(v) => update(['app', 'startWithWindows'], v)} /></div>
         <div className="setting"><div><b>Close to tray</b><p className="muted-text">Keep the mixer, hotkeys and chatbox running when the window is closed.</p></div><Toggle on={settings.app.closeToTray} onChange={(v) => update(['app', 'closeToTray'], v)} /></div>

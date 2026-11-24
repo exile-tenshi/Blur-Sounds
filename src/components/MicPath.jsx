@@ -7,7 +7,7 @@ const db = (v) => (v > 0.00003 ? Math.round(20 * Math.log10(v)) : null);
 const short = (n) => String(n || '').replace(/\s*\(.*$/, '');
 
 // v2.3.1: records what Discord / VRChat would actually get (the cable's recording side) for 3 s, then plays it back.
-async function micTest(recordName, onState) {
+export async function micTest(recordName, onState) {
   onState({ phase: 'rec', left: 3 });
   const pre = await navigator.mediaDevices.getUserMedia({ audio: true }); pre.getTracks().forEach((t) => t.stop()); // unlocks device labels
   const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');

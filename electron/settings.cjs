@@ -19,7 +19,7 @@ function defaults() {
   return {
     version: 1,
     ui: { page: 'mixer' },
-    app: { startWithWindows: false, closeToTray: false, importedMagicChatbox: false, hifiPromptDismissed: false },
+    app: { startWithWindows: false, closeToTray: false, importedMagicChatbox: false, hifiPromptDismissed: false, setup: { done: false, auto: false } },
     mixer: {
       listen: { deviceId: null, name: '', presets: [], hotkey: '', autoReturn: true },
       channelList: [
@@ -104,7 +104,11 @@ class Store {
     fs.mkdirSync(dir, { recursive: true });
     let saved = {};
     try { saved = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch {}
+    // v2.4.0: no saved settings = a new PC / new profile -> first-run auto-setup + setup wizard.
+    this.fresh = !saved || typeof saved !== 'object' || !saved.mixer;
     this.data = deepMerge(defaults(), saved);
+    // Settings from before v2.4.0 are an existing, working setup: never show the wizard or auto-configure over them.
+    if (!this.fresh && !(saved.app && saved.app.setup)) this.data.app.setup = { done: true, auto: true, migrated: true, at: Date.now() };
     // v2 migration: every channel gets the new fields
     const m = this.data.mixer;
     for (const c of m.channelList) m.channels[c.id] = deepMerge(chDefault(), m.channels[c.id] || {});

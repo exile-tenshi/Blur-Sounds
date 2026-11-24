@@ -1,4 +1,5 @@
 import SHARE from '../electron/sharepresets.json';
+import { mockSetup } from './mocksetup.js';
 // Browser-only preview data (used when not running inside Electron, e.g. for screenshots).
 export function installMock() {
   const listeners = {};
@@ -72,8 +73,11 @@ export function installMock() {
     return parts.filter(Boolean).join('\n');
   };
   setInterval(() => { const p = compose(); emit('chatbox:state', { preview: p, live: settings.chatbox.live, lastSentAt: Date.now() - 1200, sendCount: 214, media, focus: media.focus, parts: { weather: '🌧️ 46°F Light rain · H 51° L 39°', pc: '🖥️ GPU 55% 47°C', time: '🕒 10:41 PM', nowPlaying: '🎵 Song Title ᵇʸ Artist' }, weather: { data: { temp: 46, feels: 41, hum: 88, wind: 9, icon: '🌧️', cond: 'Light rain', hi: 51, lo: 39, rain: 80, unit: '°F', windUnit: 'mph', city: 'Springfield', region: 'Somewhere', via: 'ipwho.is', at: Date.now() - 120000 } }, sys: { cpu: 18, gpu: 55, gpuTemp: 47, vramUsed: 6.3, vramTotal: 16, gpuName: 'AMD Radeon GPU', ping: 14, idleSec: 3 }, osc: { port: 9001, lastAt: Date.now(), muted: false, hr: 82 }, vrc: { world: { name: 'Night Drive' }, players: 23 }, twitch: { data: { channel: 'yourchannel', live: false } }, stopwatch: { running: false, sec: 0 } }); }, 250);
+  const setupMock = mockSetup();
+  settings.app.setup = { done: !qp.get('setup') };
   window.bsp = {
     invoke: async (ch, ...a) => {
+      if (String(ch).startsWith('setup:')) return setupMock(ch, a[0]);
       if (ch === 'settings:get') return settings;
       if (ch === 'settings:set') { let o = settings; const k = a[0]; for (let i = 0; i < k.length - 1; i++) o = o[k[i]]; o[k[k.length - 1]] = a[1]; return settings; }
       if (ch === 'app:info') return { version: '1.0.0', userData: 'C:\\Users\\you\\AppData\\Roaming\\Blur Sounds Pro', tools: [

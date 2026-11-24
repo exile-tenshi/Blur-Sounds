@@ -7,6 +7,7 @@ const { Helper } = require('./helper.cjs');
 const hifi = require('./hificable.cjs');
 const { Chatbox } = require('./chatbox.cjs');
 const { importMagicChatbox } = require('./mcb.cjs');
+const setup = require('./setup.cjs');
 
 const APP_NAME = 'Blur Sounds Pro';
 app.setName(APP_NAME);
@@ -120,6 +121,7 @@ async function applyOutput(s) {
   if (s.system || !snapshot || !snapshot.routingSupported) return;
   const ch = S().mixer.channels[channelFor(s)];
   let want = ch ? ((ch.mode === 'cable' && ch.cableId) ? ch.cableId : (ch.output || '')) : '';
+  if (want && !presentOut(want)) want = ''; // saved device not connected: follow the Windows default instead of routing into nothing
   if (isGuarded(want)) want = safeOut(); // never pin an app into the broadcast cable
   // App follows the Windows default but the default is the stream cable: pin it somewhere safe.
   if (!want && isGuarded(snapshot.defaultOutput)) want = safeOut();
@@ -145,6 +147,8 @@ function visibleSessions() {
 async function onSnapshot(snap) {
   snapshot = snap;
   const m = S().mixer; let dirty = false;
+  if (!S().app.setup.auto) await firstRunSetup().catch((e) => helperLogLine('first-run setup failed: ' + e.message));
+  selfHeal();
   cableSetup();
   await guardDefault().catch(() => {});
   checkListeningDevice();
@@ -187,6 +191,7 @@ async function pushMixer() {
     guarded: [...guardedIds()], guardOn: S().mixer.guard !== false, guardLog: guardLog.slice(0, 5), defaultIsGuarded: isGuarded(snapshot.defaultOutput),
     sessions: [...byProc.values()],
     settings: S().mixer, micChain: S().micChain, micPath: micPath(),
+    setup: S().app.setup, heal: healState,
   });
 }
 
@@ -300,6 +305,97 @@ ipcMain.handle('mic:route', (_e, id) => {
   store.saveSoon(); pushEngine(); pushMixer(); return micPath();
 });
 
+// ---------------- v2.4.0 first-run setup + self-heal ----------------
+function helperLogLine(msg) { try { fs.mkdirSync(path.dirname(helperLog), { recursive: true }); fs.appendFileSync(helperLog, `[${new Date().toISOString()}] ${msg}\n`); } catch {} }
+let healState = { fixed: [], missing: [], at: 0 };
+const bootAt = Date.now();
+async function firstRunSetup(opts = {}) {
+  if (!snapshot || !snapshot.outputs) return null;
+  const r = setup.autoSetup(S(), snapshot, { full: opts.full !== false });
+  const su = S().app.setup; su.auto = true; su.autoAt = Date.now(); su.changes = r.changes; su.summary = r.summary;
+  micPathNote = null; seenPids.clear(); store.saveNow();
+  helperLogLine('setup: ' + r.changes.join(' | '));
+  // Windows' default speakers are a virtual cable (common after installing one): put them back on real speakers.
+  const def = snapshot.outputs.find((o) => o.id === snapshot.defaultOutput);
+  const spk = S().mixer.listen.deviceId;
+  if (def && setup.isVirtualOut(def) && spk && spk !== def.id) await switchListening(spk, 'setup').catch(() => {});
+  pushEngine(); send('setup:state', setupState());
+  return r;
+}
+function selfHeal() {
+  if (!snapshot) return;
+  const r = setup.heal(S(), snapshot);
+  if (r.changed) { store.saveSoon(); pushEngine(); }
+  if (r.fixed.length) { helperLogLine('self-heal: ' + r.fixed.join(' | ')); healState.fixed = [...r.fixed, ...healState.fixed].slice(0, 6); healState.at = Date.now(); }
+  // Devices still waking up right after startup (Bluetooth, USB) aren't reported as missing for the first 12 s.
+  const miss = Date.now() - bootAt > 12000 ? r.missing : [];
+  if (JSON.stringify(miss) !== JSON.stringify(healState.missing)) { healState.missing = miss; healState.at = Date.now(); }
+}
+function setupState() {
+  const snap = snapshot; const m = S().mixer; const mc = S().micChain;
+  if (!snap) return { ready: false, setup: S().app.setup, version: app.getVersion() };
+  const outs = snap.outputs; const ins = snap.inputs;
+  const cable = presentOut(mc.outId) ? outs.find((o) => o.id === mc.outId) : null;
+  const stream = presentOut(m.streamOut) ? outs.find((o) => o.id === m.streamOut) : null;
+  return {
+    ready: true, version: app.getVersion(), setup: S().app.setup,
+    speakers: outs.filter((o) => !setup.isVirtualOut(o)).map((o) => ({ id: o.id, name: o.name, isDefault: o.id === snap.defaultOutput, speakers: setup.looksLikeSpeakers(o) })),
+    listen: presentOut(m.listen.deviceId) || (outs.find((o) => o.id === snap.defaultOutput && !setup.isVirtualOut(o)) || {}).id || null,
+    mics: ins.map((i) => ({ id: i.id, name: i.name, real: setup.isRealMic(i), isDefault: i.id === snap.defaultInput || i.id === snap.defaultCommsInput })),
+    mic: (m.mic.deviceId && ins.some((i) => i.id === m.mic.deviceId)) ? m.mic.deviceId : (snap.defaultCommsInput || snap.defaultInput || null),
+    micFallback: !(m.mic.deviceId && ins.some((i) => i.id === m.mic.deviceId)),
+    cables: setup.detectAll(snap),
+    cable: cable ? { id: cable.id, name: cable.name, record: setup.recordSideOf(snap, cable) } : null,
+    suggestedCable: (() => { const c = setup.findMicCable(snap); return c ? { id: c.id, name: c.name, record: setup.recordSideOf(snap, c) } : null; })(),
+    streamMode: !!m.streamMode, stream: stream ? { id: stream.id, name: stream.name, record: setup.recordSideOf(snap, stream), cable: setup.isVirtualOut(stream) } : null,
+    streamOptions: outs.filter((o) => o.id !== (cable && cable.id) && o.id !== snap.defaultOutput && (setup.isVirtualOut(o) || /digital|spdif|s\/pdif|line out/i.test(o.name)) && !/sonar/i.test(o.name)).map((o) => ({ id: o.id, name: o.name, cable: setup.isVirtualOut(o) })),
+    onStream: !!mc.inStream, processing: !!mc.enabled && !mc.bypass, aec: !!(mc.aec && mc.aec.enabled), ns: !!(mc.ns && mc.ns.enabled),
+    chatbox: { ip: S().chatbox.ip, port: S().chatbox.port, live: !!S().chatbox.live },
+    vrchatRunning: snap.sessions.some((x) => /^vrchat$/i.test(x.process || '')),
+    discordRunning: snap.sessions.some((x) => /^discord/i.test(x.process || '')),
+    hifi: hifi.detect(snapshot), engineErrors: ((engineState && engineState.errors) || []).slice(0, 3),
+    heal: healState,
+  };
+}
+ipcMain.handle('setup:get', () => setupState());
+ipcMain.handle('setup:redetect', async () => { await firstRunSetup({ full: !S().app.setup.done }); pushMixer(); return setupState(); });
+ipcMain.handle('setup:speakers', async (_e, id) => {
+  const o = snapshot && snapshot.outputs.find((x) => x.id === id); if (!o) return { ok: false, error: 'That device is not connected.', state: setupState() };
+  const r = await switchListening(id, 'setup'); const L = listenCfg(); L.deviceId = id; L.name = o.name; store.saveSoon();
+  return { ...r, ok: r.ok !== false || r.error === 'busy', state: setupState() };
+});
+ipcMain.handle('setup:mic', (_e, id) => {
+  const i = snapshot && snapshot.inputs.find((x) => x.id === id);
+  S().mixer.mic.deviceId = i ? i.id : null; S().mixer.mic.name = i ? i.name : '';
+  store.saveSoon(); pushEngine(); pushMixer(); return setupState();
+});
+ipcMain.handle('setup:cable', (_e, id) => {
+  const mc = S().micChain; const o = snapshot && snapshot.outputs.find((x) => x.id === id);
+  mc.outId = o ? o.id : null; mc.outName = o ? o.name : ''; mc.autoCable = true; if (o) mc.enabled = true;
+  if (o && S().mixer.streamOut === o.id) { S().mixer.streamMode = false; S().mixer.streamOut = null; S().mixer.streamOutName = ''; } // never share the mic cable with the stream mix
+  store.saveSoon(); pushEngine(); pushMixer(); return setupState();
+});
+ipcMain.handle('setup:stream', (_e, id) => {
+  const m = S().mixer; const o = id && snapshot && snapshot.outputs.find((x) => x.id === id && x.id !== S().micChain.outId);
+  m.streamMode = !!o; m.streamOut = o ? o.id : null; m.streamOutName = o ? o.name : '';
+  store.saveSoon(); pushEngine(); pushMixer(); return setupState();
+});
+ipcMain.handle('setup:chatbox', (_e, { live, test }) => {
+  if (typeof live === 'boolean') { chatbox.setLive(live); S().chatbox.live = live; store.saveSoon(); refreshTray(); }
+  let sent = null;
+  if (test) { try { chatbox.osc_('/chatbox/input', [String(test).slice(0, 144), true, false]); sent = { ok: true, at: Date.now() }; } catch (e) { sent = { ok: false, error: e.message }; } }
+  return { ...setupState(), sent };
+});
+ipcMain.handle('setup:finish', (_e, { skipped } = {}) => {
+  const su = S().app.setup; su.done = true; su.skipped = !!skipped; su.at = Date.now(); su.version = app.getVersion();
+  S().app.hifiPromptDismissed = true; store.saveNow(); pushMixer(); return S();
+});
+ipcMain.handle('setup:open', (_e, what) => {
+  const urls = { discord: 'discord://-/settings/voice', sound: 'ms-settings:sound', mic: 'ms-settings:privacy-microphone', vrcosc: 'https://docs.vrchat.com/docs/osc-overview', hifi: 'https://vb-audio.com/Cable/', obs: 'https://obsproject.com/kb/audio-sources' };
+  if (urls[what]) shell.openExternal(urls[what]); return !!urls[what];
+});
+ipcMain.handle('setup:clipboard', (_e, text) => { require('electron').clipboard.writeText(String(text || '')); return true; });
+
 function engineConfig() {
   const m = S().mixer; const mc = S().micChain; const c = S().clips; const r = S().record;
   const sessions = visibleSessions();
@@ -311,14 +407,14 @@ function engineConfig() {
     channels: m.channelList.map(({ id }) => {
       const ch = m.channels[id];
       return {
-        id, mode: ch.mode, cableId: ch.cableId, volume: ch.volume * chatMixFactor(id), muted: ch.muted,
+        id, mode: ch.mode === 'cable' && !presentOut(ch.cableId) ? 'direct' : ch.mode, cableId: presentOut(ch.cableId), volume: ch.volume * chatMixFactor(id), muted: ch.muted,
         streamVolume: ch.streamVolume, streamMuted: ch.streamMuted, inClip: ch.inClip, inRec: ch.inRec, eq: ch.eq,
         pids: sessions.filter((s) => !s.system && channelFor(s) === id).map((s) => s.pid),
       };
     }),
     mic: {
       deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: micOutEffective(), gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
-      hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && mc.aec.refId ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
+      hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && presentOut(mc.aec.refId) ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
       gainDb: mc.gainDb, muted: false, inStream: mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
     },
     voice: { enabled: !!(c.enabled && c.voice.enabled), phrase: c.voice.phrase || 'clip it', modelPath: voiceModelPath() },
@@ -740,6 +836,36 @@ async function runListenArg(v, tries = 20) {
   try { fs.mkdirSync(path.join(app.getPath('userData'), 'logs'), { recursive: true }); fs.appendFileSync(path.join(app.getPath('userData'), 'logs', 'listen.log'), `[${new Date().toISOString()}] --listen=${v} -> ${JSON.stringify(r)}\n`); } catch {}
 }
 app.on('second-instance', (_e, argv) => { const l = listenArg(argv); if (l) return runListenArg(l); if (win) { win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
+// v2.4.0 self-test of the first-run setup (only with a separate BSP_PROFILE_DIR, never on real settings):
+// waits for the auto-setup, optionally picks a mic by name (BSP_SELFTEST_MIC), measures the mic path for 8 s,
+// sends a chatbox test, walks every wizard step (screenshot + check state) and writes logs/setup-selftest.json.
+async function setupSelfTest() {
+  const dir = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(dir, { recursive: true });
+  const rep = { startedAt: new Date().toISOString(), version: app.getVersion(), steps: [] };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let k = 0; k < 60 && !(snapshot && S().app.setup.auto); k++) await wait(500);
+  rep.autoSetup = S().app.setup;
+  if (process.env.BSP_SELFTEST_MIC) { const i = snapshot.inputs.find((x) => x.name.toLowerCase().includes(process.env.BSP_SELFTEST_MIC.toLowerCase()) && setup.isRealMic(x)); if (i) { S().mixer.mic.deviceId = i.id; S().mixer.mic.name = i.name; pushEngine(); rep.pickedMic = i.name; } }
+  await wait(4000);
+  const pk = { micPre: 0, micPost: 0, micOutPk: 0, frames: 0 };
+  const onLv = (d) => { const e = d.engine || {}; pk.frames++; for (const k of ['micPre', 'micPost', 'micOutPk']) pk[k] = Math.max(pk[k], e[k] > 0 ? e[k] : 0); };
+  helper.on('levels', onLv); await wait(8000); helper.off ? helper.off('levels', onLv) : helper.removeListener('levels', onLv);
+  rep.levels8s = Object.fromEntries(Object.entries(pk).map(([k, v]) => [k, k === 'frames' ? v : (v > 0 ? +(20 * Math.log10(v)).toFixed(1) : null)]));
+  if (process.env.BSP_SELFTEST_CHAT) { try { chatbox.osc_('/chatbox/input', ['Blur Sounds Pro setup self-test', true, false]); rep.chatboxTest = 'sent to ' + S().chatbox.ip + ':' + S().chatbox.port; } catch (e) { rep.chatboxTest = 'error ' + e.message; } }
+  rep.state = setupState(); rep.engineErrors = (engineState && engineState.errors) || [];
+  for (let k = 0; k < 8; k++) {
+    try {
+      await win.webContents.executeJavaScript(`(() => { const b = document.querySelectorAll('.sw-step')[${k}]; if (b) b.click(); return !!b; })()`);
+      await wait(k === 0 ? 1500 : 900);
+      const info = await win.webContents.executeJavaScript(`({ title: document.querySelector('.sw-title')?.textContent, checks: [...document.querySelectorAll('.sw-check')].map((c) => c.className.replace('sw-check ', '') + ': ' + c.textContent.slice(0, 160)), summary: [...document.querySelectorAll('.sw-sum')].map((c) => c.className.replace('sw-sum ', '') + ': ' + c.textContent) })`);
+      rep.steps.push(info);
+      const img = await Promise.race([win.webContents.capturePage(), wait(6000).then(() => null)]); if (img) fs.writeFileSync(path.join(dir, `selftest-step${k}.png`), img.toPNG()); else info.screenshot = 'timed out';
+    } catch (e) { rep.steps.push({ error: e.message }); }
+    fs.writeFileSync(path.join(dir, 'setup-selftest.json'), JSON.stringify(rep, null, 2));
+  }
+  if (process.env.BSP_SELFTEST_FINISH) { await win.webContents.executeJavaScript(`(() => { const b = [...document.querySelectorAll('.sw-nav .primary-btn')].pop(); if (b) b.click(); return !!b; })()`); await wait(1500); rep.afterFinish = { setup: S().app.setup, wizardOpen: await win.webContents.executeJavaScript(`!!document.querySelector('.sw')`) }; }
+  store.saveNow(); fs.writeFileSync(path.join(dir, 'setup-selftest.json'), JSON.stringify(rep, null, 2));
+}
 app.whenReady().then(() => {
   // Allow device labels for the soundboard output picker.
   session.defaultSession.setPermissionCheckHandler(() => true);
@@ -747,6 +873,7 @@ app.whenReady().then(() => {
   if (!S().app.importedMagicChatbox) { try { importMagicChatbox(S()); store.saveNow(); } catch {} }
   createWindow(); createTray(); helper.start(); media.syncRing();
   runListenArg(listenArg(process.argv));
+  if (process.argv.includes('--setup-selftest') && process.env.BSP_PROFILE_DIR) win.webContents.once('did-finish-load', () => setTimeout(() => setupSelfTest().catch((e) => { try { fs.writeFileSync(path.join(app.getPath('userData'), 'logs', 'setup-selftest.json'), JSON.stringify({ error: e.stack })); } catch {} }), 1500));
 });
 app.on('before-quit', () => { quitting = true; try { if (S().chatbox.live) chatbox.setLive(false); } catch {} store.saveNow(); media.shutdown(); helper.stop(); globalShortcut.unregisterAll(); });
 app.on('window-all-closed', () => app.quit());

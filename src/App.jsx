@@ -10,6 +10,7 @@ import Cables from './pages/Cables.jsx';
 import EngineAlert from './EngineAlert.jsx';
 import { ListenQuick } from './components/ListenSwitch.jsx';
 import { HifiFirstRun } from './components/HifiCable.jsx';
+import { SetupWizard, HealBanner } from './components/SetupWizard.jsx';
 
 const NAV = [
   { id: 'mixer', label: 'Mixer', icon: Icon.mixer },
@@ -26,10 +27,12 @@ export default function App() {
   const [page, setPage] = useState('mixer');
   const [helper, setHelper] = useState({ status: 'starting' });
   const [cb, setCb] = useState(null);
+  const [wizard, setWizard] = useState(null); // null | 'first' | 'rerun'
 
   useEffect(() => {
-    window.bsp.invoke('settings:get').then((s) => { setSettings(s); if (s.ui && s.ui.page) setPage(s.ui.page); });
+    window.bsp.invoke('settings:get').then((s) => { setSettings(s); if (s.ui && s.ui.page) setPage(s.ui.page); if (!(s.app && s.app.setup && s.app.setup.done)) setWizard('first'); });
     const offs = [window.bsp.onHelper(setHelper), window.bsp.onChatbox(setCb)];
+    const openW = () => setWizard('rerun'); window.addEventListener('bsp-setup-open', openW); offs.push(() => window.removeEventListener('bsp-setup-open', openW));
     return () => offs.forEach((f) => f());
   }, []);
 
@@ -59,10 +62,12 @@ export default function App() {
             <n.icon size={20} /><span>{n.label}</span>
           </button>
         ))}
-        <div className="rail-foot">v2.3</div>
+        <div className="rail-foot">v2.4</div>
       </nav>
-      {helper.status === 'running' && <HifiFirstRun settings={settings} update={update} />}
+      {helper.status === 'running' && !wizard && settings.app.setup?.done && <HifiFirstRun settings={settings} update={update} />}
+      {wizard && <SetupWizard rerun={wizard === 'rerun'} onClose={async () => { setWizard(null); setSettings({ ...(await window.bsp.invoke('settings:get')) }); }} />}
       <main className="content">
+        <HealBanner />
         {['failed', 'error', 'missing'].includes(helper.status) && page !== 'mixer' && <EngineAlert helper={helper} compact />}
         {page === 'mixer' && <Mixer />}
         {page === 'clips' && <Clips settings={settings} update={update} />}
