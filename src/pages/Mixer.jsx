@@ -4,6 +4,7 @@ import { Fader, Meter, HSlider, Select, Toggle, MiniMeter } from '../components/
 import { EqEditor } from '../components/Eq.jsx';
 import Drawer from '../components/Drawer.jsx';
 import EngineAlert from '../EngineAlert.jsx';
+import { ListenPanel } from '../components/ListenSwitch.jsx';
 
 const ICONS = { game: Icon.game, chat: Icon.headset, media: Icon.media, aux: Icon.aux, cable: Icon.cable };
 
@@ -45,8 +46,9 @@ export default function Mixer() {
   const master = outputs.find((o) => o.id === masterId) || outputs[0];
   const micId = s.mic.deviceId || st.defaultCommsInput || st.defaultInput;
   const mic = inputs.find((o) => o.id === micId) || inputs[0];
-  const lv = (pids) => Math.max(0, ...pids.map((p) => levels.sessions?.[p] || 0));
   const eng = levels.engine || {};
+  // v2.3: each app's own level = its Windows session peak meter, or the engine's capture of that exact process (cable mode)
+  const lv = (pids) => Math.max(0, ...pids.map((p) => Math.max(levels.sessions?.[p] || 0, eng.procs?.[p] || 0)));
 
   const chVal = (id, k) => (local[`ch.${id}.${k}`] ?? s.channels[id][k]);
   const setCh = (id, patch) => { setLocal((l) => ({ ...l, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [`ch.${id}.${k}`, v])) })); sendChannel(id, patch); };
@@ -105,6 +107,7 @@ export default function Mixer() {
           </div>
         </div>
       </section>
+      <ListenPanel />
 
       <section className="strips" style={{ gridTemplateColumns: `repeat(${chans.length + 1}, minmax(${streamMode ? 230 : 190}px, 1fr))` }}>
         {chans.map((c) => {
@@ -115,6 +118,7 @@ export default function Mixer() {
           const factor = c.id === 'game' ? (chatMix > 0 ? 1 - chatMix : 1) : c.id === 'chat' ? (chatMix < 0 ? 1 + chatMix : 1) : 1;
           const appLevel = apps.length ? Math.max(...apps.map((a) => lv(a.pids) * (appVal(a, 'muted') ? 0 : 1))) * vol * factor : 0;
           const level = Math.max(appLevel, eng.channels?.[c.id] || 0);
+          const rawLevel = apps.length ? Math.max(...apps.map((a) => lv(a.pids))) * vol * factor : 0; // activity while muted (greyed)
           const isCable = cfg.mode === 'cable' && cfg.cableId;
           return (
             <div key={c.id} className={`strip panel${dragProc ? ' drop-ready' : ''}${isCable ? ' cable' : ''}`}
@@ -130,7 +134,7 @@ export default function Mixer() {
                 {isCable ? <><Icon.cable size={13} /><span>{cableName(cfg.cableId).replace(/\s*\(.*$/, '')}</span></> : <><Icon.speaker size={13} /><span>{cfg.output ? (outputs.find((o) => o.id === cfg.output)?.name || 'device').replace(/\s*\(.*$/, '') : 'Direct · app default'}</span></>}
               </button>
               <div className={`strip-body${streamMode ? ' dual' : ''}`}>
-                <Meter level={muted ? 0 : level} muted={muted} />
+                <Meter level={muted ? rawLevel : level} muted={muted} />
                 <div className="fader-col"><Fader value={vol} onChange={(v) => setCh(c.id, { volume: v })} height={streamMode ? 200 : 230} />{streamMode && <span className="fader-tag">You</span>}</div>
                 {streamMode && <div className="fader-col"><Fader value={svol} onChange={(v) => setCh(c.id, { streamVolume: v })} height={200} red={false} />{<span className="fader-tag stream">Stream</span>}</div>}
                 <div className="strip-readout"><span className="big">{Math.round(vol * 100)}</span><span className="unit">%</span>{streamMode && <span className="sub">{Math.round(svol * 100)}</span>}</div>
@@ -153,7 +157,7 @@ export default function Mixer() {
                       <button className={`icon-btn tiny${appVal(a, 'muted') ? ' danger' : ''}`} onClick={() => setApp(a, { muted: !appVal(a, 'muted') })}>{appVal(a, 'muted') ? <Icon.muted size={14} /> : <Icon.speaker size={14} />}</button>
                     </div>
                     <div className="app-bottom"><HSlider value={appVal(a, 'volume')} onChange={(v) => setApp(a, { volume: v })} /><span className="num small">{Math.round(appVal(a, 'volume') * 100)}</span></div>
-                    <MiniMeter level={lv(a.pids) * (appVal(a, 'muted') || muted ? 0 : 1)} />
+                    <MiniMeter level={lv(a.pids)} muted={appVal(a, 'muted') || muted} />
                   </div>
                 ))}
               </div>

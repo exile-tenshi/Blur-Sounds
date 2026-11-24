@@ -19,8 +19,9 @@ function defaults() {
   return {
     version: 1,
     ui: { page: 'mixer' },
-    app: { startWithWindows: false, closeToTray: false, importedMagicChatbox: false },
+    app: { startWithWindows: false, closeToTray: false, importedMagicChatbox: false, hifiPromptDismissed: false },
     mixer: {
+      listen: { deviceId: null, name: '', presets: [], hotkey: '', autoReturn: true },
       channelList: [
         { id: 'game', label: 'Game', icon: 'game', builtin: true },
         { id: 'chat', label: 'Chat', icon: 'chat', builtin: true },

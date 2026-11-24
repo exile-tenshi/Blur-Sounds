@@ -389,13 +389,14 @@ public sealed class Engine
 
     public JsonObject Levels()
     {
-        var o = new JsonObject();
+        var o = new JsonObject(); var pp = new JsonObject();
         lock (l)
         {
             foreach (var c in chans.Values) { o[c.Id] = Math.Round(c.Peak, 3); }
-            foreach (var p in procs.Values) p.Peak *= 0.5f;
+            // v2.3: each captured app's own level (pre channel volume/mute), so its bar moves with its own audio
+            foreach (var p in procs.Values) { pp[p.Pid.ToString()] = Math.Round(p.Peak, 3); p.Peak *= 0.5f; }
         }
-        var r = new JsonObject { ["channels"] = o, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
+        var r = new JsonObject { ["channels"] = o, ["procs"] = pp, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
         r["ns"] = new JsonObject { ["engine"] = vc.NsActive, ["cutDb"] = Math.Round(vc.NsCutDb, 1), ["lsnr"] = Math.Round(vc.Lsnr, 1), ["cpuMs"] = Math.Round(vc.CpuMs, 2), ["error"] = vc.NsError,
             ["aecCutDb"] = Math.Round(vc.AecCutDb, 1), ["refActive"] = vc.RefActive, ["nearTalk"] = vc.NearTalk, ["aecDelayMs"] = Math.Round(vc.AecDelayMs), ["aec"] = vc.AecOn && aecRef != null, ["bypass"] = bypass };
         MicPeakPre *= 0.5f; MicPeakPost *= 0.5f;

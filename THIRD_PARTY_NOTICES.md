@@ -11,3 +11,7 @@ Blur Sounds Pro release builds include these third-party components. They are do
 - **NAudio 2.2.1**: MIT. https://github.com/naudio/NAudio
 - **Electron, React, Vite**: MIT.
 - **Weather data**: Open-Meteo (https://open-meteo.com), CC BY 4.0. IP location: ipwho.is and ip-api.com (free tiers).
+
+## VB-Audio Hi-Fi Cable (not included)
+
+The VB-Audio Hi-Fi Cable driver is **not** included or redistributed. When you click "Install Hi-Fi Cable", Blur Sounds Pro downloads the official package (`HiFiCableAsioBridgeSetup_v1007.zip`) from `download.vb-audio.com`, checks its SHA-256 and VB-Audio's Authenticode signature, and runs VB-Audio's own installer. Hi-Fi Cable & ASIO Bridge are © VB-Audio Software (Vincent Burel) and are donationware for end users: https://vb-audio.com/Cable/ · https://vb-audio.com/Voicemeeter/Donationware.htm

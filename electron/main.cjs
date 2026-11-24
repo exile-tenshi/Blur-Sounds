@@ -4,6 +4,7 @@ const fs = require('fs');
 const { Store, chDefault } = require('./settings.cjs');
 const { MediaManager } = require('./media.cjs');
 const { Helper } = require('./helper.cjs');
+const hifi = require('./hificable.cjs');
 const { Chatbox } = require('./chatbox.cjs');
 const { importMagicChatbox } = require('./mcb.cjs');
 
@@ -12,7 +13,7 @@ app.setName(APP_NAME);
 app.setPath('userData', path.join(app.getPath('appData'), APP_NAME));
 if (process.platform === 'win32') app.setAppUserModelId('com.blursounds.pro');
 
-if (!app.requestSingleInstanceLock()) { app.quit(); }
+if (!app.requestSingleInstanceLock()) { app.exit(0); } // hand off (e.g. --listen=...) to the running copy without starting Chromium
 
 const store = new Store(app.getPath('userData'));
 const S = () => store.get();
@@ -144,6 +145,7 @@ async function onSnapshot(snap) {
   snapshot = snap;
   const m = S().mixer; let dirty = false;
   await guardDefault().catch(() => {});
+  checkListeningDevice();
   for (const s of visibleSessions()) {
     const key = (s.process || '').toLowerCase();
     if (!m.apps[key]) {
@@ -226,7 +228,7 @@ function engineConfig() {
   const micKnown = !m.mic.deviceId || !snapshot || !snapshot.inputs || snapshot.inputs.some((i) => i.id === m.mic.deviceId);
   const micId = (micKnown && m.mic.deviceId) || (snapshot && (snapshot.defaultCommsInput || snapshot.defaultInput)) || null;
   return {
-    streamMode: !!m.streamMode, personalOut: m.personalOut || null, streamOut: m.streamOut || null,
+    streamMode: !!m.streamMode, personalOut: (m.personalOut && snapshot && snapshot.outputs.some((o) => o.id === m.personalOut)) ? m.personalOut : null, /* unplugged -> Windows default */ streamOut: m.streamOut || null,
     channels: m.channelList.map(({ id }) => {
       const ch = m.channels[id];
       return {
@@ -342,6 +344,122 @@ helper.on('status', (st, detail, info) => {
   helperStatus = { status: st, detail: detail || '', ...(info ? { message: info.message, hint: info.hint, code: info.code, fatal: !!info.fatal } : {}), log: helperLog };
   send('helper:status', helperStatus); if (!snapshot) pushMixer();
 });
+// ---------------- v2.3 listening device: one click moves everything you hear ----------------
+function listenCfg() { const m = S().mixer; if (!m.listen) m.listen = { deviceId: null, presets: [], hotkey: '' }; if (!Array.isArray(m.listen.presets)) m.listen.presets = []; return m.listen; }
+function listenable(o) { return o && !CABLE_RX.test(o.name) && !isGuarded(o.id); }
+function listenOptions() { return ((snapshot && snapshot.outputs) || []).filter(listenable).map((o) => ({ id: o.id, name: o.name })); }
+function currentListening() { return (snapshot && snapshot.defaultOutput) || listenCfg().deviceId || null; }
+let listenBusy = false;
+async function switchListening(to, why = 'manual') {
+  if (!snapshot) return { ok: false, error: 'The audio engine is not running.' };
+  const dev = snapshot.outputs.find((o) => o.id === to);
+  if (!dev) return { ok: false, error: 'That device is not connected.' };
+  if (!listenable(dev)) return { ok: false, error: `“${dev.name}” is a virtual cable / your stream output. Pick real headphones or speakers.` };
+  if (listenBusy) return { ok: false, error: 'busy' };
+  listenBusy = true;
+  try {
+    const m = S().mixer; const mc = S().micChain; const L = listenCfg();
+    const from = new Set([snapshot.defaultOutput, L.deviceId, m.personalOut].filter((x) => x && x !== to && !isGuarded(x)));
+    const changes = [];
+    // 1) Windows default for console + multimedia + communications
+    const r = await helper.call('setDefaultDevice', { deviceId: to, communications: true });
+    if (r && r.ok === false) throw new Error(r.error || 'Windows refused the new default device');
+    changes.push('Windows default (all roles)');
+    // 2) BSP's own "You hear" mix + mic monitor
+    if (m.personalOut !== to) { m.personalOut = to; changes.push('Blur Sounds “You hear” mix'); }
+    if (mc.monitor && mc.monitor.deviceId && mc.monitor.deviceId !== to) { mc.monitor.deviceId = to; changes.push('mic monitor'); }
+    if (mc.aec && mc.aec.refId && from.has(mc.aec.refId)) { mc.aec.refId = null; changes.push('echo-cancel reference (auto)'); }
+    // 3) channels that were sending to the old listening device (direct mode only; cable/stream routes untouched)
+    const moved = [];
+    for (const c of m.channelList) { const ch = m.channels[c.id]; if (ch.output && from.has(ch.output)) { ch.output = to; moved.push(c.id); } }
+    if (moved.length) changes.push('channels: ' + moved.map((id) => (m.channelList.find((c) => c.id === id) || {}).label || id).join(', '));
+    L.deviceId = to; L.name = dev.name; L.at = Date.now();
+    m.lastSafeDefault = to; store.saveSoon();
+    // 4) per-app routes Windows remembered for the old device -> new device
+    seenPids.clear(); let apps = 0;
+    for (const s of visibleSessions()) {
+      if (s.system) continue;
+      try {
+        const g = await helper.call('getAppOutput', { pid: s.pid }); const cur = g && g.ok !== false ? String(g.result || '') : '';
+        if (cur && [...from].some((f) => cur.includes(f.replace(/^\{[^}]*\}\./, '')))) { await helper.call('setAppOutput', { pid: s.pid, deviceId: to }); apps++; }
+      } catch {}
+      await applyOutput(s).catch(() => {});
+    }
+    if (apps) changes.push(`${apps} app route${apps > 1 ? 's' : ''}`);
+    pushEngine(); helper.call('refresh'); pushMixer(); refreshTray();
+    const res = { ok: true, deviceId: to, name: dev.name, changes, why };
+    send('listen:switched', res); return res;
+  } catch (e) { return { ok: false, error: e.message }; }
+  finally { listenBusy = false; }
+}
+function cycleListening() {
+  const L = listenCfg(); const opts = listenOptions(); const have = new Set(opts.map((o) => o.id));
+  let ring = L.presets.map((p) => p.deviceId).filter((id) => have.has(id));
+  if (ring.length < 2) ring = opts.map((o) => o.id);
+  if (!ring.length) return;
+  const now = ring.includes(currentListening()) ? currentListening() : L.deviceId; // default may briefly be a cable while the guard fixes it
+  const i = ring.indexOf(now);
+  return switchListening(ring[(i + 1) % ring.length], 'hotkey').then((r) => { if (r && r.ok) notify('Listening on ' + r.name); return r; });
+}
+function notify(body) { try { if (Notification.isSupported()) new Notification({ title: APP_NAME, body, silent: true }).show(); } catch {} }
+let lastListenMissing = null;
+function checkListeningDevice() {
+  // Chosen device unplugged: Windows already falls back on its own; keep BSP's mix audible (engine falls back to the default)
+  // and remember the choice, so plugging it back in restores it.
+  refreshTray();
+  const L = listenCfg(); if (!L.deviceId || !snapshot) return;
+  const present = snapshot.outputs.some((o) => o.id === L.deviceId);
+  if (!present && lastListenMissing !== L.deviceId) { lastListenMissing = L.deviceId; send('listen:missing', { deviceId: L.deviceId, name: L.name }); refreshTray(); }
+  else if (present && lastListenMissing === L.deviceId) { lastListenMissing = null; refreshTray(); if (snapshot.defaultOutput !== L.deviceId && L.autoReturn !== false) switchListening(L.deviceId, 'reconnected'); }
+}
+ipcMain.handle('listen:get', () => ({ current: currentListening(), options: listenOptions(), ...listenCfg(), missing: lastListenMissing }));
+ipcMain.handle('listen:set', (_e, id) => switchListening(id));
+ipcMain.handle('listen:cycle', () => cycleListening());
+ipcMain.handle('listen:presets', (_e, presets, hotkey) => {
+  const L = listenCfg();
+  if (Array.isArray(presets)) L.presets = presets.filter((p) => p && p.deviceId && !isGuarded(p.deviceId)).slice(0, 8).map((p) => ({ name: String(p.name || 'Preset').slice(0, 24), deviceId: p.deviceId, deviceName: p.deviceName || ((snapshot && snapshot.outputs.find((o) => o.id === p.deviceId)) || {}).name || '' }));
+  if (typeof hotkey === 'string') L.hotkey = hotkey.trim();
+  store.saveSoon(); registerHotkeys(); refreshTray(); return listenCfg();
+});
+
+// ---------------- v2.3 Hi-Fi Cable installer ----------------
+let hifiState = { phase: 'idle' };
+function hifiStatus() { return { ...hifi.detect(snapshot), phase: hifiState.phase, step: hifiState.step, pct: hifiState.pct, error: hifiState.error, verified: hifiState.verified, configured: hifiState.configured, page: hifi.PKG.page, donate: hifi.PKG.donate, version: 'v1.0.0.7 (HiFiCableAsioBridgeSetup_v1007.zip)' }; }
+function hifiPush(patch) { hifiState = { ...hifiState, ...patch }; send('hifi:state', hifiStatus()); }
+function autoConfigureHifi() {
+  const d = hifi.detect(snapshot); if (!d.installed) return null;
+  const m = S().mixer; const outs = snapshot.outputs; const done = [];
+  if (!m.streamOut || !outs.some((o) => o.id === m.streamOut)) { m.streamOut = d.inputId; done.push('Stream mix → Hi-Fi Cable Input'); }
+  if (m.guard === undefined) m.guard = true;
+  store.saveSoon(); pushEngine(); pushMixer();
+  return { streamOut: m.streamOut, recordWith: d.outputName, changes: done };
+}
+async function waitForHifi(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { helper.call('refresh'); await new Promise((r) => setTimeout(r, 2000)); if (hifi.detect(snapshot).installed) return true; }
+  return false;
+}
+ipcMain.handle('hifi:status', async () => ({ ...hifiStatus(), driver: await hifi.driverInfo() }));
+ipcMain.handle('hifi:install', async (_e, opts = {}) => {
+  if (['download', 'verify', 'extract', 'install', 'detect'].includes(hifiState.phase)) return hifiStatus();
+  const work = path.join(app.getPath('userData'), 'downloads', 'hifi-cable');
+  try {
+    hifiPush({ phase: 'download', step: 'download', pct: 0, error: null, verified: null, configured: null });
+    const prep = await hifi.prepare(work, (p) => hifiPush({ phase: p.step === 'verified' ? 'verify' : p.step, step: p.step, pct: p.pct ?? hifiState.pct, verified: p.verified || hifiState.verified }));
+    if (opts.dryRun) { hifiPush({ phase: 'ready', step: 'verified', verified: prep.verified, exe: prep.exe }); return { ...hifiStatus(), exe: prep.exe }; }
+    hifiPush({ phase: 'install', step: 'install' });
+    const r = await hifi.runInstaller(prep.exe);
+    if (!r.ok) { hifiPush({ phase: r.cancelled ? 'cancelled' : 'failed', error: r.error }); return hifiStatus(); }
+    hifiPush({ phase: 'detect', step: 'detect' });
+    if (await waitForHifi(45000)) { hifiPush({ phase: 'done', configured: autoConfigureHifi() }); }
+    else { const drv = await hifi.driverInfo(); hifiPush({ phase: drv.registered || drv.device ? 'reboot' : 'failed', error: drv.registered || drv.device ? null : `The installer finished (exit ${r.exitCode}) but no Hi-Fi Cable devices appeared. Run it again and click “Install Driver”.` }); }
+  } catch (e) { hifiPush({ phase: 'failed', error: e.message }); }
+  return hifiStatus();
+});
+ipcMain.handle('hifi:configure', () => { const c = autoConfigureHifi(); hifiPush({ configured: c }); return hifiStatus(); });
+ipcMain.handle('hifi:restart', () => { require('child_process').execFile('shutdown.exe', ['/r', '/t', '5', '/c', 'Restarting to finish installing VB-Audio Hi-Fi Cable'], { windowsHide: true }); return true; });
+ipcMain.handle('app:openUrl', (_e, url) => { if (/^https:\/\/(vb-audio\.com|www\.vb-audio\.com|github\.com)\//.test(url)) shell.openExternal(url); });
+
 ipcMain.handle('helper:retry', () => { helper.retry(); return true; });
 ipcMain.handle('helper:openLogs', () => { try { fs.mkdirSync(path.dirname(helperLog), { recursive: true }); if (!fs.existsSync(helperLog)) fs.writeFileSync(helperLog, ''); } catch {} shell.showItemInFolder(helperLog); return helperLog; });
 helper.on('log', (d) => { if (isDev) console.log('[helper]', d.message); });
@@ -478,6 +596,8 @@ function registerHotkeys() {
     const items = String(co['presets.items'] ?? 'brb 🚶\ngg wp 🏆\nlagging, one sec 🐢\nmuted, typing instead ⌨️').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 9);
     items.forEach((t, i) => { const k = `Ctrl+Shift+${i + 1}`; try { if (!globalShortcut.register(k, () => { const r = chatbox.sendMessage(t); if (r.ok) { const h = S().chatbox.history; h.unshift({ text: t, at: Date.now() }); store.saveSoon(); } })) bad.push(k); } catch { bad.push(k); } });
   }
+  const lk = listenCfg().hotkey;
+  if (lk) { try { if (!globalShortcut.register(lk, () => cycleListening())) bad.push(lk); } catch { bad.push(lk); } }
   const stop = S().soundboard.stopHotkey;
   if (stop) { try { if (!globalShortcut.register(stop, () => send('sound:stopAll'))) bad.push(stop); } catch { bad.push(stop); } }
   send('sound:hotkeyErrors', bad);
@@ -501,23 +621,49 @@ function createTray() {
   try {
     const img = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')).resize({ width: 16, height: 16 });
     tray = new Tray(img); tray.setToolTip(APP_NAME);
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open ' + APP_NAME, click: () => { win.show(); win.focus(); } },
-      { label: 'Chatbox live', type: 'checkbox', checked: !!S().chatbox.live, click: (mi) => { chatbox.setLive(mi.checked); S().chatbox.live = mi.checked; store.saveSoon(); } },
-      { type: 'separator' },
-      { label: 'Quit', click: () => { quitting = true; app.quit(); } },
-    ]));
+    refreshTray();
     tray.on('click', () => { win.show(); win.focus(); });
   } catch {}
 }
+let trayKey = '';
+function refreshTray() {
+  if (!tray) return;
+  const L = listenCfg(); const cur = currentListening(); const opts = listenOptions();
+  const presetItems = L.presets.map((p) => { const here = opts.some((o) => o.id === p.deviceId); return { label: `${p.name}${here ? '' : ' (not connected)'}`, type: 'radio', checked: cur === p.deviceId, enabled: here, click: () => switchListening(p.deviceId, 'tray') }; });
+  const devItems = opts.map((o) => ({ label: o.name, type: 'radio', checked: cur === o.id, click: () => switchListening(o.id, 'tray') }));
+  const key = JSON.stringify([cur, L.presets, opts, !!S().chatbox.live]); if (key === trayKey) return; trayKey = key;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open ' + APP_NAME, click: () => { win.show(); win.focus(); } },
+    { label: 'Listen on', submenu: [...presetItems, ...(presetItems.length ? [{ type: 'separator' }] : []), ...devItems, { type: 'separator' }, { label: 'Next device' + (L.hotkey ? `  (${L.hotkey})` : ''), click: () => cycleListening() }] },
+    { label: 'Chatbox live', type: 'checkbox', checked: !!S().chatbox.live, click: (mi) => { chatbox.setLive(mi.checked); S().chatbox.live = mi.checked; store.saveSoon(); } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { quitting = true; app.quit(); } },
+  ]));
+}
 
-app.on('second-instance', () => { if (win) { win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
+// v2.3: `BlurSoundsPro.exe --listen=next|<preset name>|<device id or name>` switches the listening device (Stream Deck, shortcuts).
+function listenArg(argv) { const a = (argv || []).find((x) => /^--listen=/.test(x)); return a ? a.slice(9).replace(/^"|"$/g, '') : null; }
+async function runListenArg(v, tries = 20) {
+  if (!v) return;
+  if (!snapshot) { if (tries > 0) setTimeout(() => runListenArg(v, tries - 1), 1000); return; }
+  const L = listenCfg(); const opts = listenOptions(); const lv = v.toLowerCase();
+  let r;
+  if (lv === 'next') r = await cycleListening();
+  else {
+    const p = L.presets.find((x) => x.name.toLowerCase() === lv);
+    const o = p ? { id: p.deviceId } : (opts.find((x) => x.id === v) || opts.find((x) => x.name.toLowerCase() === lv) || opts.find((x) => x.name.toLowerCase().includes(lv)));
+    r = o ? await switchListening(o.id, 'command line') : { ok: false, error: 'no device matches ' + v };
+  }
+  try { fs.mkdirSync(path.join(app.getPath('userData'), 'logs'), { recursive: true }); fs.appendFileSync(path.join(app.getPath('userData'), 'logs', 'listen.log'), `[${new Date().toISOString()}] --listen=${v} -> ${JSON.stringify(r)}\n`); } catch {}
+}
+app.on('second-instance', (_e, argv) => { const l = listenArg(argv); if (l) return runListenArg(l); if (win) { win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
 app.whenReady().then(() => {
   // Allow device labels for the soundboard output picker.
   session.defaultSession.setPermissionCheckHandler(() => true);
   session.defaultSession.setPermissionRequestHandler((_wc, _p, cb) => cb(true));
   if (!S().app.importedMagicChatbox) { try { importMagicChatbox(S()); store.saveNow(); } catch {} }
   createWindow(); createTray(); helper.start(); media.syncRing();
+  runListenArg(listenArg(process.argv));
 });
 app.on('before-quit', () => { quitting = true; try { if (S().chatbox.live) chatbox.setLive(false); } catch {} store.saveNow(); media.shutdown(); helper.stop(); globalShortcut.unregisterAll(); });
 app.on('window-all-closed', () => app.quit());

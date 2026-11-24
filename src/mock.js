@@ -84,8 +84,14 @@ export function installMock() {
       if (ch === 'share:presets') return { ...SHARE, last: null };
       if (ch === 'share:plan') { const p = SHARE.presets.find((x) => x.id === a[1].preset); const v = p.vertical; return { ok: true, src: { audio: [{ title: 'Desktop + mic' }, { title: 'Desktop audio' }, { title: 'Microphone' }] }, W: v ? 1080 : 1706, H: v ? 1920 : 720, fps: v ? 60 : 30, vKbps: v ? 12000 : 2378, aKbps: 128, dur: 30, estBytes: p.sizeBytes ? p.sizeBytes * 0.95 : 46e6, sizeBytes: p.sizeBytes || 0, hasAudio: true, warnings: [] }; }
       if (ch === 'clip:library') return a[0] === 'rec' ? { dir: 'C:\\Users\\you\\Videos\\Blur Sounds Pro\\Recordings', items: recs } : { dir: 'C:\\Users\\you\\Videos\\Blur Sounds Pro\\Clips', items: clips };
+      if (ch === 'listen:get') return { current: 'o-vr', options: [{ id: 'o-vr', name: 'Speakers (VR Headset)' }, { id: 'o-hp', name: 'Headphones (USB Headset)' }, { id: 'o-mon', name: 'Monitor (HDMI Audio)' }], presets: [{ name: 'VR', deviceId: 'o-vr', deviceName: 'Speakers (VR Headset)' }, { name: 'Headphones', deviceId: 'o-hp', deviceName: 'Headphones (USB Headset)' }], hotkey: 'Ctrl+Alt+O' };
+      if (ch === 'listen:set') return { ok: true, deviceId: a[0], name: 'Headphones (USB Headset)', changes: ['Windows default (all roles)', 'Blur Sounds “You hear” mix', 'channels: Game, Chat, Media, Aux', '2 app routes'] };
+      if (ch === 'hifi:status') return new URLSearchParams(location.search).get('hifi') === 'missing'
+        ? { installed: false, partial: false, phase: new URLSearchParams(location.search).get('phase') || 'idle', step: 'download', pct: 64, page: 'https://vb-audio.com/Cable/', donate: 'https://vb-audio.com/Voicemeeter/Donationware.htm', driver: { registered: false } }
+        : { installed: true, inputName: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', outputName: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', phase: 'idle', page: 'https://vb-audio.com/Cable/', donate: 'https://vb-audio.com/Voicemeeter/Donationware.htm', driver: { registered: true, device: 'VB-Audio Hi-Fi Cable', deviceStatus: 'OK' } };
       return null;
     },
+    onListen: on('listen:switched'), onListenMissing: on('listen:missing'), onHifi: on('hifi:state'),
     onMixer: (cb) => { setTimeout(() => cb(state()), 30); return on('mixer:state')(cb); },
     onLevels: on('mixer:levels'), onMedia: (cb) => { setTimeout(() => cb(media), 30); return () => {}; }, onHelper: (cb) => { setTimeout(() => cb({ status: 'running' }), 10); return () => {}; },
     onChatbox: on('chatbox:state'), onEngine: (cb) => { setTimeout(() => cb(engine), 20); return () => {}; }, onClipSaved: on('clip:saved'), onRecSaved: on('rec:saved'), onSoundTrigger: on('x'), onSoundStop: on('y'), onHotkeyErrors: on('z'), fileUrl: (p) => p,

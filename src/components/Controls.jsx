@@ -1,4 +1,21 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
+
+// v2.3 meter ballistics: instant attack, ~0.9 s fall from full scale (in the sqrt/display domain), 60 fps.
+export function useBallistics(level) {
+  const target = Math.min(1, Math.sqrt(Math.max(0, level || 0)));
+  const [shown, setShown] = useState(target); const cur = useRef(target); const raf = useRef(0); const last = useRef(0);
+  useEffect(() => {
+    if (target >= cur.current) { cur.current = target; setShown(target); return; }
+    const step = (t) => {
+      const dt = last.current ? Math.min(0.1, (t - last.current) / 1000) : 1 / 60; last.current = t;
+      cur.current = Math.max(target, cur.current - dt * 1.1); setShown(cur.current);
+      raf.current = cur.current > target ? requestAnimationFrame(step) : 0;
+    };
+    last.current = 0; cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf.current);
+  }, [target]);
+  return shown;
+}
 
 export function Fader({ value, onChange, disabled, height = 230, red = true }) {
   const ref = useRef(null);
@@ -27,11 +44,12 @@ export function Fader({ value, onChange, disabled, height = 230, red = true }) {
 }
 
 export function Meter({ level = 0, height = 230, muted }) {
-  const segs = 28; const lit = Math.round(Math.min(1, Math.sqrt(level)) * segs);
+  // muted: still shows the source's own activity, greyed, so you can see who is making sound
+  const segs = 28; const lit = Math.round(useBallistics(level) * segs);
   return (
-    <div className="meter" style={{ height }}>
+    <div className={`meter${muted ? ' muted' : ''}`} style={{ height }}>
       {Array.from({ length: segs }).map((_, i) => {
-        const idx = segs - 1 - i; const on = idx < lit && !muted;
+        const idx = segs - 1 - i; const on = idx < lit;
         const zone = idx > segs * 0.86 ? 'hot' : idx > segs * 0.66 ? 'warm' : 'ok';
         return <span key={i} className={`seg ${zone}${on ? ' on' : ''}`} />;
       })}
@@ -64,6 +82,7 @@ export function Select({ value, onChange, options, className = '' }) {
   );
 }
 
-export function MiniMeter({ level = 0 }) {
-  return <div className="minimeter"><i style={{ width: `${Math.min(100, Math.sqrt(level) * 100)}%` }} /></div>;
+export function MiniMeter({ level = 0, muted }) {
+  const v = useBallistics(level);
+  return <div className={`minimeter${muted ? ' muted' : ''}`}><i style={{ width: `${v * 100}%` }} /></div>;
 }

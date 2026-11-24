@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Icon } from '../components/Icons.jsx';
 import { Toggle, Select } from '../components/Controls.jsx';
+import { HifiPanel } from '../components/HifiCable.jsx';
 
 const short = (n) => String(n || '').replace(/\s*\(.*$/, '');
 
@@ -15,11 +16,12 @@ export default function Cables() {
   const outName = (id) => st.outputs.find((o) => o.id === id)?.name;
   return (
     <div className="page cables-page">
+      <HifiPanel />
       <section className="panel">
         <div className="row-between"><div><h3>Virtual cables</h3><p className="muted-text small">Audio devices Blur Sounds Pro can route channels, your stream mix and your processed mic through.</p></div>
           <span className={`pill ${st.sonarRunning ? 'warn' : 'ok'}`}><i />SteelSeries Sonar {st.sonarRunning ? 'running' : 'not running'}</span></div>
         <div className="cable-list">
-          {cables.length === 0 && <div className="apps-empty">No virtual cables found. Install the free VB-Audio Virtual Cable (vb-audio.com/Cable) to add one.</div>}
+          {cables.length === 0 && <div className="apps-empty">No virtual cables found. Use “Install Hi-Fi Cable” above to add one.</div>}
           {cables.map((c) => (
             <div key={c.id} className={`cable-row${c.ownedBySonar ? ' sonar' : ''}`}>
               <span className="strip-icon"><Icon.cable size={16} /></span>

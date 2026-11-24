@@ -76,7 +76,8 @@ h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .14e
 .hslider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--red) var(--p), #2a2e35 var(--p)); outline: none; }
 .hslider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 16px; border-radius: 2px; background: linear-gradient(180deg, #f3f4f6, #9da3ab); border: 1px solid #0b0c0e; box-shadow: 0 1px 3px rgba(0,0,0,.6); }
 .minimeter { height: 3px; background: #1d2025; border-radius: 2px; overflow: hidden; }
-.minimeter i { display: block; height: 100%; background: linear-gradient(90deg, #8e959e, #d8dce1 70%, var(--red2)); transition: width 80ms linear; }
+.minimeter i { display: block; height: 100%; background: linear-gradient(90deg, #8e959e, #d8dce1 70%, var(--red2)); }
+.minimeter.muted i { background: #4a4f57; }
 
 /* Mixer */
 .topbar { display: grid; grid-template-columns: 1.3fr 1fr; gap: 0; } .topbar.three { grid-template-columns: 1.25fr 1fr 1fr; } .master-slider { width: 150px !important; }
@@ -113,6 +114,7 @@ h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .14e
 .meter .seg { flex: 1; border-radius: 1px; background: #1a1d22; }
 .meter .seg.on.ok { background: #c8cdd3; } .meter .seg.on.warn { background: #e9eaec; } .meter .seg.on.hot { background: var(--red2); box-shadow: 0 0 6px var(--red-glow); }
 .meter .seg.on.warm { background: #eef0f2; }
+.meter.muted .seg.on, .meter.muted .seg.on.hot, .meter.muted .seg.on.warm { background: #4a4f57; box-shadow: none; }
 .mute-btn { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 8px; border-radius: 4px; border: 1px solid var(--line2); background: #111317; color: var(--silver); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 600; }
 .mute-btn:hover { border-color: #3a4049; }
 .mute-btn.active { background: linear-gradient(180deg, var(--red2), var(--red)); color: #fff; border-color: var(--red); box-shadow: 0 0 14px var(--red-glow); }
@@ -414,3 +416,53 @@ button.pill { cursor: pointer; }
 .engine-alert-text b { color: var(--text); }
 .engine-alert-text small { opacity: .75; font-variant-numeric: tabular-nums; }
 .engine-alert-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* v2.3 listening device switch */
+.listen-quick { position: relative; -webkit-app-region: no-drag; }
+.listen-pill { cursor: pointer; color: var(--silver); border-color: var(--red-dim); background: linear-gradient(180deg, #1a0d10, #0e1013); }
+.listen-pill:hover, .listen-pill.open { border-color: var(--red); color: #fff; }
+.listen-pill b { font-size: 9px; color: var(--red2); }
+.listen-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 280px; padding: 6px; background: #0b0c0f; border: 1px solid var(--red-dim); border-radius: 6px; box-shadow: 0 16px 40px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.02) inset; display: flex; flex-direction: column; gap: 2px; }
+.listen-menu-head { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); padding: 6px 8px 3px; }
+.listen-menu button { display: flex; justify-content: space-between; align-items: center; gap: 12px; text-align: left; padding: 7px 9px; border-radius: 4px; color: var(--silver); background: none; border: 1px solid transparent; cursor: pointer; font-size: 12px; }
+.listen-menu button span { display: inline-flex; align-items: center; gap: 7px; }
+.listen-menu button small { color: var(--muted); font-size: 10.5px; }
+.listen-menu button:hover:not(:disabled) { background: #16181c; border-color: var(--line2); }
+.listen-menu button.on { border-color: var(--red); background: linear-gradient(90deg, rgba(229,35,47,.18), transparent); color: #fff; }
+.listen-menu button:disabled { opacity: .4; cursor: default; }
+.listen-menu .listen-next { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 4px 4px; color: var(--red2); }
+.listen-panel { padding: 10px 14px; margin-bottom: 12px; }
+.listen-row { display: flex; align-items: center; gap: 14px; }
+.listen-label { display: flex; flex-direction: column; min-width: 120px; cursor: help; }
+.listen-tiles { display: flex; gap: 8px; flex: 1; overflow-x: auto; padding: 2px; }
+.listen-tile { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; text-align: left; min-width: 150px; max-width: 220px; padding: 7px 11px; border-radius: 5px; border: 1px solid var(--line); background: linear-gradient(180deg, #15171b, #0e1013); color: var(--silver); cursor: pointer; }
+.listen-tile svg { grid-row: span 2; color: var(--muted); }
+.listen-tile b { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.listen-tile small { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.listen-tile:hover:not(:disabled) { border-color: var(--line2); color: #fff; }
+.listen-tile.on { border-color: var(--red); background: linear-gradient(180deg, #2a0f14, #120a0c); box-shadow: 0 0 0 1px var(--red-dim) inset, 0 0 16px var(--red-glow); color: #fff; }
+.listen-tile.on svg { color: var(--red2); }
+.listen-tile.preset b::after { content: ' ★'; color: var(--red2); font-size: 10px; }
+.listen-tile:disabled { opacity: .4; cursor: default; }
+.listen-toast { margin: 8px 0 0; }
+.listen-toast.ok b { color: #fff; }
+.listen-toast.bad, .bad-text { color: var(--red2); }
+.ok-text { color: var(--ok); }
+.listen-edit { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.hotkey-field { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.hotkey-field input { width: 170px; cursor: pointer; }
+/* v2.3 Hi-Fi Cable installer */
+.hifi-panel { margin-bottom: 12px; }
+.hifi-title { display: flex; gap: 12px; align-items: flex-start; }
+.hifi-status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
+.hifi-status > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #0e1013; }
+.hifi-status b { color: var(--silver); font-size: 12px; }
+.hifi-steps { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; counter-reset: s; }
+.hifi-steps li { counter-increment: s; font-size: 12px; color: var(--muted); padding-left: 26px; position: relative; }
+.hifi-steps li::before { content: counter(s); position: absolute; left: 0; top: -1px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line2); display: grid; place-items: center; font-size: 10px; }
+.hifi-steps li.now { color: #fff; } .hifi-steps li.now::before { border-color: var(--red); background: var(--red); color: #fff; box-shadow: 0 0 10px var(--red-glow); }
+.hifi-steps li.done { color: var(--silver); } .hifi-steps li.done::before { content: '✓'; border-color: var(--ok); color: var(--ok); }
+.hifi-credit a { color: var(--red2); cursor: pointer; text-decoration: underline; }
+.modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(5,5,7,.72); display: grid; place-items: center; backdrop-filter: blur(2px); }
+.modal { width: min(760px, 92vw); max-height: 88vh; overflow: auto; padding: 20px 22px; border-color: var(--red-dim); }
+.modal h2 { margin: 0 0 6px; } .modal > p { color: var(--muted); margin: 0 0 12px; }

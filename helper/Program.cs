@@ -136,7 +136,7 @@ static class Program
             JsonObject lv;
             lock (AudioLock) lv = Levels();
             Send(new JsonObject { ["event"] = "levels", ["data"] = lv });
-            Thread.Sleep(66);
+            Thread.Sleep(33); // ~30 Hz meters (UI smooths: instant attack, slow decay)
         });
         StartMta(() =>
         {
@@ -287,25 +287,40 @@ static class Program
         return o;
     }
 
-    static readonly Dictionary<int, (string name, string display, string path)> ProcCache = new();
+    // v2.3: cache is keyed by pid + process start time, so a restarted app (or a reused pid) is re-identified.
+    static readonly Dictionary<int, (string name, string display, string path, long started)> ProcCache = new();
+    // Audio that plays from a helper/host process belongs to the app that launched it (WebView2, CEF, Qt WebEngine...).
+    static readonly HashSet<string> HostProcs = new(StringComparer.OrdinalIgnoreCase) { "msedgewebview2", "CefSharp.BrowserSubprocess", "QtWebEngineProcess", "steamwebhelper", "CefSubprocess", "cef_subprocess", "WebViewHost" };
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int cls, ref PBI pbi, int len, out int ret);
+    [StructLayout(LayoutKind.Sequential)] struct PBI { public IntPtr r1, peb, r2a, r2b, pid, parent; }
+    static int ParentPid(Process p) { try { var b = new PBI(); return NtQueryInformationProcess(p.Handle, 0, ref b, Marshal.SizeOf(b), out _) == 0 ? (int)b.parent : 0; } catch { return 0; } }
+    static long StartTicks(int pid) { try { using var p = Process.GetProcessById(pid); return p.StartTime.Ticks; } catch { return 0; } }
     static (string name, string display, string path) ProcInfo(int pid, AudioSessionControl s)
     {
         if (pid == 0 || s.IsSystemSoundsSession) return ("System", "System sounds", null);
-        if (ProcCache.TryGetValue(pid, out var c)) return c;
+        long st = StartTicks(pid);
+        if (ProcCache.TryGetValue(pid, out var c) && c.started == st) return (c.name, c.display, c.path);
         string name = "pid " + pid, display = null, path = null;
         try
         {
-            using var p = Process.GetProcessById(pid);
+            var p = Process.GetProcessById(pid);
+            // climb out of host/helper processes to the owning app (max 4 levels)
+            for (int k = 0; k < 4 && HostProcs.Contains(p.ProcessName); k++)
+            {
+                int pp = ParentPid(p); if (pp <= 4) break;
+                try { var par = Process.GetProcessById(pp); if (par.StartTime > p.StartTime) break; p.Dispose(); p = par; } catch { break; }
+            }
             name = p.ProcessName;
             try { path = p.MainModule?.FileName; display = p.MainModule?.FileVersionInfo?.FileDescription; } catch { }
             if (string.IsNullOrWhiteSpace(display)) { try { display = p.MainWindowTitle; } catch { } }
+            p.Dispose();
         }
         catch { }
         var dn = s.DisplayName;
         if (!string.IsNullOrWhiteSpace(dn) && !dn.StartsWith("@")) display = dn;
         if (string.IsNullOrWhiteSpace(display)) display = name;
         var r = (name, display.Trim(), path);
-        ProcCache[pid] = r;
+        ProcCache[pid] = (r.name, r.Item2, r.path, st);
         return r;
     }
 
