@@ -65,7 +65,7 @@ sealed class OutputSink : IDisposable
 {
     public readonly string DeviceId; WasapiOut wo; BufferedWaveProvider bwp; byte[] bytes = new byte[0];
     public string Error; public readonly int Rate, Channels; public float Peak; public long Written;
-    float[] conv = new float[0]; double pos; float lastL, lastR;
+    RateOut conv;
     public OutputSink(MMDeviceEnumerator en, string id)
     {
         DeviceId = id;
@@ -79,7 +79,7 @@ sealed class OutputSink : IDisposable
             {
                 bwp = new BufferedWaveProvider(WaveFormat.CreateIeeeFloatWaveFormat(r, c)) { DiscardOnBufferOverflow = true, BufferDuration = TimeSpan.FromMilliseconds(600), ReadFully = true };
                 wo = new WasapiOut(dev, AudioClientShareMode.Shared, true, 30);
-                wo.Init(bwp); wo.Play(); Rate = r; Channels = c; last = null; break;
+                wo.Init(bwp); wo.Play(); Rate = r; Channels = c; conv = new RateOut(r, c); last = null; break;
             }
             catch (Exception e) { last = e; try { wo?.Dispose(); } catch { } wo = null; }
         }
@@ -93,24 +93,7 @@ sealed class OutputSink : IDisposable
         float pk = 0; for (int i = 0; i < count; i++) { var a = Math.Abs(stereo[i]); if (a > pk) pk = a; }
         if (pk > Peak) Peak = pk; Written += count / 2;
         float[] src = stereo; int n = count;
-        if (Rate != 48000 || Channels != 2)
-        {
-            int inFrames = count / 2; double step = 48000.0 / Rate;
-            int outFrames = (int)Math.Ceiling((inFrames - pos) / step) + 1; int need = outFrames * Channels;
-            if (conv.Length < need) conv = new float[need];
-            int o = 0;
-            for (; pos < inFrames; pos += step)
-            {
-                int i0 = (int)pos; double f = pos - i0;
-                float l0 = i0 == 0 ? lastL : stereo[(i0 - 1) * 2], r0 = i0 == 0 ? lastR : stereo[(i0 - 1) * 2 + 1];
-                float l1 = stereo[i0 * 2], r1 = stereo[i0 * 2 + 1];
-                float l = (float)(l0 + (l1 - l0) * f), r = (float)(r0 + (r1 - r0) * f);
-                if (Channels == 1) conv[o++] = (l + r) * 0.5f;
-                else { conv[o++] = l; conv[o++] = r; for (int k = 2; k < Channels; k++) conv[o++] = 0; }
-            }
-            pos -= inFrames; if (inFrames > 0) { lastL = stereo[(inFrames - 1) * 2]; lastR = stereo[(inFrames - 1) * 2 + 1]; }
-            src = conv; n = o;
-        }
+        if (Rate != 48000 || Channels != 2) n = conv.Convert(stereo, count, out src);
         int nb = n * 4; if (bytes.Length < nb) bytes = new byte[nb];
         Buffer.BlockCopy(src, 0, bytes, 0, nb);
         bwp.AddSamples(bytes, 0, nb);
@@ -516,5 +499,31 @@ public sealed class Engine
             chans.Clear(); streamMode = false;
             try { sysLoop?.Dispose(); } catch { } sysLoop = null; clipSysWant = null;
         }
+    }
+}
+
+// v2.4.1 real-device pitch test: 440 Hz through the engine's OutputSink into a render endpoint (e.g. Hi-Fi Cable Input),
+// recorded from a capture endpoint (e.g. Hi-Fi Cable Output) through the engine's DeviceSource (-> 48 kHz).
+static class ToneTest
+{
+    public static int Run(string renderId, string captureId, double secs, double level)
+    {
+        var en = new MMDeviceEnumerator(); var sink = new OutputSink(en, renderId); var src = new DeviceSource(en, captureId, captureId == renderId); // same id = loopback of that output
+        var rec = new List<float>(); var sw = Stopwatch.StartNew(); long made = 0; var blk = new float[960]; var rd = new float[48000 * 2];
+        while (sw.Elapsed.TotalSeconds < secs)
+        {
+            long target = (long)(sw.Elapsed.TotalSeconds * 48000) + 2400;
+            while (made < target) { for (int i = 0; i < 480; i++) { float v = (float)(level * Math.Sin(2 * Math.PI * 440 * (made + i) / 48000.0)); blk[i * 2] = v; blk[i * 2 + 1] = v; } sink.Write(blk, 960); made += 480; }
+            int got = src.Ring.Count; if (got > 0) { src.Ring.Read(rd, Math.Min(got, rd.Length), 48000 * 8); for (int k = 0; k < Math.Min(got, rd.Length); k++) rec.Add(rd[k]); }
+            Thread.Sleep(5);
+        }
+        sink.Dispose(); src.Dispose();
+        var a = rec.ToArray(); int sk = Math.Min(a.Length, 48000); var b = a.Skip(sk).ToArray(); // skip the first second (start-up)
+        float pk = 0; foreach (var v in b) pk = Math.Max(pk, Math.Abs(v));
+        double f = PitchCheck.Freq(b, b.Length, 2, 48000);
+        var o = new JsonObject { ["render"] = en.GetDevice(renderId).FriendlyName, ["renderRate"] = sink.Rate, ["capture"] = en.GetDevice(captureId).FriendlyName, ["captureRate"] = src.SampleRate,
+            ["sentHz"] = 440, ["gotHz"] = Math.Round(f, 2), ["cents"] = f > 0 ? Math.Round(1200 * Math.Log2(f / 440), 1) : null, ["peakDb"] = pk > 0 ? Math.Round(20 * Math.Log10(pk), 1) : null };
+        o["pass"] = f > 0 && Math.Abs(1200 * Math.Log2(f / 440)) < 10;
+        Console.WriteLine(o.ToJsonString()); return 0;
     }
 }

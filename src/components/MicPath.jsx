@@ -47,15 +47,9 @@ export function MicPath({ st, eng, onOpenChain }) {
         {p.streamMode && <div className="mp-stream" title="Off: your mic is NOT mixed into the stream mix that Streamlabs / OBS capture. It still goes to your virtual mic for VRChat / Discord."><Toggle small on={!!p.onStream} onChange={(v) => window.bsp.invoke('mic:chain', { inStream: v })} label="Mic on stream" /></div>}
         <button className="ghost-btn" disabled={t && (t.phase === 'rec' || t.phase === 'play')} onClick={run}><Icon.play size={13} /> {t?.phase === 'rec' ? `Recording… ${t.left}` : t?.phase === 'play' ? 'Playing back…' : 'Mic test'}</button>
       </div>
-      {p.shared && !p.onStream && (
-        <div className="warn-box">Your stream mix also goes to <b>{short(p.stream?.name)}</b>, the same cable as your mic, so anything capturing “{p.stream?.recordName}” (Streamlabs / OBS) still hears your mic. Give the stream mix its own device:
-          {' '}<select value={tgt} onChange={(e) => setTgt(e.target.value)}><option value="">Choose…</option>{(p.streamTargets || []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>
-          {' '}<button className="primary-btn" disabled={!tgt} onClick={() => window.bsp.invoke('stream:route', tgt)}>Move stream mix</button>
-          <div className="hint">Then in Streamlabs / OBS capture that device (an “Audio Output Capture” for a speaker/digital output, or its “… Output” recording device for a cable). For a dedicated stream cable you can also install the free standard VB-CABLE from vb-audio.com.</div>
-        </div>)}
-      {p.streamMode && p.stream && !p.shared && <p className="hint">Stream mix → <b>{short(p.stream.name)}</b>{p.onStream ? ' (includes your mic)' : ' (no mic)'}. Capture “{p.stream.recordName || p.stream.name}” in Streamlabs / OBS.</p>}
       {p.out && <p className="hint">In Discord / VRChat choose <b>“{p.out.recordName}”</b> as your microphone.</p>}
       {p.note && <p className="hint ok-text">{p.note}</p>}
+      <CableRate r={st.cableRate} />
       {t?.phase === 'done' && (t.peak > 0.003 ? <p className="hint ok-text">Mic test: “{t.device}” got your voice (peak {db(t.peak)} dB). You just heard what others hear.</p>
         : <p className="warn-box">Mic test: “{t.device}” was silent for 3 s. Talk during the test; if it stays silent, check the meters above: no input = mic/privacy settings, input but no “Processed” = the voice gate is closed (lower its threshold), processed but no output = the cable isn't receiving.</p>)}
       {t?.phase === 'err' && <p className="warn-box">Mic test failed: {t.error}</p>}
@@ -70,4 +64,19 @@ export function MicPath({ st, eng, onOpenChain }) {
       {p.errors?.length > 0 && <p className="warn-box">Audio engine: {p.errors.join(' · ')}</p>}
     </section>
   );
+}
+
+// v2.4.1: Hi-Fi Cable has no sample-rate converter; its two sides must run at the same rate or voices change pitch.
+const khz = (r) => (r ? `${+(r / 1000).toFixed(1)} kHz` : '?');
+export function CableRate({ r }) {
+  const [busy, setBusy] = useState(false);
+  if (!r || !r.capture || !r.render.rate || !r.capture.rate) return null;
+  if (r.ok) return <p className="hint muted-text small">{short(r.render.name)} {khz(r.render.rate)} → {short(r.capture.name)} {khz(r.capture.rate)}: same rate, so your voice keeps its pitch.</p>;
+  const pct = Math.round(Math.abs(1 - r.capture.rate / r.render.rate) * 100);
+  return (
+    <div className="warn-box"><b>Your voice is {r.capture.rate < r.render.rate ? 'deeper' : 'higher'} than it should be (~{pct}%).</b> “{r.render.name}” runs at {khz(r.render.rate)} but “{r.capture.name}” at {khz(r.capture.rate)}, and Hi-Fi Cable has no rate converter.
+      {' '}<button className="primary-btn" disabled={busy} onClick={async () => { setBusy(true); try { await window.bsp.invoke('cable:fixRate'); } finally { setBusy(false); } }}>{busy ? 'Fixing…' : 'Set both to 48 kHz'}</button>
+      {r.error && <div className="hint">{r.error}</div>}
+      <div className="hint">By hand: Windows Sound settings → More sound settings → Playback → “{r.render.name}” → Properties → Advanced → 48000 Hz; then Recording → “{r.capture.name}” → the same 48000 Hz. Restart Discord / VRChat afterwards.</div>
+    </div>);
 }

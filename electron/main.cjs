@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, globalShortcut, Tray, Menu, nativeImage, session, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { Store, chDefault } = require('./settings.cjs');
+const { Store, chDefault, defaults } = require('./settings.cjs');
 const { MediaManager } = require('./media.cjs');
 const { Helper } = require('./helper.cjs');
 const hifi = require('./hificable.cjs');
@@ -191,7 +191,7 @@ async function pushMixer() {
     guarded: [...guardedIds()], guardOn: S().mixer.guard !== false, guardLog: guardLog.slice(0, 5), defaultIsGuarded: isGuarded(snapshot.defaultOutput),
     sessions: [...byProc.values()],
     settings: S().mixer, micChain: S().micChain, micPath: micPath(),
-    setup: S().app.setup, heal: healState,
+    setup: S().app.setup, heal: healState, stream: streamInfoFull(), cableRate: rateInfo(),
   });
 }
 
@@ -324,6 +324,7 @@ async function firstRunSetup(opts = {}) {
 }
 function selfHeal() {
   if (!snapshot) return;
+  checkCableRates().catch(() => {});
   const r = setup.heal(S(), snapshot);
   if (r.changed) { store.saveSoon(); pushEngine(); }
   if (r.fixed.length) { helperLogLine('self-heal: ' + r.fixed.join(' | ')); healState.fixed = [...r.fixed, ...healState.fixed].slice(0, 6); healState.at = Date.now(); }
@@ -331,6 +332,48 @@ function selfHeal() {
   const miss = Date.now() - bootAt > 12000 ? r.missing : [];
   if (JSON.stringify(miss) !== JSON.stringify(healState.missing)) { healState.missing = miss; healState.at = Date.now(); }
 }
+// v2.4.1: Hi-Fi Cable has no sample-rate converter. If its two sides run at different Windows formats (e.g. Input 48 kHz,
+// Output 44.1 kHz) everything through it plays at the wrong speed: 48 -> 44.1 drops the pitch ~8% (a deeper voice).
+// Both sides are set to 48 kHz once per mismatch; if Windows refuses, the Mic path shows the manual fix.
+const rateState = { pairs: [], error: null, fixedAt: 0 }; const rateTried = new Set();
+function hifiPairs(snap) {
+  return (snap.outputs || []).filter((o) => /hi-?fi cable input/i.test(o.name)).map((o) => {
+    const r = setup.recordSideOf(snap, o); const i = r && r.id ? snap.inputs.find((x) => x.id === r.id) : null;
+    const p = { render: { id: o.id, name: o.name, rate: o.rate || null }, capture: i ? { id: i.id, name: i.name, rate: i.rate || null } : null };
+    p.ok = !p.capture || !p.render.rate || !p.capture.rate || p.render.rate === p.capture.rate; return p;
+  });
+}
+async function checkCableRates() {
+  if (!snapshot || helperStatus.status !== 'running') return;
+  rateState.pairs = hifiPairs(snapshot);
+  for (const p of rateState.pairs) {
+    if (p.ok) continue;
+    const key = `${p.render.id}|${p.render.rate}|${p.capture.rate}`; if (rateTried.has(key)) continue; rateTried.add(key);
+    const res = [];
+    for (const d of [p.render, p.capture]) {
+      if (d.rate === 48000) continue;
+      const r = await helper.call('setDeviceRate', { deviceId: d.id, rate: 48000 }).catch((e) => ({ ok: false, error: e.message }));
+      res.push({ name: d.name, from: d.rate, ok: !!(r && r.ok !== false && r.result && r.result.ok), error: (r && (r.error || (r.result && r.result.hr))) || null });
+    }
+    helperLogLine('hi-fi cable rates: ' + JSON.stringify({ render: p.render.rate, capture: p.capture.rate, res }));
+    if (res.every((x) => x.ok)) {
+      rateState.error = null; rateState.fixedAt = Date.now();
+      healState.fixed = [`Hi-Fi Cable's two sides were at different sample rates (${p.render.rate / 1000} vs ${p.capture.rate / 1000} kHz), which makes voices sound deeper or higher. Both are now 48 kHz`, ...healState.fixed].slice(0, 6); healState.at = Date.now();
+      setTimeout(async () => { await helper.call('engineReset'); helper.call('engineConfig', { config: engineConfig() }); helper.call('refresh'); }, 700);
+    } else rateState.error = `Windows didn't let Blur Sounds Pro change the format (${res.filter((x) => !x.ok).map((x) => `${x.name}: ${x.error || 'refused'}`).join('; ')}).`;
+    pushMixer();
+  }
+}
+function rateInfo() { const p = rateState.pairs.find((x) => S().micChain.outId && x.render.id === S().micChain.outId) || rateState.pairs[0]; return p ? { ...p, error: p.ok ? null : rateState.error, fixedAt: rateState.fixedAt } : null; }
+ipcMain.handle('cable:fixRate', async () => { rateTried.clear(); rateState.error = null; await checkCableRates(); return rateInfo(); });
+// v2.4.1: "Reset mic chain" = safe processing defaults. Device picks, the virtual-mic cable, on/off and Mic on stream are kept.
+ipcMain.handle('micchain:reset', () => {
+  const mc = S().micChain; const d = defaults().micChain;
+  const keep = { enabled: mc.enabled, outId: mc.outId, outName: mc.outName, inStream: mc.inStream, aecRef: mc.aec && mc.aec.refId };
+  for (const k of Object.keys(d)) mc[k] = JSON.parse(JSON.stringify(d[k]));
+  Object.assign(mc, { enabled: keep.enabled, outId: keep.outId, outName: keep.outName, inStream: keep.inStream }); mc.aec.refId = keep.aecRef || null;
+  store.saveSoon(); pushEngine(); pushMixer(); return mc;
+});
 function setupState() {
   const snap = snapshot; const m = S().mixer; const mc = S().micChain;
   if (!snap) return { ready: false, setup: S().app.setup, version: app.getVersion() };
@@ -354,7 +397,7 @@ function setupState() {
     vrchatRunning: snap.sessions.some((x) => /^vrchat$/i.test(x.process || '')),
     discordRunning: snap.sessions.some((x) => /^discord/i.test(x.process || '')),
     hifi: hifi.detect(snapshot), engineErrors: ((engineState && engineState.errors) || []).slice(0, 3),
-    heal: healState,
+    heal: healState, streamInfo: streamInfoFull(),
   };
 }
 ipcMain.handle('setup:get', () => setupState());
@@ -395,6 +438,52 @@ ipcMain.handle('setup:open', (_e, what) => {
   if (urls[what]) shell.openExternal(urls[what]); return !!urls[what];
 });
 ipcMain.handle('setup:clipboard', (_e, text) => { require('electron').clipboard.writeText(String(text || '')); return true; });
+
+// ---------------- v2.4.1 stream destination ----------------
+function streamInfoFull() {
+  if (!snapshot) return null;
+  return { ...setup.streamInfo(S(), snapshot), vbc: vbcStatus(), hifiInstalled: hifi.detect(snapshot).installed, pending: S().mixer.streamPending || null };
+}
+// via: 'off' | 'desktop' | 'cable' | 'output' (with id)
+function setStream({ via, id } = {}) {
+  const m = S().mixer; const mc = S().micChain;
+  if (via === 'cable' || via === 'output') {
+    const o = snapshot && snapshot.outputs.find((x) => x.id === id);
+    if (!o) return { ok: false, error: 'That device is not connected.', stream: streamInfoFull() };
+    if (o.id === presentOut(mc.outId)) return { ok: false, error: `“${o.name}” is your virtual mic. The stream mix needs a different device, or Discord / VRChat would hear your apps.`, stream: streamInfoFull() };
+    if (o.id === snapshot.defaultOutput) return { ok: false, error: `“${o.name}” is what you listen on. Use “Desktop audio” instead.`, stream: streamInfoFull() };
+    m.streamMode = true; m.streamVia = setup.isVirtualOut(o) ? 'cable' : 'output'; m.streamOut = o.id; m.streamOutName = o.name;
+  } else if (via === 'desktop' || via === 'off') { m.streamMode = false; m.streamVia = via; }
+  else return { ok: false, error: 'unknown destination', stream: streamInfoFull() };
+  store.saveSoon(); seenPids.clear(); pushEngine(); helper.call('refresh'); pushMixer();
+  return { ok: true, stream: streamInfoFull() };
+}
+ipcMain.handle('stream:set', async (_e, o) => setStream(o));
+// ---- second cable (standard VB-CABLE) for the stream mix: official download at click time, verified, run elevated ----
+let vbcState = { phase: 'idle' };
+function vbcStatus() { return { ...hifi.detectVb(snapshot), phase: vbcState.phase, step: vbcState.step, pct: vbcState.pct, error: vbcState.error, verified: vbcState.verified, page: hifi.VBC.page, donate: hifi.VBC.donate, version: 'VBCABLE_Driver_Pack46.zip' }; }
+function vbcPush(patch) { vbcState = { ...vbcState, ...patch }; send('vbcable:state', vbcStatus()); pushMixer(); }
+ipcMain.handle('vbcable:status', () => vbcStatus());
+ipcMain.handle('vbcable:install', async (_e, opts = {}) => {
+  if (['download', 'verify', 'extract', 'install', 'detect'].includes(vbcState.phase)) return vbcStatus();
+  const work = path.join(app.getPath('userData'), 'downloads', 'vb-cable');
+  S().mixer.streamPending = 'cable'; store.saveSoon(); // route the stream mix to it as soon as it appears (also after a restart)
+  try {
+    vbcPush({ phase: 'download', step: 'download', pct: 0, error: null, verified: null });
+    const prep = await hifi.prepare(work, (p) => vbcPush({ phase: p.step === 'verified' ? 'verify' : p.step, step: p.step, pct: p.pct ?? vbcState.pct, verified: p.verified || vbcState.verified }), hifi.VBC);
+    if (opts.dryRun) { vbcPush({ phase: 'ready', step: 'verified', verified: prep.verified }); return { ...vbcStatus(), exe: prep.exe }; }
+    vbcPush({ phase: 'install', step: 'install' });
+    const r = await hifi.runInstaller(prep.exe);
+    if (!r.ok) { vbcPush({ phase: r.cancelled ? 'cancelled' : 'failed', error: r.error }); return vbcStatus(); }
+    vbcPush({ phase: 'detect', step: 'detect' });
+    const end = Date.now() + 45000; let ok = false;
+    while (Date.now() < end) { helper.call('refresh'); await new Promise((res) => setTimeout(res, 2000)); if (hifi.detectVb(snapshot).installed) { ok = true; break; } }
+    if (ok) { selfHeal(); vbcPush({ phase: 'done' }); }
+    else { const drv = await hifi.driverInfo(hifi.VBC.pnp); vbcPush({ phase: drv.registered || drv.device ? 'reboot' : 'failed', error: drv.registered || drv.device ? null : `The installer finished (exit ${r.exitCode}) but no VB-CABLE devices appeared. Run it again and click “Install Driver”.` }); }
+  } catch (e) { vbcPush({ phase: 'failed', error: e.message }); }
+  return vbcStatus();
+});
+ipcMain.handle('vbcable:restart', () => { require('child_process').execFile('shutdown.exe', ['/r', '/t', '5', '/c', 'Restarting to finish installing VB-Audio VB-CABLE'], { windowsHide: true }); return true; });
 
 function engineConfig() {
   const m = S().mixer; const mc = S().micChain; const c = S().clips; const r = S().record;
@@ -451,7 +540,10 @@ ipcMain.handle('mixer:channel', async (_e, ch, patch) => {
 });
 ipcMain.handle('mixer:get', () => { pushMixer(); return true; });
 ipcMain.handle('mixer:global', async (_e, patch) => {
-  Object.assign(S().mixer, patch); store.saveSoon();
+  Object.assign(S().mixer, patch);
+  if (patch.streamMode === true && snapshot) { const m = S().mixer; if (!presentOut(m.streamOut) || m.streamOut === presentOut(S().micChain.outId)) { const sc = setup.findStreamCable(snapshot, presentOut(S().micChain.outId)); if (sc) { m.streamOut = sc.id; m.streamOutName = sc.name; m.streamVia = 'cable'; } } }
+  if (patch.streamMode === false && S().mixer.streamVia !== 'desktop') S().mixer.streamVia = 'off';
+  store.saveSoon();
   if ('chatMix' in patch) { await applyChannel('game'); await applyChannel('chat'); }
   pushEngine(); pushMixer(); return S().mixer;
 });
@@ -607,8 +699,10 @@ function hifiPush(patch) { hifiState = { ...hifiState, ...patch }; send('hifi:st
 function autoConfigureHifi() {
   const d = hifi.detect(snapshot); if (!d.installed) return null;
   const m = S().mixer; const outs = snapshot.outputs; const done = [];
-  if (!m.streamOut || !outs.some((o) => o.id === m.streamOut)) { m.streamOut = d.inputId; done.push('Stream mix → Hi-Fi Cable Input'); }
-  const mc = S().micChain; if (!presentOut(mc.outId) && !m.streamMode) { mc.outId = d.inputId; mc.outName = d.inputName; mc.enabled = true; mc.autoCable = true; done.push('Mic → Hi-Fi Cable Input (pick “' + d.outputName + '” as your mic in Discord / VRChat)'); }
+  const mc = S().micChain;
+  // v2.4.1: Hi-Fi becomes the stream cable only when the mic already has its own cable; otherwise it is the mic.
+  if ((!m.streamOut || !outs.some((o) => o.id === m.streamOut)) && presentOut(mc.outId) && mc.outId !== d.inputId) { m.streamOut = d.inputId; m.streamOutName = d.inputName; m.streamMode = true; m.streamVia = 'cable'; delete m.streamPending; done.push('Stream mix → Hi-Fi Cable Input'); }
+  if (!presentOut(mc.outId)) { mc.outId = d.inputId; mc.outName = d.inputName; mc.enabled = true; mc.autoCable = true; done.push('Mic → Hi-Fi Cable Input (pick “' + d.outputName + '” as your mic in Discord / VRChat)'); }
   if (m.guard === undefined) m.guard = true;
   store.saveSoon(); pushEngine(); pushMixer();
   return { streamOut: m.streamOut, recordWith: d.outputName, changes: done };
@@ -864,6 +958,19 @@ async function setupSelfTest() {
     fs.writeFileSync(path.join(dir, 'setup-selftest.json'), JSON.stringify(rep, null, 2));
   }
   if (process.env.BSP_SELFTEST_FINISH) { await win.webContents.executeJavaScript(`(() => { const b = [...document.querySelectorAll('.sw-nav .primary-btn')].pop(); if (b) b.click(); return !!b; })()`); await wait(1500); rep.afterFinish = { setup: S().app.setup, wizardOpen: await win.webContents.executeJavaScript(`!!document.querySelector('.sw')`) }; }
+  rep.streamAfterSetup = streamInfoFull(); rep.cableRate = rateInfo(); rep.healFixed = healState.fixed;
+  // Optional stream-mix proof: BSP_SELFTEST_STREAM=<unused output name>. Peaks of the stream mix with the channels on stream, then all muted on stream, then restored.
+  if (process.env.BSP_SELFTEST_STREAM) {
+    const o = snapshot.outputs.find((x) => x.name.toLowerCase().includes(process.env.BSP_SELFTEST_STREAM.toLowerCase()));
+    const measure = async (ms) => { const q = { streamPk: 0, master: 0, frames: 0 }; const f = (d) => { const e = d.engine || {}; q.frames++; q.streamPk = Math.max(q.streamPk, e.streamPk > 0 ? e.streamPk : 0); q.master = Math.max(q.master, d.master || 0); };
+      helper.on('levels', f); await wait(ms); helper.off ? helper.off('levels', f) : helper.removeListener('levels', f); return Object.fromEntries(Object.entries(q).map(([k, v]) => [k, k === 'frames' ? v : (v > 0 ? +(20 * Math.log10(v)).toFixed(1) : null)])); };
+    const t = rep.streamTest = { device: o && o.name, set: o ? setStream({ via: o.id === snapshot.defaultOutput ? 'desktop' : 'output', id: o.id }).ok : false };
+    await wait(3000); t.info = streamInfoFull(); t.broadcastOn = await measure(6000);
+    const ch = S().mixer.channels; const prev = Object.fromEntries(Object.entries(ch).map(([k, c]) => [k, c.streamMuted]));
+    for (const c of Object.values(ch)) c.streamMuted = true; pushEngine(); await wait(1500); t.allMutedOnStream = await measure(6000);
+    for (const [k, v] of Object.entries(prev)) ch[k].streamMuted = v; pushEngine(); await wait(1500); t.restored = await measure(5000);
+    const img = await Promise.race([win.webContents.capturePage(), wait(6000).then(() => null)]); if (img) fs.writeFileSync(path.join(dir, 'selftest-stream.png'), img.toPNG());
+  }
   store.saveNow(); fs.writeFileSync(path.join(dir, 'setup-selftest.json'), JSON.stringify(rep, null, 2));
 }
 app.whenReady().then(() => {

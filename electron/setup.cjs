@@ -82,8 +82,14 @@ function autoSetup(st, snap, { full = true } = {}) {
   sum.cable = cable ? cable.name : null; sum.recordName = cable ? recordSideOf(snap, cable).name : null;
   changes.push(cable ? `Mic → “${cable.name}” (pick “${sum.recordName}” as the mic in Discord / VRChat)` : 'No virtual cable yet (install Hi-Fi Cable to use the processed mic in Discord / VRChat)');
   const sc = findStreamCable(snap, cable && cable.id);
-  if (sc) { m.streamMode = true; m.streamOut = sc.id; m.streamOutName = sc.name; sum.stream = sc.name; sum.streamRecord = recordSideOf(snap, sc).name; changes.push(`Stream mix → “${sc.name}” (no mic)`); }
-  else if (full || !present(snap.outputs, m.streamOut) || m.streamOut === mc.outId) { m.streamMode = false; m.streamOut = null; m.streamOutName = ''; sum.stream = null; changes.push('Stream mix off (no second cable)'); }
+  if (sc) { m.streamMode = true; m.streamVia = 'cable'; m.streamOut = sc.id; m.streamOutName = sc.name; sum.stream = sc.name; sum.streamRecord = recordSideOf(snap, sc).name; changes.push(`Stream mix → “${sc.name}” (no mic)`); }
+  else if (full || !present(snap.outputs, m.streamOut) || m.streamOut === mc.outId) {
+    // v2.4.1: one cable (or none) = the cable is your mic. Your apps still stream: Streamlabs / OBS capture your
+    // desktop audio (the Windows default speakers) directly. A second cable can be installed later for a separate mix.
+    m.streamMode = false; m.streamVia = 'desktop'; m.streamOut = null; m.streamOutName = ''; sum.stream = null;
+    const def = (snap.outputs || []).find((o) => o.id === (spk && spk.id)); sum.streamDesktop = def ? def.name : null;
+    changes.push(`Stream: Streamlabs / OBS capture your desktop audio${def ? ` (“${def.name}”)` : ''} (no second cable for a separate stream mix)`);
+  }
   if (full) {
     Object.assign(mc, {
       gainDb: 0, clearcast: false, bypass: false,
@@ -128,6 +134,13 @@ function heal(st, snap) {
     if (o && !(opts.notVirtual && isVirtualOut(o))) { obj[idKey] = o.id; obj[nameKey] = o.name; changed = true; fixed.push(`${label}: found “${o.name}” again`); }
     else missing.push({ what: label, name: name || 'a device that is not on this PC', fallback: opts.fallback || 'Windows default' });
   };
+  // v2.4.1: settings from before v2.4.1 that already stream to a device: remember how.
+  if (m.streamVia === undefined && m.streamMode && present(outs, m.streamOut)) { m.streamVia = isVirtualOut(outs.find((o) => o.id === m.streamOut)) ? 'cable' : 'output'; changed = true; }
+  // A second cable was installed for the stream mix (often needs a restart): route the stream mix to it once it appears.
+  if (m.streamPending) {
+    const micId = present(outs, mc.outId) ? mc.outId : null; const sc = findStreamCable(snap, micId);
+    if (sc) { m.streamMode = true; m.streamVia = 'cable'; m.streamOut = sc.id; m.streamOutName = sc.name; delete m.streamPending; changed = true; fixed.push(`Stream mix now goes to “${sc.name}”. In Streamlabs / OBS capture “${recordSideOf(snap, sc).name}”`); }
+  }
   slot(m.mic, 'deviceId', 'name', ins, 'Microphone', { fallback: 'the Windows default mic' });
   slot(m.listen, 'deviceId', 'name', outs, 'Listening device', { notVirtual: true, fallback: 'the Windows default speakers' });
   slot(m, 'personalOut', 'personalOutName', outs, '“You hear” mix', { notVirtual: true });
@@ -142,4 +155,39 @@ function heal(st, snap) {
   return { changed, fixed, missing };
 }
 
-module.exports = { autoSetup, heal, pickSpeakers, pickMic, findMicCable, findStreamCable, recordSideOf, detectAll, isVirtualOut, isRealMic, guessChannel, looksLikeSpeakers, sameName, MIC_CABLE_RX };
+// v2.4.1: where does the stream audio go? (pure, used by the Mixer, the wizard and the tests)
+//  via: 'cable' | 'output' -> the stream mix is written to that device (Streamlabs / OBS capture it)
+//       'desktop'          -> no separate stream mix: Streamlabs / OBS capture desktop audio (what you hear)
+//       'off'              -> the user doesn't stream
+//       'none'             -> Streamer mode is on but there is no destination: NOTHING reaches the stream (warning)
+//       'unset'            -> settings from before v2.4.1 with streaming off and broadcast toggles on (asks once)
+function streamInfo(st, snap) {
+  const m = st.mixer; const mc = st.micChain; const outs = snap.outputs || [];
+  const micId = present(outs, mc.outId) ? mc.outId : null; const micOut = micId && outs.find((o) => o.id === micId);
+  const so = present(outs, m.streamOut) ? outs.find((o) => o.id === m.streamOut) : null;
+  const def = outs.find((o) => o.id === snap.defaultOutput) || null;
+  const broadcastOn = (m.channelList || []).filter((c) => m.channels[c.id] && !m.channels[c.id].streamMuted && (m.channels[c.id].streamVolume ?? 1) > 0).map((c) => c.label);
+  let via; let warn = null;
+  if (m.streamMode) {
+    if (so && so.id !== micId) via = isVirtualOut(so) ? 'cable' : 'output';
+    else if (so) { via = 'cable'; warn = 'shared'; }
+    else { via = 'none'; warn = 'no-destination'; }
+  } else if (m.streamVia === 'desktop') via = 'desktop';
+  else if (m.streamVia === 'off') via = 'off';
+  else if (broadcastOn.length) { via = 'unset'; warn = 'unset'; }
+  else via = 'off';
+  const second = findStreamCable(snap, micId);
+  const options = outs.filter((o) => o.id !== micId && o.id !== snap.defaultOutput && !/sonar/i.test(o.name) && (isVirtualOut(o) || /digital|spdif|s\/pdif|line out/i.test(o.name)))
+    .map((o) => ({ id: o.id, name: o.name, cable: isVirtualOut(o), record: isVirtualOut(o) ? recordSideOf(snap, o).name : null }));
+  return {
+    via, warn, streamMode: !!m.streamMode, onStream: !!mc.inStream, broadcastOn,
+    dest: so ? { id: so.id, name: so.name, cable: isVirtualOut(so), record: isVirtualOut(so) ? recordSideOf(snap, so).name : null } : null,
+    savedName: m.streamMode && !so ? (m.streamOutName || null) : null,
+    desktop: def && !isVirtualOut(def) ? def.name : (def ? def.name : null),
+    micRecord: micOut ? recordSideOf(snap, micOut).name : null, micCable: micOut ? micOut.name : null,
+    secondCable: second ? { id: second.id, name: second.name, record: recordSideOf(snap, second).name } : null,
+    options,
+  };
+}
+
+module.exports = { streamInfo,  autoSetup, heal, pickSpeakers, pickMic, findMicCable, findStreamCable, recordSideOf, detectAll, isVirtualOut, isRealMic, guessChannel, looksLikeSpeakers, sameName, MIC_CABLE_RX };

@@ -5,6 +5,7 @@ import { EqEditor } from '../components/Eq.jsx';
 import Drawer from '../components/Drawer.jsx';
 import EngineAlert from '../EngineAlert.jsx';
 import { ListenPanel } from '../components/ListenSwitch.jsx';
+import { StreamPath } from '../components/StreamPath.jsx';
 import { MicPath } from '../components/MicPath.jsx';
 
 const ICONS = { game: Icon.game, chat: Icon.headset, media: Icon.media, aux: Icon.aux, cable: Icon.cable };
@@ -93,7 +94,7 @@ export default function Mixer() {
           </div>
           <div className="row-between stream-row">
             <Toggle small on={streamMode} onChange={(v) => window.bsp.invoke('mixer:global', { streamMode: v })} label="Streamer mode" />
-            <span className="muted-text small">{streamMode ? (s.streamOut ? `Stream mix → ${cableName(s.streamOut).replace(/\s*\(.*$/, '')}` : 'Pick a stream output in Cables') : 'One mix for you and your stream'}</span>
+            <span className="muted-text small">{streamMode ? (st.stream && st.stream.dest ? `Stream mix → ${st.stream.dest.name.replace(/\s*\(.*$/, '')}` : <b className="bad-text">No stream output: see Stream audio below</b>) : st.stream && st.stream.via === 'desktop' ? 'Stream = your desktop audio' : 'One mix for you and your stream'}</span>
           </div>
         </div>
         <div className="topbar-block nowplaying">
@@ -110,6 +111,7 @@ export default function Mixer() {
       </section>
       <ListenPanel />
       <MicPath st={st} eng={eng} onOpenChain={() => setDrawer({ type: 'mic' })} />
+      <StreamPath si={st.stream} />
 
       <section className="strips" style={{ gridTemplateColumns: `repeat(${chans.length + 1}, minmax(${streamMode ? 230 : 190}px, 1fr))` }}>
         {chans.map((c) => {
@@ -269,6 +271,8 @@ function MicDrawer({ st, levels, mic, onClose }) {
           {mc.monitor?.enabled && <input type="range" min={0} max={100} value={Math.round((mc.monitor.volume ?? 0.8) * 100)} onChange={(e) => sub('monitor', { volume: Number(e.target.value) / 100 })} />}
         </div>
       </div>
+      <div className="row-between reset-chain"><span className="muted-text small">Sounds odd (muffled, robotic, cut off, too bassy)? Go back to the safe starting settings.</span>
+        <button className="ghost-btn" onClick={async () => { if (!window.confirm('Reset the mic chain?\n\nGate, noise suppression, echo cancel, high-pass, compressor, EQ, gain and “Hear myself” go back to the safe defaults. Your mic, your virtual mic cable, “Process my mic” and “Mic on stream” stay as they are.')) return; const n = await window.bsp.invoke('micchain:reset'); if (n) setMc(n); }}>Reset mic chain</button></div>
       {mc.bypass && <p className="warn-box">Compare mode: everyone (stream, VRChat, Discord) is hearing your raw mic right now. Flip back to After when you're done.</p>}
       {mc.monitor?.enabled && <p className="hint">“Hear myself” plays your mic into {(st.outputs.find((o) => o.id === st.settings.personalOut) || {}).name || 'your headphones'}. Use headphones, not speakers, or it will feed back.</p>}
       <div className="fx-grid">

@@ -18,6 +18,27 @@ const PKG = {
   donate: 'https://vb-audio.com/Voicemeeter/Donationware.htm',
 };
 const IN_RX = /hi-?fi cable input/i, OUT_RX = /hi-?fi cable output/i;
+// v2.4.1: the standard VB-CABLE as a SECOND cable for the stream mix (Hi-Fi Cable carries the mic). Also VB-Audio
+// donationware: free for personal use, never bundled or redistributed - the official package is downloaded from
+// vb-audio.com when the user clicks Install, verified (pinned SHA-256 + Authenticode signer) and run elevated.
+const VBC = {
+  name: 'VB-CABLE',
+  url: 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack46.zip',
+  file: 'VBCABLE_Driver_Pack46.zip',
+  exe: 'VBCABLE_Setup_x64.exe',
+  zipSha256: 'bc44e8974191a5a2427d6c979e2dab08dbb09925f3f435dfa2f0ba3e45b6eb90',
+  exeSha256: '734c35dfa6d98f48782a451633ceb471166ec70d60482fd89a1123d0ee3c4f41',
+  signer: /CN=Vincent Burel\b/i,
+  page: 'https://vb-audio.com/Cable/',
+  donate: 'https://vb-audio.com/Voicemeeter/Donationware.htm',
+  pnp: 'VB.Audio Virtual Cable',
+};
+const VB_IN_RX = /^cable input \(vb-audio virtual cable\)/i, VB_OUT_RX = /^cable output \(vb-audio virtual cable\)/i;
+function detectVb(snapshot) {
+  const outs = (snapshot && snapshot.outputs) || [], ins = (snapshot && snapshot.inputs) || [];
+  const input = outs.find((o) => VB_IN_RX.test(o.name)) || null; const output = ins.find((i) => VB_OUT_RX.test(i.name)) || null;
+  return { installed: !!(input && output), partial: !!(input || output) && !(input && output), inputId: input && input.id, inputName: input && input.name, outputId: output && output.id, outputName: output && output.name };
+}
 
 function detect(snapshot) {
   const outs = (snapshot && snapshot.outputs) || [], ins = (snapshot && snapshot.inputs) || [];
@@ -34,9 +55,9 @@ function ps(script, timeoutMs = 120000) {
 const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
 
 // Registry/PnP view, independent of the audio engine (also tells us "driver installed but needs a reboot").
-async function driverInfo() {
-  const r = await ps(`$u = Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall' -ErrorAction SilentlyContinue | % { Get-ItemProperty $_.PSPath } | ? { $_.DisplayName -match 'Hi-?Fi Cable' } | select -First 1
-$d = Get-PnpDevice -ErrorAction SilentlyContinue | ? { $_.FriendlyName -match 'Hi-?Fi Cable' } | select -First 1
+async function driverInfo(pnp = 'Hi-?Fi Cable') {
+  const r = await ps(`$u = Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall' -ErrorAction SilentlyContinue | % { Get-ItemProperty $_.PSPath } | ? { $_.DisplayName -match '${pnp}' } | select -First 1
+$d = Get-PnpDevice -ErrorAction SilentlyContinue | ? { $_.FriendlyName -match '${pnp}' } | select -First 1
 $pend = (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired') -or (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending') -or [bool](Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)
 [pscustomobject]@{ registered = [bool]$u; name = $u.DisplayName; setup = $u.UninstallString; device = $d.FriendlyName; deviceStatus = "$($d.Status)"; problem = "$($d.Problem)"; rebootPending = $pend } | ConvertTo-Json -Compress`, 30000);
   try { return JSON.parse(r.out); } catch { return { registered: false, error: r.errOut || (r.err && r.err.message) }; }
@@ -68,7 +89,7 @@ async function signature(file) {
 }
 
 // Download -> verify zip -> extract -> verify exe. Returns { exe, verified: {...} } or throws with a readable message.
-async function prepare(workDir, onStep) {
+async function prepare(workDir, onStep, PKG = module.exports.PKG) {
   const step = (s, extra) => onStep && onStep({ step: s, ...extra });
   fs.rmSync(workDir, { recursive: true, force: true }); fs.mkdirSync(workDir, { recursive: true });
   const zip = path.join(workDir, PKG.file);
@@ -103,4 +124,4 @@ async function runInstaller(exe) {
   return { ok: false, error: msg };
 }
 
-module.exports = { PKG, detect, driverInfo, prepare, runInstaller, signature, sha256 };
+module.exports = { PKG, VBC, detect, detectVb, driverInfo, prepare, runInstaller, signature, sha256 };

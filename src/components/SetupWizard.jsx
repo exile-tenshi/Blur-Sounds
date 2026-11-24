@@ -3,6 +3,7 @@ import { Icon, Logo } from './Icons.jsx';
 import { MiniMeter, Toggle } from './Controls.jsx';
 import { useHifi } from './HifiCable.jsx';
 import { micTest } from './MicPath.jsx';
+import { StreamPath } from './StreamPath.jsx';
 
 // v2.4.0 first-run setup wizard. Everything was already auto-configured on first launch; each step shows what was
 // picked, lets you change it, and verifies it actually works (green check) or offers the fix.
@@ -57,13 +58,13 @@ export function SetupWizard({ onClose, rerun }) {
   const hifiBusy = h && ['download', 'verify', 'extract', 'install', 'detect'].includes(h.phase);
   const micOk = (lv.max?.pre || 0) > 0.01;
   const cableOk = !!st?.cable && ((lv.max?.out || 0) > 0.003 || (mt?.phase === 'done' && mt.peak > 0.003));
-  const streamOk = !st?.streamMode || (st.stream && st.stream.id !== st.cable?.id);
+  const si = st?.streamInfo; const streamOk = !!si && !si.warn && si.via !== 'none';
   const results = ready ? [
     ['Speakers', !!spk && heard !== false, spk ? spk.name : 'none'],
     ['Microphone', !!mic, mic ? mic.name + (st.micFallback ? ' (Windows default)' : '') : 'none found'],
     ['Virtual mic cable', !!st.cable, st.cable ? st.cable.name : 'not installed'],
     ['Discord / VRChat mic', !!st.cable?.record?.id, rec || '—'],
-    ['Stream mix', streamOk, st.streamMode && st.stream ? `${st.stream.name} (${st.onStream ? 'with' : 'no'} mic)` : 'off'],
+    ['Stream audio', streamOk, !si ? '—' : si.via === 'desktop' ? `desktop audio (${si.desktop})` : si.dest ? `${si.dest.name} (${si.onStream ? 'with' : 'no'} mic)` : si.via === 'off' ? 'off' : 'no destination'],
     ['VRChat chatbox', true, `OSC ${st.chatbox.ip}:${st.chatbox.port}${st.chatbox.live ? ', live' : ', off'}`],
   ] : [];
 
@@ -144,14 +145,11 @@ export function SetupWizard({ onClose, rerun }) {
 
         {step.id === 'stream' && ready && <>
           <h1 className="sw-title">Streaming (optional)</h1>
-          <p className="sw-lead">The <b>stream mix</b> is a separate mix of your apps for Streamlabs / OBS, with its own per-channel volumes. Your mic is <b>not</b> in it (turn <b>Mic on stream</b> on in the Mixer if you want it there).</p>
-          <div className="sw-devs">
-            <button className={`sw-dev${!st.streamMode ? ' on' : ''}`} onClick={() => act('setup:stream', null)}><Icon.stream size={16} /><div><b>Off</b><small>I don't stream / I capture desktop audio myself</small></div></button>
-            {st.streamOptions.map((o) => <button key={o.id} className={`sw-dev${st.streamMode && st.stream?.id === o.id ? ' on' : ''}`} onClick={() => act('setup:stream', o.id)}><Icon.stream size={16} /><div><b>{short(o.name)}</b><small>{o.cable ? 'virtual cable' : 'unused output'}</small></div></button>)}
-          </div>
-          {st.streamMode && st.stream ? <Check ok={streamOk}>{streamOk ? <>In Streamlabs / OBS, add {st.stream.cable ? <>an <b>Audio Input Capture</b> of “<b>{st.stream.record?.name}</b>”</> : <>an <b>Audio Output Capture</b> of “<b>{st.stream.name}</b>”</>} for your stream audio. Don't also capture “{rec || 'your mic cable'}” unless you want your processed mic on stream.</> : 'The stream mix and your mic share one cable. Pick another output above.'}</Check>
-            : <Check ok>Stream mix off. If you stream, capture your mic with “{rec || 'your mic'}” and desktop audio the usual way.{st.streamOptions.length === 0 ? ' For a separate stream mix, install a second cable (the free standard VB-CABLE), then pick it here.' : ''}</Check>}
-          <div className="row-gap"><button className="ghost-btn" onClick={() => open('obs')}>OBS audio sources guide</button></div>
+          <p className="sw-lead">How your <b>app audio</b> (game, music, Discord…) reaches Streamlabs / OBS. With one virtual cable, that cable is your mic, so Streamlabs / OBS simply capture your <b>desktop audio</b>. That works right away. For a separate stream mix with its own per-channel volumes, add a second free cable. Your mic is never in it unless you turn on <b>Mic on stream</b>.</p>
+          {st.streamInfo && <StreamPath si={st.streamInfo} />}
+          {st.streamInfo && (st.streamInfo.via === 'off' ? <Check ok>Streaming off. You can turn it on any time in the Mixer (Stream audio row).</Check>
+            : !st.streamInfo.warn && st.streamInfo.via !== 'none' ? <Check ok>Your app audio goes to <b>{st.streamInfo.via === 'desktop' ? `desktop audio (${st.streamInfo.desktop})` : st.streamInfo.dest?.name}</b>. Set up Streamlabs / OBS as shown above.</Check>
+            : <Check>Pick where your app audio goes (above).</Check>)}
         </>}
 
         {step.id === 'chatbox' && ready && <>
@@ -182,14 +180,22 @@ export function SetupWizard({ onClose, rerun }) {
 
 // Startup self-heal banner: devices that were found again by name, or are missing (Windows default used meanwhile).
 export function HealBanner() {
-  const [hs, setHs] = useState(null); const [hide, setHide] = useState(0);
-  useEffect(() => window.bsp.onMixer((s) => s && s.heal && setHs(s.heal)), []);
-  if (!hs || hs.at <= hide || (!hs.missing.length && !hs.fixed.length)) return null;
-  return (
-    <div className={`heal-banner${hs.missing.length ? '' : ' ok'}`}>
+  const [hs, setHs] = useState(null); const [hide, setHide] = useState(0); const [si, setSi] = useState(null); const [hideS, setHideS] = useState('');
+  useEffect(() => window.bsp.onMixer((s) => { if (!s) return; if (s.heal) setHs(s.heal); if (s.stream) setSi(s.stream); }), []);
+  const streamBad = si && (si.warn === 'unset' || si.warn === 'no-destination' || si.warn === 'shared') && hideS !== si.warn;
+  const dev = hs && hs.at > hide && (hs.missing.length || hs.fixed.length);
+  if (!dev && !streamBad) return null;
+  return (<>
+    {streamBad && <div className="heal-banner">
+      <span><b>Your apps aren't reaching your stream.</b> {si.warn === 'unset' ? 'Streaming is off, but channels are set to broadcast.' : si.warn === 'shared' ? 'The stream mix is on your mic cable.' : 'Streamer mode is on, but the stream mix has no output.'} Quick fix: let Streamlabs / OBS capture your desktop audio (see Mixer → Stream audio for the exact steps).</span>
+      <button className="primary-btn" onClick={() => window.bsp.invoke('stream:set', { via: 'desktop' })}>Use desktop audio</button>
+      {si.warn === 'unset' && <button className="ghost-btn" onClick={() => window.bsp.invoke('stream:set', { via: 'off' })}>I don't stream</button>}
+      <button className="ghost-btn" onClick={() => setHideS(si.warn)}>Later</button>
+    </div>}
+    {dev && <div className={`heal-banner${hs.missing.length ? '' : ' ok'}`}>
       {hs.missing.length > 0 ? <span><b>Not connected:</b> {hs.missing.map((m) => `${m.what} (“${m.name}”) → using ${m.fallback}`).join(' · ')}. It switches back when it's plugged in again.</span>
         : <span><b>Devices updated:</b> {hs.fixed.join(' · ')}.</span>}
       <button className="ghost-btn" onClick={() => setHide(hs.at)}>Dismiss</button>
-    </div>
-  );
+    </div>}
+  </>);
 }

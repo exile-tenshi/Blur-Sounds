@@ -74,6 +74,9 @@ static class Program
             Console.WriteLine(SysStats.Get("1.1.1.1").ToJsonString()); Console.WriteLine(Adl.Probe()); return 0;
         }
         if (args.Length > 0 && args[0] == "--echorec") return EchoRec.Run(args);
+        if (args.Length > 0 && args[0] == "--pitchtest") { var r = PitchCheck.Run(); Console.Write(r); return r.Contains("FAILED") ? 1 : 0; }
+        if (args.Length > 2 && args[0] == "--setrate") { Console.WriteLine(PolicyConfig.SetRate(args[1], int.Parse(args[2])).ToJsonString()); return 0; }
+        if (args.Length > 2 && args[0] == "--tonetest") return ToneTest.Run(args[1], args[2], args.Length > 3 ? double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture) : 3, args.Length > 4 ? double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture) : 0.05);
         if (args.Length > 0 && args[0] == "--snapshot")
         {
             Enumerator = new MMDeviceEnumerator();
@@ -164,6 +167,7 @@ static class Program
                 case "setDeviceVolume": Dev((string)req["deviceId"]).AudioEndpointVolume.MasterVolumeLevelScalar = Clamp((float)(double)req["volume"]); break;
                 case "setDeviceMute": Dev((string)req["deviceId"]).AudioEndpointVolume.Mute = (bool)req["mute"]; break;
                 case "setDefaultDevice": PolicyConfig.SetDefault((string)req["deviceId"], (bool?)req["communications"] ?? true); break;
+                case "setDeviceRate": result = PolicyConfig.SetRate((string)req["deviceId"], (int)req["rate"]); break;
                 case "setMicMeter": break; // v2: the engine owns the mic capture
                 case "engineConfig": Eng.Configure(req["config"]); break;
                 case "engineStatus": result = Eng.Status(); break;
@@ -284,6 +288,8 @@ static class Program
     {
         var o = new JsonObject { ["id"] = d.ID, ["name"] = d.FriendlyName, ["default"] = isDefault, ["comms"] = isComms };
         try { o["volume"] = d.AudioEndpointVolume.MasterVolumeLevelScalar; o["muted"] = d.AudioEndpointVolume.Mute; } catch { }
+        // v2.4.1: the endpoint's Windows format (Sound settings > Advanced). Hi-Fi Cable has no rate converter, so its two sides must match.
+        try { if (d.Properties[PropertyKeys.PKEY_AudioEngine_DeviceFormat].Value is byte[] f && f.Length >= 16) { o["rate"] = BitConverter.ToInt32(f, 4); o["channels"] = BitConverter.ToUInt16(f, 2); o["bits"] = BitConverter.ToUInt16(f, 14); } } catch { }
         return o;
     }
 
@@ -457,10 +463,10 @@ static class PolicyConfig
     [ComImport, Guid("f8679f50-850a-41cf-9c72-430f290290c8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     interface IPolicyConfig
     {
-        [PreserveSig] int GetMixFormat(IntPtr a, IntPtr b);
-        [PreserveSig] int GetDeviceFormat(IntPtr a, int b, IntPtr c);
+        [PreserveSig] int GetMixFormat([MarshalAs(UnmanagedType.LPWStr)] string id, out IntPtr fmt);
+        [PreserveSig] int GetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string id, int useDefault, out IntPtr fmt);
         [PreserveSig] int ResetDeviceFormat(IntPtr a);
-        [PreserveSig] int SetDeviceFormat(IntPtr a, IntPtr b, IntPtr c);
+        [PreserveSig] int SetDeviceFormat([MarshalAs(UnmanagedType.LPWStr)] string id, IntPtr endpointFmt, IntPtr mixFmt);
         [PreserveSig] int GetProcessingPeriod(IntPtr a, int b, IntPtr c, IntPtr d);
         [PreserveSig] int SetProcessingPeriod(IntPtr a, IntPtr b);
         [PreserveSig] int GetShareMode(IntPtr a, IntPtr b);
@@ -479,6 +485,27 @@ static class PolicyConfig
         Marshal.ThrowExceptionForHR(pc.SetDefaultEndpoint(id, 1)); // multimedia
         if (comms) Marshal.ThrowExceptionForHR(pc.SetDefaultEndpoint(id, 2)); // communications
         Marshal.ReleaseComObject(pc);
+    }
+    // v2.4.1: change an endpoint's shared-mode sample rate (same as Sound settings > Properties > Advanced > Default Format).
+    static IntPtr WithRate(IntPtr src, int rate)
+    {
+        int cb = Marshal.ReadInt16(src, 16); int size = 18 + (Marshal.ReadInt16(src, 0) == unchecked((short)0xFFFE) ? Math.Max(cb, 22) : cb);
+        var mem = Marshal.AllocCoTaskMem(size); var tmp = new byte[size]; Marshal.Copy(src, tmp, 0, size); Marshal.Copy(tmp, 0, mem, size);
+        int align = Marshal.ReadInt16(mem, 12); Marshal.WriteInt32(mem, 4, rate); Marshal.WriteInt32(mem, 8, rate * align);
+        return mem;
+    }
+    public static JsonObject SetRate(string id, int rate)
+    {
+        var pc = (IPolicyConfig)new CPolicyConfigClient(); IntPtr df = IntPtr.Zero, mf = IntPtr.Zero, nd = IntPtr.Zero, nm = IntPtr.Zero;
+        try
+        {
+            Marshal.ThrowExceptionForHR(pc.GetDeviceFormat(id, 0, out df)); Marshal.ThrowExceptionForHR(pc.GetMixFormat(id, out mf));
+            int before = Marshal.ReadInt32(df, 4); if (before == rate) return new JsonObject { ["ok"] = true, ["before"] = before, ["rate"] = rate, ["changed"] = false };
+            nd = WithRate(df, rate); nm = WithRate(mf, rate);
+            int hr = pc.SetDeviceFormat(id, nd, nm);
+            return new JsonObject { ["ok"] = hr == 0, ["before"] = before, ["rate"] = rate, ["changed"] = hr == 0, ["hr"] = hr == 0 ? null : "0x" + hr.ToString("X8") };
+        }
+        finally { foreach (var p in new[] { df, mf, nd, nm }) if (p != IntPtr.Zero) Marshal.FreeCoTaskMem(p); Marshal.ReleaseComObject(pc); }
     }
 }
 

@@ -18,7 +18,7 @@ export function mockSetup() {
     cable: noCable ? null : cable, suggestedCable: noCable ? null : cable,
     streamMode: !noCable, stream: noCable ? null : { id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', record: { id: 'r2', name: 'CABLE Output (VB-Audio Virtual Cable)' }, cable: true },
     streamOptions: noCable ? [] : [{ id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', cable: true }, { id: 'o4', name: 'Realtek Digital Output (Realtek(R) Audio)', cable: false }],
-    onStream: false, processing: true, aec: noCable, ns: true, chatbox: { ip: '127.0.0.1', port: 9000, live: false }, vrchatRunning: true, discordRunning: true, hifi: { installed: !noCable }, engineErrors: [], heal: { fixed: [], missing: [] },
+    onStream: false, processing: true, aec: noCable, ns: true, chatbox: { ip: '127.0.0.1', port: 9000, live: false }, vrchatRunning: true, discordRunning: true, hifi: { installed: !noCable }, engineErrors: [], heal: { fixed: [], missing: [] }, streamInfo: mockStream(),
   };
   return async (ch, a) => {
     if (ch === 'setup:get' || ch === 'setup:redetect') return s;
@@ -28,4 +28,24 @@ export function mockSetup() {
     if (ch === 'setup:chatbox') { if (a && typeof a.live === 'boolean') s.chatbox.live = a.live; return { ...s, sent: a && a.test ? { ok: true } : null }; }
     return true;
   };
+}
+
+// v2.4.1 stream destination preview: ?stream=desktop|unset|none|cable|output
+export function mockStream() {
+  const v = new URLSearchParams(location.search).get('stream') || 'desktop';
+  const base = { streamMode: ['none', 'cable', 'output'].includes(v), onStream: false, broadcastOn: ['Game', 'Chat', 'Media', 'Aux'], desktop: 'Headphones (USB Gaming Headset)',
+    micRecord: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', micCable: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', secondCable: v === 'cable' ? { id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', record: 'CABLE Output (VB-Audio Virtual Cable)' } : null,
+    options: v === 'cable' ? [{ id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', cable: true, record: 'CABLE Output (VB-Audio Virtual Cable)' }] : [{ id: 'o4', name: 'Realtek Digital Output (Realtek(R) Audio)', cable: false }],
+    vbc: { installed: v === 'cable', phase: 'idle' }, hifiInstalled: true, pending: null, warn: null, dest: null };
+  if (v === 'desktop') return { ...base, via: 'desktop' };
+  if (v === 'unset') return { ...base, via: 'unset', warn: 'unset' };
+  if (v === 'none') return { ...base, via: 'none', warn: 'no-destination', savedName: null };
+  if (v === 'cable') return { ...base, via: 'cable', dest: { id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', cable: true, record: 'CABLE Output (VB-Audio Virtual Cable)' }, broadcastOn: ['Game', 'Media'] };
+  return { ...base, via: 'output', dest: { id: 'o4', name: 'Realtek Digital Output (Realtek(R) Audio)', cable: false, record: null } };
+}
+
+// v2.4.1 Hi-Fi Cable rate preview: ?rate=mismatch
+export function mockRate() {
+  const bad = new URLSearchParams(location.search).get('rate') === 'mismatch';
+  return { render: { id: 'c1', name: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', rate: 48000 }, capture: { id: 'c1o', name: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', rate: bad ? 44100 : 48000 }, ok: !bad, error: null };
 }

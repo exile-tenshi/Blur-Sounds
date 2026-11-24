@@ -236,6 +236,79 @@ public sealed class Resampler
     }
 }
 
+// 48 kHz stereo -> any device rate / channel count (linear interpolation, phase kept across blocks).
+public sealed class RateOut
+{
+    readonly int rate, chans; float[] buf = new float[0]; double pos; float lastL, lastR;
+    public RateOut(int rate, int chans) { this.rate = rate; this.chans = chans; }
+    public int Convert(float[] stereo, int count, out float[] dst)
+    {
+        int inFrames = count / 2; double step = 48000.0 / rate;
+        int outFrames = (int)Math.Ceiling((inFrames - pos) / step) + 1; int need = outFrames * chans;
+        if (buf.Length < need) buf = new float[need];
+        int o = 0;
+        for (; pos < inFrames; pos += step)
+        {
+            int i0 = (int)pos; double f = pos - i0;
+            float l0 = i0 == 0 ? lastL : stereo[(i0 - 1) * 2], r0 = i0 == 0 ? lastR : stereo[(i0 - 1) * 2 + 1];
+            float l1 = stereo[i0 * 2], r1 = stereo[i0 * 2 + 1];
+            float l = (float)(l0 + (l1 - l0) * f), r = (float)(r0 + (r1 - r0) * f);
+            if (chans == 1) buf[o++] = (l + r) * 0.5f;
+            else { buf[o++] = l; buf[o++] = r; for (int k = 2; k < chans; k++) buf[o++] = 0; }
+        }
+        pos -= inFrames; if (inFrames > 0) { lastL = stereo[(inFrames - 1) * 2]; lastR = stereo[(inFrames - 1) * 2 + 1]; }
+        dst = buf; return o;
+    }
+}
+
+// v2.4.1 pitch check: a 440 Hz tone at any device rate in -> 48 kHz engine -> any device rate out must stay 440 Hz.
+public static class PitchCheck
+{
+    // Frequency from rising zero crossings with sub-sample interpolation; skips the first 0.1 s.
+    public static double Freq(float[] x, int n, int stride, int fs)
+    {
+        int skip = fs / 10 * stride; double first = -1, last = -1; int crossings = 0;
+        for (int i = skip + stride; i < n; i += stride)
+        {
+            float a = x[i - stride], b = x[i];
+            if (a < 0 && b >= 0) { double t = (i / stride - 1) + a / (a - b); if (first < 0) first = t; else { last = t; crossings++; } }
+        }
+        return crossings > 0 ? crossings * fs / (last - first) : 0;
+    }
+    public static string Run()
+    {
+        var sb = new System.Text.StringBuilder(); bool ok = true;
+        foreach (int inRate in new[] { 44100, 48000, 96000, 16000 })
+            foreach (int inCh in new[] { 1, 2 })
+                foreach (int outRate in new[] { 44100, 48000, 96000 })
+                {
+                    int secs = 2; int frames = inRate * secs; var src = new float[frames * inCh];
+                    for (int i = 0; i < frames; i++) for (int c = 0; c < inCh; c++) src[i * inCh + c] = (float)(0.5 * Math.Sin(2 * Math.PI * 440 * i / inRate));
+                    // capture side: arbitrary-sized blocks like WASAPI delivers
+                    var ring = new FloatRing(48000 * 2 * 4); var rs = new Resampler(inRate); int blk = inRate / 100 + 7;
+                    var mid = new List<float>();
+                    var tmp = new float[48000 * 2 * 4];
+                    for (int p = 0; p < frames; p += blk)
+                    {
+                        int nf = Math.Min(blk, frames - p); var part = new float[nf * inCh]; Array.Copy(src, p * inCh, part, 0, nf * inCh);
+                        rs.Push(part, nf, inCh, ring); int got = ring.Count; ring.Read(tmp, got, 48000 * 8); for (int k = 0; k < got; k++) mid.Add(tmp[k]);
+                    }
+                    var m = mid.ToArray(); double fMid = Freq(m, m.Length, 2, 48000);
+                    // render side: engine blocks of 480 frames -> device rate
+                    var ro = new RateOut(outRate, 2); var outL = new List<float>();
+                    for (int p = 0; p + 960 <= m.Length; p += 960) { var blkS = new float[960]; Array.Copy(m, p, blkS, 0, 960); int n = ro.Convert(blkS, 960, out var d); for (int k = 0; k < n; k++) outL.Add(d[k]); }
+                    var oa = outL.ToArray(); double fOut = Freq(oa, oa.Length, 2, outRate);
+                    double cents = 1200 * Math.Log2(fOut / 440.0); bool pass = Math.Abs(cents) < 5 && Math.Abs(1200 * Math.Log2(fMid / 440.0)) < 5;
+                    ok &= pass; sb.AppendLine($"{(pass ? "PASS" : "FAIL")} in {inRate} Hz/{inCh}ch -> engine 48 kHz {fMid:F2} Hz -> out {outRate} Hz {fOut:F2} Hz ({cents:+0.00;-0.00;0.00} cents)");
+                }
+        // what an unmatched Hi-Fi Cable does (no converter inside): samples written at one rate are read at another
+        foreach (var (w, r) in new[] { (48000, 44100), (44100, 48000), (96000, 48000) })
+            sb.AppendLine($"INFO Hi-Fi Cable written at {w} Hz but read at {r} Hz: 440 Hz arrives as {440.0 * r / w:F1} Hz ({1200 * Math.Log2((double)r / w):+0;-0} cents{(r < w ? ", deeper voice" : ", higher voice")})");
+        sb.AppendLine(ok ? "ALL PITCH CHECKS PASSED" : "PITCH CHECK FAILED");
+        return sb.ToString();
+    }
+}
+
 // Thread-safe float ring with drift control.
 public sealed class FloatRing
 {

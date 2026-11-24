@@ -517,3 +517,11 @@ button.mp-node { display: flex !important; flex-direction: row !important; align
 .sw-hifi .row-gap { margin: 6px 0; }
 .heal-banner { display: flex; align-items: center; gap: 12px; margin: 12px 16px 0; padding: 9px 12px; border: 1px solid var(--red-dim); border-radius: 4px; background: rgba(229,35,47,.07); color: #f1c9cc; font-size: 12px; }
 .heal-banner span { flex: 1; } .heal-banner.ok { border-color: rgba(60,207,122,.35); background: rgba(60,207,122,.06); color: var(--silver); } .heal-banner .ghost-btn { padding: 4px 10px; }
+/* v2.4.1 stream audio row */
+.streampath .sp-select { margin-left: auto; } .streampath .sp-select select { min-width: 150px; }
+.sp-how { margin: 4px 16px 6px 34px; padding: 0; color: var(--silver); font-size: 12px; line-height: 1.65; } .sp-how b { color: #fff; }
+.sp-install { margin: 6px 16px 12px; } .sp-install .muted-text { margin: 6px 0 0; line-height: 1.5; }
+.streampath .warn-box { margin: 10px 16px; } .streampath > .hint { margin: 4px 16px 10px; }
+.sw-body .streampath { margin: 0 0 8px; }
+.bad-text { color: var(--red2); }
+.reset-chain { margin: 8px 0 4px; gap: 12px; }
