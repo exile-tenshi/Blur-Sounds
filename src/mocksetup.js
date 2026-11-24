@@ -62,3 +62,19 @@ export function mockUpdate() {
     : q === 'ratelimit' ? { ...base, status: 'error', error: "GitHub's update check limit was reached for now. Try again after 5:42 PM." } : { ...base, current: '2.4.2', status: 'current' };
   return (ch) => (ch === 'update:get' || ch === 'update:check' ? st : ch === 'update:run' ? { ...st, status: 'downloading', progress: 0.1 } : true);
 }
+
+// v2.5.0 voice changer mock: ?vc=running|download|off|dsp
+export function mockVc() {
+  const q = new URLSearchParams(location.search).get('vc') || 'running';
+  const F = { contentvec: 377711777, rmvpe: 361688443, lyra: 112559689, lyraSpk: 111616, vctk: 112559689, vctkSpk: 111616 };
+  const L = { contentvec: 'ContentVec speech features', rmvpe: 'RMVPE pitch tracker', lyra: 'Lyra voice', lyraSpk: 'Lyra voice (speaker table)', vctk: 'Studio voice pack', vctkSpk: 'Studio voice pack (speaker table)' };
+  const have = q === 'download' ? [] : Object.keys(F);
+  const files = Object.fromEntries(Object.keys(F).map((k) => [k, { label: L[k], size: F[k], present: have.includes(k) }]));
+  const V = [['lyra', 'Lyra', 'female', 'Warm, clear female voice. Most natural for male → female.', ['lyra', 'lyraSpk'], 'lyra'], ['ava', 'Ava', 'female', 'Bright, young female voice.', ['vctk', 'vctkSpk'], 'vctk'], ['nova', 'Nova', 'female', 'Soft, smooth female voice.', ['vctk', 'vctkSpk'], 'vctk'], ['mia', 'Mia', 'female', 'Lighter, airy female voice.', ['vctk', 'vctkSpk'], 'vctk'], ['rowan', 'Rowan', 'male', 'Natural, full male voice. Most natural for female → male.', ['vctk', 'vctkSpk'], 'vctk'], ['ezra', 'Ezra', 'male', 'Deeper, calm male voice.', ['vctk', 'vctkSpk'], 'vctk'], ['silas', 'Silas', 'male', 'Lighter male voice.', ['vctk', 'vctkSpk'], 'vctk']];
+  const voices = V.map(([id, name, gender, desc, fl, model]) => ({ id, name, gender, desc, files: fl, model, ready: fl.concat(['contentvec', 'rmvpe']).every((k) => have.includes(k)), source: id === 'lyra' ? 'RVC v2 voice trained on LibriSpeech speaker 8312 (public-domain LibriVox reading, LibriSpeech CC BY 4.0); model by KoeAI (MIT).' : 'RVC v2 base model speaker (VCTK corpus, CC BY 4.0); RVC project (MIT).' }));
+  let settings = { enabled: q !== 'off', engine: q === 'dsp' ? 'dsp' : 'ai', voice: 'lyra', preset: 'm2f', bypass: false, hotkey: 'Ctrl+Alt+V', pitch: 0, autoPitch: true, targetHz: 205, quality: 'balanced', device: 'gpu', f0: 'auto', expressive: 1, envMix: 0.35, blendWith: null, blend: 0, dsp: { pitch: 11, formant: 17, targetHz: 210 }, custom: [] };
+  const st = () => ({ settings, models: { files, voices, baseReady: have.length > 0 }, hotkeyError: null });
+  const engine = q === 'running' ? { state: 'running', provider: 'DirectML GPU (AMD Radeon RX 9070 XT)', f0: 'RMVPE', inferMs: 21.4, inferP95: 26.0, latencyMs: 186, dropouts: 0, inHz: 118, outHz: 206, shift: 9.6 }
+    : q === 'dsp' ? { state: 'running', provider: 'DSP (no model)', latencyMs: 47, inHz: 118, outHz: 221, shift: 11 } : { state: 'off' };
+  return { engine, route: (ch, a) => { if (ch === 'vc:set') settings = { ...settings, ...a[0], dsp: a[0] && a[0].dsp ? { ...settings.dsp, ...a[0].dsp } : settings.dsp }; return st(); } };
+}

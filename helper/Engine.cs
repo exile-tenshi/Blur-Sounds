@@ -129,7 +129,7 @@ public sealed class Engine
     readonly FloatRing micRing = new(48000 * 2);
     // mic chain
     readonly NoiseGate gate = new(); readonly Compressor comp = new(); readonly Equalizer micEq = new(); readonly Limiter micLim = new();
-    readonly VoiceChain vc = new(); bool nsOn, clearcast, bypass; float micGain = 1; bool micMuted;
+    readonly VoiceChain vc = new(); readonly VoiceChanger changer = new(); bool changerOn; bool nsOn, clearcast, bypass; float micGain = 1; bool micMuted;
     DeviceSource aecRef; string aecRefId; OutputSink monitor; bool monitorOn; float monitorVol = 0.8f;
     bool micInStream = true, micInClip = true, micInRec = true, streamMode, chainOn;
     Resampler micRs; float[] micMono = new float[4096];
@@ -229,7 +229,7 @@ public sealed class Engine
                 aecRef = null; aecRefId = refWant; vc.Reference = null;
                 if (refWant != null) { try { aecRef = new DeviceSource(en, refWant, true); vc.Reference = aecRef.Ring; } catch (Exception e) { Err("echo reference", e); } }
             }
-            monitorOn = chainOn && ((bool?)m?["monitor"]?["enabled"] ?? false); monitorVol = (float)Math.Clamp((double?)m?["monitor"]?["volume"] ?? 0.8, 0, 1.5);
+            monitorOn = (chainOn || ((bool?)m?["changer"]?["enabled"] ?? false)) && ((bool?)m?["monitor"]?["enabled"] ?? false); // v2.5.0: "hear myself" also works for the voice changer alone monitorVol = (float)Math.Clamp((double?)m?["monitor"]?["volume"] ?? 0.8, 0, 1.5);
             monitor = Swap(monitor, monitorOn ? ((string)m?["monitor"]?["deviceId"] ?? personalId ?? DefaultRender()) : null, "mic monitor");
             comp.Enabled = (bool?)m?["comp"]?["enabled"] ?? false; comp.ThresholdDb = (double?)m?["comp"]?["thresholdDb"] ?? -18;
             comp.Ratio = (double?)m?["comp"]?["ratio"] ?? 3; comp.MakeupDb = (double?)m?["comp"]?["makeupDb"] ?? 4;
@@ -240,6 +240,9 @@ public sealed class Engine
             // v2.3.1: the virtual-mic cable gets your mic whenever one is chosen (processed if the chain is on, raw otherwise)
             string micOutId = (string)m?["outId"]; if (string.IsNullOrEmpty(micOutId)) micOutId = null;
             micOut = Swap(micOut, micOutId, "mic out");
+            // ----- v2.5.0 voice changer (off unless the user turns it on) -----
+            var vcc = VcConfig.From(m?["changer"]); changerOn = vcc.Enabled;
+            try { changer.Configure(vcc); } catch (Exception e) { Err("voice changer", e); }
             // ----- voice -----
             var v = cfg["voice"];
             voiceOn = (bool?)v?["enabled"] ?? false; voiceModel = (string)v?["modelPath"] ?? ""; voicePhrase = (string)v?["phrase"] ?? "clip it";
@@ -259,7 +262,7 @@ public sealed class Engine
             }
             // mic capture needed?
             bool needMic = (bool?)m?["meter"] ?? true;
-            needMic |= chainOn || voiceOn || micOutId != null || ((streamMode && micInStream) || (clipOn && micInClip) || (rec != null && micInRec));
+            needMic |= chainOn || voiceOn || changerOn || micOutId != null || ((streamMode && micInStream) || (clipOn && micInClip) || (rec != null && micInRec));
             string wantMic = needMic ? (string)m?["deviceId"] : null;
             if (wantMic != micId)
             {
@@ -320,12 +323,12 @@ public sealed class Engine
 
     void MicChain(float[] mono, int n)
     {
-        if (!chainOn || bypass) return;
+        bool on = chainOn && !bypass;
         // HPF -> echo cancel -> DeepFilterNet/RNNoise, then the voice gate (much easier once the noise floor is gone)
-        try { vc.Process(mono, n); } catch (Exception e) { Err("voice chain", e); }
-        gate.Process(mono, n);
-        micEq.Process(mono, n, 1);
-        comp.Process(mono, n);
+        if (on) { try { vc.Process(mono, n); } catch (Exception e) { Err("voice chain", e); } gate.Process(mono, n); }
+        // v2.5.0: voice changer works on the cleaned-up voice, before EQ/compressor shape the final sound
+        if (changerOn) { try { changer.Process(mono, n); } catch (Exception e) { Err("voice changer", e); } }
+        if (on) { micEq.Process(mono, n, 1); comp.Process(mono, n); }
     }
 
     // v2.4.2 EQ check: tones through the real mic-chain code (configured from the same JSON the app sends) and through a
@@ -492,6 +495,7 @@ public sealed class Engine
         var r = new JsonObject { ["channels"] = o, ["procs"] = pp, ["captured"] = captured, ["hearError"] = hearErr == "" ? null : hearErr, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
         // v2.3.1: what actually went into the virtual-mic / stream cables
         var mo = micOut; var so = stream; r["micOutPk"] = mo != null ? Math.Round(mo.Peak, 3) : -1; r["streamPk"] = so != null ? Math.Round(so.Peak, 3) : -1; if (mo != null) mo.Peak *= 0.5f; if (so != null) so.Peak *= 0.5f;
+        r["changer"] = changer.Status();
         r["ns"] = new JsonObject { ["engine"] = vc.NsActive, ["cutDb"] = Math.Round(vc.NsCutDb, 1), ["lsnr"] = Math.Round(vc.Lsnr, 1), ["cpuMs"] = Math.Round(vc.CpuMs, 2), ["error"] = vc.NsError,
             ["aecCutDb"] = Math.Round(vc.AecCutDb, 1), ["refActive"] = vc.RefActive, ["nearTalk"] = vc.NearTalk, ["aecDelayMs"] = Math.Round(vc.AecDelayMs), ["aec"] = vc.AecOn && aecRef != null, ["bypass"] = bypass };
         MicPeakPre *= 0.5f; MicPeakPost *= 0.5f;
@@ -572,6 +576,7 @@ public sealed class Engine
             foreach (var p in procs.Values) p.Dispose(); procs.Clear(); procRings.Clear();
             personal?.Dispose(); personal = null; stream?.Dispose(); stream = null; micOut?.Dispose(); micOut = null;
             foreach (var hs in hearSinks.Values) hs?.Dispose(); hearSinks.Clear(); hearBus.Clear(); hearLim.Clear();
+            try { changer.Configure(new VcConfig()); } catch { } changerOn = false;
             monitor?.Dispose(); monitor = null; try { aecRef?.Dispose(); } catch { } aecRef = null; aecRefId = null; vc.Reference = null;
             chans.Clear(); streamMode = false;
             try { sysLoop?.Dispose(); } catch { } sysLoop = null; clipSysWant = null;

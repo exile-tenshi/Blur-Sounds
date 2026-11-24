@@ -536,6 +536,7 @@ function engineConfig() {
       deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: micOutEffective(), gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
       hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && presentOut(mc.aec.refId) ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
       gainDb: mc.gainDb, muted: false, inStream: micCableMode() ? false : mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
+      changer: vcEngineConfig(), // v2.5.0
     },
     voice: { enabled: !!(c.enabled && c.voice.enabled), phrase: c.voice.phrase || 'clip it', modelPath: voiceModelPath() },
     clip: { enabled: !!c.enabled, bufferSeconds: Math.max(30, (c.seconds || 30) + 5), source: c.audioSource || 'auto', systemDevice: c.systemDevice || null },
@@ -871,6 +872,52 @@ ipcMain.handle('app:info', () => ({
   tools: toolPaths().map((t) => ({ ...t, exists: fs.existsSync(t.path) })),
 }));
 // v2.4.2 in-app updater (public GitHub releases, SHA-256 verified; see updater.cjs)
+// ---------------- v2.5.0 voice changer ----------------
+const { VoiceModels, VOICES } = require('./voicemodels.cjs');
+const vmodels = new VoiceModels({ dir: path.join(app.getPath('userData'), 'voice-models'), log: (m) => helperLogLine(m), send: (p) => send('vc:progress', p) });
+const VC = () => S().voiceChanger;
+function vcEngineConfig() {
+  const v = VC(); if (!v || !v.enabled) return { enabled: false };
+  if (v.engine === 'dsp') return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.dsp.pitch, autoPitch: !!v.autoPitch, targetHz: v.dsp.targetHz, formant: v.dsp.formant };
+  const r = vmodels.resolve(v.voice, v.custom); const p = vmodels.paths();
+  if (!r || vmodels.need(v.voice, v.custom).length || !fs.existsSync(r.modelPath)) return { enabled: false }; // models not downloaded yet: mic stays untouched
+  const r2 = v.blendWith ? vmodels.resolve(v.blendWith, v.custom) : null;
+  return {
+    enabled: true, engine: 'ai', bypass: !!v.bypass, cvPath: p.cvPath, f0Path: p.f0Path, voicePath: r.modelPath, spkPath: r.spkPath, sid: r.sid,
+    sid2: r2 && r2.modelPath === r.modelPath ? r2.sid : -1, blend: v.blend || 0,
+    pitch: v.pitch || 0, autoPitch: !!v.autoPitch, targetHz: v.targetHz || r.targetHz, quality: v.quality || 'balanced', device: v.device || 'gpu', f0: v.f0 || 'auto',
+    expressive: v.expressive ?? 1, envMix: v.envMix ?? 0.35,
+  };
+}
+function vcState() { const v = VC(); return { settings: v, models: vmodels.status(v.custom), hotkeyError: vcHotkeyError }; }
+let vcHotkeyError = null;
+function vcPatch(p) {
+  const v = VC();
+  for (const k of Object.keys(p || {})) { if (k === 'dsp') v.dsp = { ...v.dsp, ...p.dsp }; else v[k] = p[k]; }
+  if (p && p.voice && !('targetHz' in p)) { const r = vmodels.resolve(p.voice, v.custom); if (r) v.targetHz = r.targetHz; }
+  store.saveSoon(); pushEngine(); if (p && 'hotkey' in p) registerHotkeys(); send('vc:state', vcState()); return vcState();
+}
+ipcMain.handle('vc:get', () => vcState());
+ipcMain.handle('vc:set', (_e, p) => vcPatch(p));
+ipcMain.handle('vc:download', async (_e, voiceId) => {
+  const keys = vmodels.need(voiceId || VC().voice, VC().custom);
+  send('vc:state', vcState()); await vmodels.download(keys); pushEngine(); send('vc:state', vcState()); return vcState();
+});
+ipcMain.handle('vc:cancel', () => { vmodels.cancel(); return vcState(); });
+ipcMain.handle('vc:import', async (_e, opts) => {
+  const r = await dialog.showOpenDialog(win, { title: 'Import an RVC voice (.onnx exported for Blur Sounds Pro)', filters: [{ name: 'Voice', extensions: ['onnx', 'pth'] }], properties: ['openFile'] });
+  if (r.canceled || !r.filePaths[0]) return { ok: false, cancelled: true };
+  const res = vmodels.importVoice(r.filePaths[0], opts || {}); if (!res.ok) return res;
+  const v = VC(); v.custom = (v.custom || []).filter((c) => c.id !== res.voice.id).concat([res.voice]); store.saveSoon(); send('vc:state', vcState());
+  return { ok: true, voice: res.voice, state: vcState() };
+});
+ipcMain.handle('vc:removeCustom', (_e, id) => {
+  const v = VC(); const c = (v.custom || []).find((x) => x.id === id);
+  if (c) { for (const f of [c.modelPath, c.spkPath]) if (f && f.startsWith(vmodels.dir)) try { fs.rmSync(f, { force: true }); } catch {} }
+  v.custom = (v.custom || []).filter((x) => x.id !== id); if (v.voice === id) v.voice = 'lyra'; store.saveSoon(); pushEngine(); return vcState();
+});
+ipcMain.handle('vc:openFolder', () => shell.openPath(vmodels.dir));
+
 const updater = new Updater({ app, log: (m) => helperLogLine(m), send: (st) => send('update:state', st) });
 let updateResult = null;
 // Update self-test (only with a separate BSP_PROFILE_DIR): no audio engine, checks the feed and runs the update once.
@@ -949,6 +996,8 @@ function registerHotkeys() {
   }
   const lk = listenCfg().hotkey;
   if (lk) { try { if (!globalShortcut.register(lk, () => cycleListening())) bad.push(lk); } catch { bad.push(lk); } }
+  const vk = S().voiceChanger && S().voiceChanger.hotkey; vcHotkeyError = null;
+  if (vk) { try { if (!globalShortcut.register(vk, () => { const v = S().voiceChanger; if (!v.enabled) vcPatch({ enabled: true, bypass: false }); else vcPatch({ bypass: !v.bypass }); })) { bad.push(vk); vcHotkeyError = vk; } } catch { bad.push(vk); vcHotkeyError = vk; } }
   const stop = S().soundboard.stopHotkey;
   if (stop) { try { if (!globalShortcut.register(stop, () => send('sound:stopAll'))) bad.push(stop); } catch { bad.push(stop); } }
   send('sound:hotkeyErrors', bad);

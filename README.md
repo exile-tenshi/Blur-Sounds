@@ -14,6 +14,13 @@ A SteelSeries Sonar–style audio app for Windows, built as the next version of 
 - **Streamer mode.** Two mixes: a personal mix for your headphones and a stream mix sent to a cable for OBS, Discord or VRChat. Each channel has its own stream volume and mute.
 - **EQ.** A 7-band parametric EQ on every channel, with presets.
 - **Mic chain.** High-pass filter, echo cancellation, AI noise suppression (DeepFilterNet3 or RNNoise), voice gate, compressor, EQ and a ClearCast-style voice preset, with a Before/After A/B switch. The processed mic can be sent to a cable.
+- **Voice changer (v2.5).** Real-time male → female and female → male on the **Voice** page, off until you turn it on. It sits in the mic chain after noise suppression and before the virtual mic.
+  - **AI voice:** RVC v2 (ContentVec features, RMVPE pitch, NSF-HiFiGAN voice) on ONNX Runtime with DirectML (AMD, NVIDIA or Intel GPU) and a CPU fallback. Seven built-in voices from openly licensed speech corpora (LibriSpeech, VCTK), plus import of your own RVC v2 voice exported with `tools/rvc2onnx.py`.
+  - **Auto pitch** learns your speaking pitch and moves it to where the voice naturally sits. There is also a fine-tune control, voice blending, an expressiveness control and a "follow my loudness" control.
+  - **Models are downloaded on first use** (about 0.8 GB, from the official RVC repository and the `voice-models-v1` release) and each file is checked against a pinned SHA-256.
+  - **Delay:** measured on an RX 9070 XT, about 170 ms (Fast), 220 ms (Balanced) or 380 ms (Best).
+  - **Pitch & formant mode:** a PSOLA shifter with independent formant control. It needs no download and adds about 47 ms.
+  - A/B switch to your real voice, a global hotkey, and "Hear myself".
 - **Echo cancellation (v2.2).** Removes the sound of your speakers/headset from your mic: automatic delay tracking (GCC-PHAT), a SpeexDSP adaptive filter with residual echo suppression, double-talk detection so your voice isn't cut while others talk, and Mild / Strong / Max strength. Adds about 10 ms (about 40 ms total with DeepFilterNet3).
 - **Broadcast guard (v2.2).** Keeps the Windows default output and per-app routes from pointing at the stream or virtual-mic cable, so muted apps can't leak into your broadcast. Includes a Reset routing option.
 - **All-in-one output switch (v2.3).** Pick the headphones or speakers you want to listen on from the top bar, the Mixer, or the tray menu, and everything follows in one go: the Windows default (all roles), Blur Sounds' own "You hear" mix and mic monitor, the channels and per-app routes that were on the old device. Your stream cable and the broadcast guard are left alone, and a cable can never be picked as the listening device. Save named presets (e.g. Headphones / VR), cycle them with a global hotkey, and if a device is unplugged the app falls back to the Windows default and switches back when it returns.
@@ -96,7 +103,8 @@ Large and third-party binaries are **not** committed. `scripts/fetch-deps.cjs` d
 | RNNoise 0.2 (built from source with MinGW) | [xiph/rnnoise](https://github.com/xiph/rnnoise) | BSD-3-Clause |
 | SpeexDSP 1.2.1 (built from source with MinGW) | [xiph/speexdsp](https://github.com/xiph/speexdsp) | BSD-3-Clause |
 | DeepFilterNet3 model + libDF (`df.dll`, built with Rust) | [Rikorose/DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | MIT / Apache-2.0 |
-| NAudio, Vosk API (NuGet) | restored by `dotnet publish` | MIT / Apache-2.0 |
+| NAudio, Vosk API, ONNX Runtime DirectML (NuGet) | restored by `dotnet publish` | MIT / Apache-2.0 |
+| Voice changer models (downloaded by the app on first use, not bundled) | RMVPE: [lj1995/VoiceConversionWebUI](https://huggingface.co/lj1995/VoiceConversionWebUI); ContentVec and voices: [voice-models-v1 release](https://github.com/exile-tenshi/Blur-Sounds/releases/tag/voice-models-v1) (converted from RVC-Project, content-vec-best and KoeAI/llvc_models) | MIT; voices trained on LibriSpeech / VCTK (CC BY 4.0) |
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -127,4 +135,4 @@ Thank you for testing Blur Sounds when it was still breaking. This release exist
 
 ### Built with
 
-Electron, React, Vite, NAudio, Vosk, RNNoise, SpeexDSP, DeepFilterNet, FFmpeg, open-meteo, and the VRChat OSC chatbox protocol. The chatbox is inspired by MagicChatbox.
+Electron, React, Vite, NAudio, Vosk, ONNX Runtime, RVC / ContentVec / RMVPE, RNNoise, SpeexDSP, DeepFilterNet, FFmpeg, open-meteo, and the VRChat OSC chatbox protocol. The chatbox is inspired by MagicChatbox.

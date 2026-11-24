@@ -7,6 +7,7 @@ import Settings from './pages/Settings.jsx';
 import Clips from './pages/Clips.jsx';
 import Record from './pages/Record.jsx';
 import Cables from './pages/Cables.jsx';
+import Voice from './pages/Voice.jsx';
 import EngineAlert from './EngineAlert.jsx';
 import { ListenQuick } from './components/ListenSwitch.jsx';
 import { HifiFirstRun } from './components/HifiCable.jsx';
@@ -15,6 +16,7 @@ import { UpdateBadge, UpdateToast } from './components/Updater.jsx';
 
 const NAV = [
   { id: 'mixer', label: 'Mixer', icon: Icon.mixer },
+  { id: 'voice', label: 'Voice', icon: Icon.vchange },
   { id: 'clips', label: 'Clips', icon: Icon.clip },
   { id: 'record', label: 'Record', icon: Icon.rec },
   { id: 'cables', label: 'Cables', icon: Icon.cable },
@@ -64,7 +66,7 @@ export default function App() {
             <n.icon size={20} /><span>{n.label}</span>
           </button>
         ))}
-        <div className="rail-foot">v2.4</div>
+        <div className="rail-foot">v2.5</div>
       </nav>
       {helper.status === 'running' && !wizard && settings.app.setup?.done && <HifiFirstRun settings={settings} update={update} />}
       {wizard && <SetupWizard rerun={wizard === 'rerun'} onClose={async () => { setWizard(null); setSettings({ ...(await window.bsp.invoke('settings:get')) }); }} />}
@@ -72,6 +74,7 @@ export default function App() {
         <HealBanner />
         {['failed', 'error', 'missing'].includes(helper.status) && page !== 'mixer' && <EngineAlert helper={helper} compact />}
         {page === 'mixer' && <Mixer />}
+        {page === 'voice' && <Voice />}
         {page === 'clips' && <Clips settings={settings} update={update} />}
         {page === 'record' && <Record settings={settings} update={update} />}
         {page === 'cables' && <Cables />}

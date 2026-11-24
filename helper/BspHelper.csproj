@@ -23,6 +23,7 @@
   <ItemGroup>
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="Vosk" Version="0.3.38" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
   </ItemGroup>
   <!-- Vosk.targets picks natives by the *build* OS; force the Windows ones when cross-publishing from Linux. -->
   <ItemGroup>

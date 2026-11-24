@@ -76,6 +76,12 @@ function defaults() {
       comp: { enabled: true, thresholdDb: -20, ratio: 3, makeupDb: 4, attackMs: 5, releaseMs: 120 },
       eq: { ...eqDefault(), preset: 'flat' },
     },
+    // v2.5.0 voice changer: OFF until you turn it on. AI voices download on first use.
+    voiceChanger: {
+      enabled: false, engine: 'ai', voice: 'lyra', preset: 'm2f', bypass: false, hotkey: '',
+      pitch: 0, autoPitch: true, targetHz: 205, quality: 'balanced', device: 'gpu', f0: 'auto', expressive: 1, envMix: 0.35, blendWith: null, blend: 0,
+      dsp: { pitch: 11, formant: 17, targetHz: 210 }, custom: [],
+    },
     clips: {
       enabled: true, seconds: 30, hotkey: 'F8', includeMic: true, folder: null,
       voice: { enabled: true, phrase: 'clip it' },
