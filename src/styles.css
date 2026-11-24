@@ -406,3 +406,11 @@ button.pill { cursor: pointer; }
 .guard-banner.ok { padding: 8px 12px; border: 1px solid var(--line2); border-radius: 4px; background: #0e1013; }
 .seg.three { grid-template-columns: 1fr 1fr 1fr; }
 .ns-stats span.on { color: var(--red2); }
+
+/* v2.2.2 engine problems */
+.engine-alert { display: flex; gap: 16px; align-items: center; justify-content: space-between; text-align: left; margin-top: 10px; padding: 12px 14px; border: 1px solid var(--red2); border-radius: 4px; background: #160c0e; max-width: 720px; }
+.engine-alert.compact { margin: 0 0 12px; max-width: none; }
+.engine-alert-text { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+.engine-alert-text b { color: var(--text); }
+.engine-alert-text small { opacity: .75; font-variant-numeric: tabular-nums; }
+.engine-alert-actions { display: flex; gap: 8px; flex-shrink: 0; }

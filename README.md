@@ -44,12 +44,12 @@ A SteelSeries Sonar–style audio app for Windows, built as the next version of 
 ## Requirements
 
 - Windows 10 or 11, 64-bit
-- [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) for the audio helper
+- Nothing else to install: the audio engine ships with its own .NET 8 runtime (since 2.2.2)
 - Optional: [VB-Audio Cable / Hi-Fi Cable](https://vb-audio.com/Cable/) for routing to other apps
 - Optional: VRChat with OSC turned on (Action Menu → Options → OSC → Enabled) for the chatbox. Mute and heart rate need OSC output on port 9001 (configurable).
 - Optional: an AMD GPU for hardware encoding. Without one, x264 is used.
 
-Your settings are stored in `%APPDATA%\Blur Sounds Pro\settings.json`. Nothing personal is included in the app.
+Your settings are stored in `%APPDATA%\Blur Sounds Pro\settings.json`. If the audio engine won't start, the Mixer shows why, with a Retry button and an Open logs button (`%APPDATA%\Blur Sounds Pro\logs\helper.log`). Nothing personal is included in the app.
 
 ## Build from source
 
@@ -66,7 +66,7 @@ Individual steps:
 
 ```bash
 npm run fetch-deps     # Vosk model, FFmpeg, RNNoise, SpeexDSP, DeepFilterNet3 (downloaded/built, not committed)
-npm run build:helper   # .NET audio helper -> helper-bin/
+npm run build:helper   # .NET audio helper (self-contained, single file) -> helper-bin/
 npm run build:renderer # React UI -> renderer/
 npm run dev            # UI preview in a browser with mock data
 ```

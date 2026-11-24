@@ -29,6 +29,29 @@ static class Program
     static string DefaultRenderId;
     static DateTime LastMediaSent = DateTime.MinValue;
 
+    // --selftest: proves the bundled runtime and every native library load on this PC (used by the app's diagnostics/logs).
+    static int SelfTest()
+    {
+        var r = new JsonObject
+        {
+            ["runtime"] = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+            ["os"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            // "" = the runtime is bundled inside this exe (self-contained single-file), otherwise the shared .NET install it came from
+            ["runtimeFrom"] = typeof(object).Assembly.Location == "" ? "bundled" : Path.GetDirectoryName(typeof(object).Assembly.Location),
+        };
+        var nat = new JsonObject();
+        foreach (var n in new[] { "df.dll", "speexdsp.dll", "rnnoise.dll", "libvosk.dll" })
+        {
+            var full = Path.Combine(AppContext.BaseDirectory, n);
+            if (!File.Exists(full)) { nat[n] = "missing"; continue; }
+            nat[n] = System.Runtime.InteropServices.NativeLibrary.TryLoad(full, out var h) ? "ok" : "load failed";
+        }
+        r["natives"] = nat;
+        try { using var en = new MMDeviceEnumerator(); r["renderDevices"] = en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).Count; r["captureDevices"] = en.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active).Count; }
+        catch (Exception e) { r["audioError"] = e.Message; }
+        Console.Out.WriteLine(r.ToJsonString()); return 0;
+    }
+
     static void Send(JsonObject o)
     {
         var s = o.ToJsonString();
@@ -38,8 +61,11 @@ static class Program
     [STAThread]
     static int Main(string[] args)
     {
-        Console.OutputEncoding = new UTF8Encoding(false);
-        Console.InputEncoding = new UTF8Encoding(false);
+        // v2.2.2: plain UTF-8 pipes instead of console code pages (setting Console.*Encoding can throw on some systems).
+        try { Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true }); } catch { }
+        try { Console.SetIn(new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false))); } catch { }
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => { try { Console.Error.WriteLine("fatal: " + e.ExceptionObject); } catch { } };
+        if (args.Length > 0 && args[0] == "--selftest") return SelfTest();
         // v2.2: the helper must see the real Windows default, never a per-app route Windows remembered for it.
         if (args.Length == 0) { try { AppRouting.Set(Environment.ProcessId, "", "render"); } catch { } }
         if (args.Length > 0 && args[0] == "--stats")
@@ -91,8 +117,14 @@ static class Program
     public static Engine Eng;
     static void AudioThread()
     {
-        Enumerator = new MMDeviceEnumerator();
-        Eng = new Engine(new MMDeviceEnumerator()) { Emit = Send };
+        try { Enumerator = new MMDeviceEnumerator(); Eng = new Engine(new MMDeviceEnumerator()) { Emit = Send }; }
+        catch (Exception e)
+        {
+            // Windows Audio service stopped/disabled: tell the app why instead of crashing with an obscure code.
+            Console.Error.WriteLine("audio service unavailable: " + e.Message);
+            Send(new JsonObject { ["event"] = "fatal", ["code"] = "audio-service", ["message"] = e.Message });
+            Environment.Exit(3);
+        }
         StartMta(() =>
         {
             var snap = Snapshot();

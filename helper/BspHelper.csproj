@@ -7,8 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>BspAudioHelper</AssemblyName>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
-    <PublishSingleFile>false</PublishSingleFile>
+    <!-- v2.2.2: ship the .NET runtime inside the helper so it runs on PCs without .NET installed. -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -20,7 +26,7 @@
   </ItemGroup>
   <!-- Vosk.targets picks natives by the *build* OS; force the Windows ones when cross-publishing from Linux. -->
   <ItemGroup>
-    <None Include="$(NuGetPackageRoot)vosk/0.3.38/build/lib/win-x64/*.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    <None Include="$(NuGetPackageRoot)vosk/0.3.38/build/lib/win-x64/*.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Link="%(Filename)%(Extension)" />
   </ItemGroup>
   <Target Name="DropNonWindowsVosk" AfterTargets="Publish">
     <Delete Files="$(PublishDir)libvosk.so;$(PublishDir)libvosk.dylib" />

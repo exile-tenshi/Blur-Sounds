@@ -3,6 +3,7 @@ import { Icon } from '../components/Icons.jsx';
 import { Fader, Meter, HSlider, Select, Toggle, MiniMeter } from '../components/Controls.jsx';
 import { EqEditor } from '../components/Eq.jsx';
 import Drawer from '../components/Drawer.jsx';
+import EngineAlert from '../EngineAlert.jsx';
 
 const ICONS = { game: Icon.game, chat: Icon.headset, media: Icon.media, aux: Icon.aux, cable: Icon.cable };
 
@@ -35,7 +36,7 @@ export default function Mixer() {
 
   if (!st || !st.ready) {
     return (<div className="page"><div className="empty-state panel"><Icon.mixer size={36} /><h2>Waiting for the audio engine</h2>
-      <p>{st && st.helper ? `Engine status: ${st.helper.status}. ${st.helper.detail || ''}` : 'Starting…'}</p></div></div>);
+      {st && st.helper && st.helper.status !== 'starting' ? <EngineAlert helper={st.helper} /> : <p>Starting…</p>}</div></div>);
   }
 
   const s = st.settings;

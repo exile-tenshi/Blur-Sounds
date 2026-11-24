@@ -7,6 +7,7 @@ import Settings from './pages/Settings.jsx';
 import Clips from './pages/Clips.jsx';
 import Record from './pages/Record.jsx';
 import Cables from './pages/Cables.jsx';
+import EngineAlert from './EngineAlert.jsx';
 
 const NAV = [
   { id: 'mixer', label: 'Mixer', icon: Icon.mixer },
@@ -39,7 +40,7 @@ export default function App() {
       <header className="titlebar">
         <div className="brand"><Logo size={24} /><span className="brand-name">BLUR SOUNDS</span><span className="brand-pro">PRO</span></div>
         <div className="title-status">
-          <span className={`pill ${helper.status === 'running' ? 'ok' : 'warn'}`}><i />Audio engine {helper.status === 'running' ? 'online' : helper.status}</span>
+          <span className={`pill ${helper.status === 'running' ? 'ok' : 'warn'}`} title={helper.status === 'running' ? '' : [helper.message, helper.hint].filter(Boolean).join('\n')}><i />Audio engine {helper.status === 'running' ? 'online' : helper.status === 'failed' ? 'failed' : helper.status}</span>
           <RecPill go={go} />
           <span className={`pill ${cb && cb.live ? 'live' : ''}`}><i />VRChat chatbox {cb && cb.live ? 'live' : 'off'}</span>
         </div>
@@ -55,9 +56,10 @@ export default function App() {
             <n.icon size={20} /><span>{n.label}</span>
           </button>
         ))}
-        <div className="rail-foot">v2.2</div>
+        <div className="rail-foot">v2.2.2</div>
       </nav>
       <main className="content">
+        {['failed', 'error', 'missing'].includes(helper.status) && page !== 'mixer' && <EngineAlert helper={helper} compact />}
         {page === 'mixer' && <Mixer />}
         {page === 'clips' && <Clips settings={settings} update={update} />}
         {page === 'record' && <Record settings={settings} update={update} />}

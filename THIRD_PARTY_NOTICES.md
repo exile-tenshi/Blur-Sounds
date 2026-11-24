@@ -7,6 +7,7 @@ Blur Sounds Pro release builds include these third-party components. They are do
 - **RNNoise 0.2**: BSD-3-Clause, Copyright Xiph.Org Foundation and contributors. https://github.com/xiph/rnnoise. Built from source as `rnnoise.dll`; the license is shipped as `RNNOISE-COPYING` next to it.
 - **SpeexDSP 1.2.1**: BSD-3-Clause, Copyright Xiph.Org Foundation, Jean-Marc Valin and contributors. https://github.com/xiph/speexdsp. Built from source as `speexdsp.dll` (acoustic echo canceller + residual echo suppressor); the license is shipped as `SPEEXDSP-COPYING`.
 - **DeepFilterNet 3** (libDF and the DeepFilterNet3 ONNX model): MIT OR Apache-2.0, Copyright Hendrik Schröter. https://github.com/Rikorose/DeepFilterNet. Built from source as `df.dll` (it statically includes Rust crates such as tract, ndarray and rustfft under MIT/Apache-2.0); the model ships in `resources/models/deepfilter` with both licenses.
+- **.NET 8 runtime** (bundled inside `BspAudioHelper.exe`): MIT, Copyright .NET Foundation and Contributors. https://github.com/dotnet/runtime
 - **NAudio 2.2.1**: MIT. https://github.com/naudio/NAudio
 - **Electron, React, Vite**: MIT.
 - **Weather data**: Open-Meteo (https://open-meteo.com), CC BY 4.0. IP location: ipwho.is and ip-api.com (free tiers).

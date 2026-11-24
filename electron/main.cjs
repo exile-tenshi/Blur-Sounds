@@ -22,7 +22,8 @@ const isDev = !app.isPackaged;
 const helperExe = isDev
   ? path.join(__dirname, '..', 'helper-bin', 'BspAudioHelper.exe')
   : path.join(process.resourcesPath, 'helper', 'BspAudioHelper.exe');
-const helper = new Helper(helperExe);
+const helperLog = path.join(app.getPath('userData'), 'logs', 'helper.log');
+const helper = new Helper(helperExe, helperLog);
 
 function send(ch, data) { if (win && !win.isDestroyed()) win.webContents.send(ch, data); }
 
@@ -221,7 +222,9 @@ function pushEngine() { clearTimeout(engineTimer); engineTimer = setTimeout(() =
 function engineConfig() {
   const m = S().mixer; const mc = S().micChain; const c = S().clips; const r = S().record;
   const sessions = visibleSessions();
-  const micId = m.mic.deviceId || (snapshot && (snapshot.defaultCommsInput || snapshot.defaultInput)) || null;
+  // A saved mic that isn't plugged in / doesn't exist on this PC falls back to the Windows default mic (the setting itself is kept).
+  const micKnown = !m.mic.deviceId || !snapshot || !snapshot.inputs || snapshot.inputs.some((i) => i.id === m.mic.deviceId);
+  const micId = (micKnown && m.mic.deviceId) || (snapshot && (snapshot.defaultCommsInput || snapshot.defaultInput)) || null;
   return {
     streamMode: !!m.streamMode, personalOut: m.personalOut || null, streamOut: m.streamOut || null,
     channels: m.channelList.map(({ id }) => {
@@ -335,7 +338,12 @@ helper.on('engine', (d) => { engineState = d; send('engine:state', { engine: d, 
 helper.on('voice', async (d) => { const r = await media.saveClip('voice'); clipDone(r, `Heard “${d.text}”`); });
 helper.on('status', (st) => { if (st === 'running') { seenPids.clear(); pushEngine(); } });
 helper.on('media', (d) => { chatbox.setMedia(d); send('media:state', d); });
-helper.on('status', (st, detail) => { helperStatus = { status: st, detail: detail || '' }; send('helper:status', helperStatus); });
+helper.on('status', (st, detail, info) => {
+  helperStatus = { status: st, detail: detail || '', ...(info ? { message: info.message, hint: info.hint, code: info.code, fatal: !!info.fatal } : {}), log: helperLog };
+  send('helper:status', helperStatus); if (!snapshot) pushMixer();
+});
+ipcMain.handle('helper:retry', () => { helper.retry(); return true; });
+ipcMain.handle('helper:openLogs', () => { try { fs.mkdirSync(path.dirname(helperLog), { recursive: true }); if (!fs.existsSync(helperLog)) fs.writeFileSync(helperLog, ''); } catch {} shell.showItemInFolder(helperLog); return helperLog; });
 helper.on('log', (d) => { if (isDev) console.log('[helper]', d.message); });
 
 // ---------------- chatbox ----------------
