@@ -45,7 +45,7 @@ export function installMock() {
     { id: 'o3', name: 'CABLE Input (VB-Audio Virtual Cable)', recordName: 'CABLE Output (VB-Audio Virtual Cable)', sonar: false, ownedBySonar: false, usedBy: ['Game'] },
     { id: 'o5', name: 'SteelSeries Sonar - Gaming (SteelSeries Sonar Virtual Audio Device)', recordName: null, sonar: true, ownedBySonar: true, usedBy: [] },
     { id: 'o6', name: 'SteelSeries Sonar - Chat (SteelSeries Sonar Virtual Audio Device)', recordName: null, sonar: true, ownedBySonar: true, usedBy: [] }];
-  const state = () => ({ helper: { status: 'running' }, ready: true, cables, sonarRunning: true, micChain: settings.micChain, outputs, inputs, defaultOutput: 'o1', defaultInput: 'i0', defaultCommsInput: 'i0', routingSupported: true, sessions, settings: settings.mixer });
+  const state = () => ({ helper: { status: 'running' }, ready: true, cables, sonarRunning: true, micChain: settings.micChain, micPath: new URLSearchParams(location.search).get('mic') === 'nocable' ? { input: { id: 'i0', name: 'Microphone (USB Mic)', fallback: true }, processing: true, out: null, cable: null, warn: 'no-cable', errors: [] } : { input: { id: 'i0', name: 'Microphone (USB Mic)', fallback: false }, processing: true, out: { id: 'o2', name: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', recordName: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', via: 'mic' }, cable: { id: 'o2', name: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)' }, warn: null, errors: [] }, outputs, inputs, defaultOutput: 'o1', defaultInput: 'i0', defaultCommsInput: 'i0', routingSupported: true, sessions, settings: settings.mixer });
   const media = { app: 'Spotify.exe', title: 'Song Title', artist: 'Artist', status: 'playing', position: 124, duration: 386, focus: { name: 'VRChat' } };
   const engine = { engine: { running: true, rnnoise: 'ok', voice: { enabled: true, ready: true, heard: 'okay clip it', phrase: 'clip it' }, clip: { enabled: true, buffered: 30, capacity: 34 }, record: { active: page === 'record' } },
     media: { ffmpeg: true, videoRing: true, ringSeconds: 34, recording: page === 'record' ? { startedAt: Date.now() - 754000, video: true } : null, clipsDir: 'C:\\Users\\you\\Videos\\Blur Sounds Pro\\Clips', recDir: 'C:\\Users\\you\\Videos\\Blur Sounds Pro\\Recordings' } };
@@ -61,7 +61,7 @@ export function installMock() {
   let t = 0;
   setInterval(() => {
     t += 1; const w = (p) => Math.max(0, 0.35 + 0.3 * Math.sin(t / 3 + p) + Math.random() * 0.25);
-    emit('mixer:levels', { sessions: { 1: w(0), 3: w(1) * 0.8, 4: 0, 5: w(2), 7: w(3) * 0.3 }, mic: w(4) * 0.7, master: w(5), engine: { clipDesk: w(1) * 0.6, clipMic: w(4) * 0.5, clipUsing: 'apps', channels: { game: w(0) }, micPre: w(4) * 0.8, micPost: w(4) * 0.7, gr: 3.5, gate: 1, vad: 0.93 } });
+    emit('mixer:levels', { sessions: { 1: w(0), 3: w(1) * 0.8, 4: 0, 5: w(2), 7: w(3) * 0.3 }, mic: w(4) * 0.7, master: w(5), engine: { clipDesk: w(1) * 0.6, clipMic: w(4) * 0.5, clipUsing: 'apps', channels: { game: w(0) }, micPre: w(4) * 0.8, micPost: w(4) * 0.7, micOutPk: w(4) * 0.7, streamPk: w(1) * 0.5, gr: 3.5, gate: 1, vad: 0.93 } });
   }, 90);
   const compose = () => {
     const m = settings.chatbox.modules; const parts = [];

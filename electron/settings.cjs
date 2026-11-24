@@ -67,7 +67,7 @@ function defaults() {
     soundboard: { outputLabel: '', monitor: true, volume: 0.8, stopHotkey: '', sounds: [] },
     micChain: {
       enabled: false, outId: null, gainDb: 0, clearcast: false, inStream: true,
-      gate: { enabled: true, thresholdDb: -48, holdMs: 150, releaseMs: 120, attackMs: 2, rangeDb: -60 },
+      gate: { enabled: true, thresholdDb: -55, holdMs: 200, releaseMs: 150, attackMs: 2, rangeDb: -40 }, // gentle on a fresh setup: quiet mics still open it, closed = -40 dB, not silence
       ns: { enabled: true, amount: 0.9, engine: 'rnnoise' },
       hpf: { enabled: false, freq: 90 },
       aec: { enabled: false, refId: null, strength: 'strong' },

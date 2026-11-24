@@ -59,25 +59,60 @@ sealed class DeviceSource : IDisposable
 }
 
 // A render endpoint fed from the engine (personal mix, stream mix, processed mic).
+// v2.3.1: opens the device at its own shared-mode mix format (any rate / channel count, e.g. Hi-Fi Cable at
+// 96/192 kHz or 8 ch) and converts the engine's 48 kHz stereo itself, instead of relying on Windows/DMO resampling.
 sealed class OutputSink : IDisposable
 {
-    public readonly string DeviceId; readonly WasapiOut wo; readonly BufferedWaveProvider bwp; byte[] bytes = new byte[0];
-    public string Error;
+    public readonly string DeviceId; WasapiOut wo; BufferedWaveProvider bwp; byte[] bytes = new byte[0];
+    public string Error; public readonly int Rate, Channels; public float Peak; public long Written;
+    float[] conv = new float[0]; double pos; float lastL, lastR;
     public OutputSink(MMDeviceEnumerator en, string id)
     {
         DeviceId = id;
         var dev = en.GetDevice(id);
-        bwp = new BufferedWaveProvider(WaveFormat.CreateIeeeFloatWaveFormat(48000, 2)) { DiscardOnBufferOverflow = true, BufferDuration = TimeSpan.FromMilliseconds(600), ReadFully = true };
-        wo = new WasapiOut(dev, AudioClientShareMode.Shared, true, 30);
-        wo.Init(bwp); wo.Play();
+        int rate = 48000, chans = 2;
+        try { var mf = dev.AudioClient.MixFormat; if (mf != null && mf.SampleRate >= 8000) { rate = mf.SampleRate; chans = Math.Clamp(mf.Channels, 1, 8); } } catch { }
+        Exception last = null;
+        foreach (var (r, c) in new[] { (rate, chans), (48000, 2) })
+        {
+            try
+            {
+                bwp = new BufferedWaveProvider(WaveFormat.CreateIeeeFloatWaveFormat(r, c)) { DiscardOnBufferOverflow = true, BufferDuration = TimeSpan.FromMilliseconds(600), ReadFully = true };
+                wo = new WasapiOut(dev, AudioClientShareMode.Shared, true, 30);
+                wo.Init(bwp); wo.Play(); Rate = r; Channels = c; last = null; break;
+            }
+            catch (Exception e) { last = e; try { wo?.Dispose(); } catch { } wo = null; }
+        }
+        if (last != null) throw new Exception($"could not open {dev.FriendlyName} ({rate} Hz, {chans} ch): {last.Message}");
         wo.PlaybackStopped += (s, e) => { if (e.Exception != null) Error = e.Exception.Message; };
     }
     public void Write(float[] stereo, int count)
     {
         // keep latency bounded: if more than 120 ms queued, drop this block
         if (bwp.BufferedDuration.TotalMilliseconds > 120) return;
-        int nb = count * 4; if (bytes.Length < nb) bytes = new byte[nb];
-        Buffer.BlockCopy(stereo, 0, bytes, 0, nb);
+        float pk = 0; for (int i = 0; i < count; i++) { var a = Math.Abs(stereo[i]); if (a > pk) pk = a; }
+        if (pk > Peak) Peak = pk; Written += count / 2;
+        float[] src = stereo; int n = count;
+        if (Rate != 48000 || Channels != 2)
+        {
+            int inFrames = count / 2; double step = 48000.0 / Rate;
+            int outFrames = (int)Math.Ceiling((inFrames - pos) / step) + 1; int need = outFrames * Channels;
+            if (conv.Length < need) conv = new float[need];
+            int o = 0;
+            for (; pos < inFrames; pos += step)
+            {
+                int i0 = (int)pos; double f = pos - i0;
+                float l0 = i0 == 0 ? lastL : stereo[(i0 - 1) * 2], r0 = i0 == 0 ? lastR : stereo[(i0 - 1) * 2 + 1];
+                float l1 = stereo[i0 * 2], r1 = stereo[i0 * 2 + 1];
+                float l = (float)(l0 + (l1 - l0) * f), r = (float)(r0 + (r1 - r0) * f);
+                if (Channels == 1) conv[o++] = (l + r) * 0.5f;
+                else { conv[o++] = l; conv[o++] = r; for (int k = 2; k < Channels; k++) conv[o++] = 0; }
+            }
+            pos -= inFrames; if (inFrames > 0) { lastL = stereo[(inFrames - 1) * 2]; lastR = stereo[(inFrames - 1) * 2 + 1]; }
+            src = conv; n = o;
+        }
+        int nb = n * 4; if (bytes.Length < nb) bytes = new byte[nb];
+        Buffer.BlockCopy(src, 0, bytes, 0, nb);
         bwp.AddSamples(bytes, 0, nb);
     }
     public void Dispose() { try { wo.Stop(); } catch { } try { wo.Dispose(); } catch { } }
@@ -203,7 +238,8 @@ public sealed class Engine
             micEq.Configure(m?["eq"]);
             micGain = Db.ToLin((double?)m?["gainDb"] ?? 0); micMuted = (bool?)m?["muted"] ?? false;
             micInStream = (bool?)m?["inStream"] ?? true; micInClip = (bool?)m?["inClip"] ?? true; micInRec = (bool?)m?["inRec"] ?? true;
-            string micOutId = chainOn ? (string)m?["outId"] : null;
+            // v2.3.1: the virtual-mic cable gets your mic whenever one is chosen (processed if the chain is on, raw otherwise)
+            string micOutId = (string)m?["outId"]; if (string.IsNullOrEmpty(micOutId)) micOutId = null;
             micOut = Swap(micOut, micOutId, "mic out");
             // ----- voice -----
             var v = cfg["voice"];
@@ -224,7 +260,7 @@ public sealed class Engine
             }
             // mic capture needed?
             bool needMic = (bool?)m?["meter"] ?? true;
-            needMic |= chainOn || voiceOn || ((streamMode && micInStream) || (clipOn && micInClip) || (rec != null && micInRec));
+            needMic |= chainOn || voiceOn || micOutId != null || ((streamMode && micInStream) || (clipOn && micInClip) || (rec != null && micInRec));
             string wantMic = needMic ? (string)m?["deviceId"] : null;
             if (wantMic != micId)
             {
@@ -247,6 +283,7 @@ public sealed class Engine
 
     string DefaultRender() { try { return en.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID; } catch { return null; } }
 
+    static JsonNode SinkJson(OutputSink s) => s == null ? null : new JsonObject { ["id"] = s.DeviceId, ["rate"] = s.Rate, ["channels"] = s.Channels, ["written"] = s.Written, ["error"] = s.Error };
     OutputSink Swap(OutputSink cur, string id, string what)
     {
         if (cur != null && cur.DeviceId == id) return cur;
@@ -397,6 +434,8 @@ public sealed class Engine
             foreach (var p in procs.Values) { pp[p.Pid.ToString()] = Math.Round(p.Peak, 3); p.Peak *= 0.5f; }
         }
         var r = new JsonObject { ["channels"] = o, ["procs"] = pp, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
+        // v2.3.1: what actually went into the virtual-mic / stream cables
+        var mo = micOut; var so = stream; r["micOutPk"] = mo != null ? Math.Round(mo.Peak, 3) : -1; r["streamPk"] = so != null ? Math.Round(so.Peak, 3) : -1; if (mo != null) mo.Peak *= 0.5f; if (so != null) so.Peak *= 0.5f;
         r["ns"] = new JsonObject { ["engine"] = vc.NsActive, ["cutDb"] = Math.Round(vc.NsCutDb, 1), ["lsnr"] = Math.Round(vc.Lsnr, 1), ["cpuMs"] = Math.Round(vc.CpuMs, 2), ["error"] = vc.NsError,
             ["aecCutDb"] = Math.Round(vc.AecCutDb, 1), ["refActive"] = vc.RefActive, ["nearTalk"] = vc.NearTalk, ["aecDelayMs"] = Math.Round(vc.AecDelayMs), ["aec"] = vc.AecOn && aecRef != null, ["bypass"] = bypass };
         MicPeakPre *= 0.5f; MicPeakPost *= 0.5f;
@@ -419,6 +458,7 @@ public sealed class Engine
             {
                 ["running"] = running, ["cables"] = cables.Count, ["appCaptures"] = new JsonArray(procs.Keys.Select(k => (JsonNode)k).ToArray()),
                 ["personalOut"] = personal?.DeviceId, ["streamOut"] = stream?.DeviceId, ["micOut"] = micOut?.DeviceId, ["mic"] = micId,
+                ["sinks"] = new JsonObject { ["stream"] = SinkJson(stream), ["micOut"] = SinkJson(micOut), ["personal"] = SinkJson(personal) },
                 ["rnnoise"] = vc.NsActive, ["nsError"] = vc.NsError,
                 ["voice"] = new JsonObject { ["enabled"] = voiceOn, ["ready"] = Voice.Ready, ["error"] = Voice.Error, ["heard"] = Voice.LastHeard, ["phrase"] = voicePhrase },
                 ["clip"] = new JsonObject { ["source"] = clipSource, ["using"] = ClipUsing, ["systemDevice"] = sysLoop?.DeviceId, ["systemError"] = sysLoop?.Error, ["enabled"] = clipOn, ["buffered"] = Math.Round(Math.Min(clipWritten, clipRing.Length) / 96000.0, 1), ["capacity"] = clipRing.Length / 96000 },

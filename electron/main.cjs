@@ -10,7 +10,8 @@ const { importMagicChatbox } = require('./mcb.cjs');
 
 const APP_NAME = 'Blur Sounds Pro';
 app.setName(APP_NAME);
-app.setPath('userData', path.join(app.getPath('appData'), APP_NAME));
+// BSP_PROFILE_DIR: run with a separate settings folder (clean-profile testing) without touching the real one.
+app.setPath('userData', process.env.BSP_PROFILE_DIR ? path.resolve(process.env.BSP_PROFILE_DIR) : path.join(app.getPath('appData'), APP_NAME));
 if (process.platform === 'win32') app.setAppUserModelId('com.blursounds.pro');
 
 if (!app.requestSingleInstanceLock()) { app.exit(0); } // hand off (e.g. --listen=...) to the running copy without starting Chromium
@@ -79,7 +80,7 @@ function guardedIds() {
   const m = S().mixer; const mc = S().micChain; const g = new Set();
   if (m.guard === false) return g;
   if (m.streamOut) g.add(m.streamOut);
-  if (mc.enabled && mc.outId) g.add(mc.outId);
+  if (mc.outId) g.add(mc.outId); // virtual-mic cable (v2.3.1: used whenever chosen)
   return g;
 }
 function isGuarded(id) { return !!id && guardedIds().has(id); }
@@ -144,6 +145,7 @@ function visibleSessions() {
 async function onSnapshot(snap) {
   snapshot = snap;
   const m = S().mixer; let dirty = false;
+  cableSetup();
   await guardDefault().catch(() => {});
   checkListeningDevice();
   for (const s of visibleSessions()) {
@@ -184,7 +186,7 @@ async function pushMixer() {
     routingSupported: snapshot.routingSupported,
     guarded: [...guardedIds()], guardOn: S().mixer.guard !== false, guardLog: guardLog.slice(0, 5), defaultIsGuarded: isGuarded(snapshot.defaultOutput),
     sessions: [...byProc.values()],
-    settings: S().mixer, micChain: S().micChain,
+    settings: S().mixer, micChain: S().micChain, micPath: micPath(),
   });
 }
 
@@ -221,6 +223,73 @@ function detectCables() {
 }
 let engineTimer = null;
 function pushEngine() { clearTimeout(engineTimer); engineTimer = setTimeout(() => helper.call('engineConfig', { config: engineConfig() }), 120); }
+// ---------------- v2.3.1 virtual-mic / stream cable setup ----------------
+// Cable endpoints are matched by name pattern (device IDs differ on every PC), never by another PC's ID.
+const MIC_CABLE_RX = [/hi-?fi cable input/i, /^cable input\b/i, /^cable-[a-d] input/i, /voicemeeter (aux |vaio3 )?input/i];
+function presentOut(id) { return id && snapshot && snapshot.outputs.some((o) => o.id === id) ? id : null; }
+function findMicCable() {
+  const outs = (snapshot && snapshot.outputs) || [];
+  for (const rx of MIC_CABLE_RX) { const o = outs.find((x) => rx.test(x.name)); if (o) return o; }
+  return null;
+}
+function sameName(a, b) { return a && b && a.replace(/\s*\(.*$/, '').trim().toLowerCase() === b.replace(/\s*\(.*$/, '').trim().toLowerCase(); }
+function cableSetup() {
+  if (!snapshot) return;
+  const m = S().mixer; const mc = S().micChain; const outs = snapshot.outputs; let dirty = false;
+  const byName = (name) => (name ? outs.find((o) => o.name === name) || outs.find((o) => sameName(o.name, name)) : null);
+  // Saved cable IDs that don't exist here (other PC / reinstalled driver): re-find the same cable by name.
+  if (mc.outId && !presentOut(mc.outId)) { const o = byName(mc.outName); if (o) { mc.outId = o.id; dirty = true; } }
+  if (m.streamOut && !presentOut(m.streamOut)) { const o = byName(m.streamOutName); if (o) { m.streamOut = o.id; dirty = true; } }
+  if (mc.outId && presentOut(mc.outId)) { const n = outs.find((o) => o.id === mc.outId).name; if (mc.outName !== n) { mc.outName = n; dirty = true; } }
+  if (m.streamOut && presentOut(m.streamOut)) { const n = outs.find((o) => o.id === m.streamOut).name; if (m.streamOutName !== n) { m.streamOutName = n; dirty = true; } }
+  // Fresh setup with a virtual cable already installed: send the mic to it once (the user can change it later).
+  if (!mc.autoCable) {
+    const cable = findMicCable();
+    if (cable) {
+      if (!mc.outId && !m.streamOut) { mc.outId = cable.id; mc.outName = cable.name; mc.enabled = true; micPathNote = `Your mic now goes to “${cable.name}”. In Discord / VRChat pick “${recordNameFor(cable)}” as the microphone.`; }
+      mc.autoCable = true; dirty = true;
+    }
+  }
+  if (dirty) store.saveSoon();
+}
+let micPathNote = null;
+function recordNameFor(out) {
+  if (!out) return null;
+  const c = detectCables().find((x) => x.id === out.id); if (c && c.recordName) return c.recordName;
+  return out.name.replace(/input/i, 'Output');
+}
+// Mic reaches the cable through the stream mix already: don't also write it straight in (doubled voice).
+function micOutEffective() {
+  const m = S().mixer; const mc = S().micChain; const id = presentOut(mc.outId);
+  if (id && m.streamMode && mc.inStream && presentOut(m.streamOut) === id) return null;
+  return id;
+}
+function micPath() {
+  if (!snapshot) return null;
+  const m = S().mixer; const mc = S().micChain; const outs = snapshot.outputs;
+  const micKnown = !m.mic.deviceId || snapshot.inputs.some((i) => i.id === m.mic.deviceId);
+  const inId = (micKnown && m.mic.deviceId) || snapshot.defaultCommsInput || snapshot.defaultInput || null;
+  const inDev = snapshot.inputs.find((i) => i.id === inId);
+  const viaStream = !!(m.streamMode && mc.inStream && presentOut(m.streamOut));
+  const outId = presentOut(mc.outId) || (viaStream ? m.streamOut : null);
+  const out = outs.find((o) => o.id === outId);
+  const cable = findMicCable();
+  const errs = ((engineState && engineState.errors) || []).concat((engineState && engineState.sourceErrors) || []).filter((e) => /mic out|stream|output|mic:/i.test(e));
+  let warn = null;
+  if (!inDev) warn = 'no-input';
+  else if (mc.outId && !presentOut(mc.outId)) warn = 'out-missing';
+  else if (!out) warn = cable ? 'not-routed' : 'no-cable';
+  return { input: inDev ? { id: inDev.id, name: inDev.name, fallback: !micKnown || !m.mic.deviceId } : null, processing: !!mc.enabled && !mc.bypass,
+    out: out ? { id: out.id, name: out.name, recordName: recordNameFor(out), via: presentOut(mc.outId) ? 'mic' : 'stream' } : null,
+    savedOutName: mc.outId && !presentOut(mc.outId) ? (mc.outName || 'a cable that is not on this PC') : null,
+    cable: cable ? { id: cable.id, name: cable.name, recordName: recordNameFor(cable) } : null, warn, errors: errs.slice(0, 3), note: micPathNote };
+}
+ipcMain.handle('mic:route', (_e, id) => {
+  const mc = S().micChain; const o = snapshot && snapshot.outputs.find((x) => x.id === id);
+  mc.outId = o ? o.id : null; mc.outName = o ? o.name : ''; mc.autoCable = true; if (o) mc.enabled = true; micPathNote = null;
+  store.saveSoon(); pushEngine(); pushMixer(); return micPath();
+});
+
 function engineConfig() {
   const m = S().mixer; const mc = S().micChain; const c = S().clips; const r = S().record;
   const sessions = visibleSessions();
@@ -228,7 +297,7 @@ function engineConfig() {
   const micKnown = !m.mic.deviceId || !snapshot || !snapshot.inputs || snapshot.inputs.some((i) => i.id === m.mic.deviceId);
   const micId = (micKnown && m.mic.deviceId) || (snapshot && (snapshot.defaultCommsInput || snapshot.defaultInput)) || null;
   return {
-    streamMode: !!m.streamMode, personalOut: (m.personalOut && snapshot && snapshot.outputs.some((o) => o.id === m.personalOut)) ? m.personalOut : null, /* unplugged -> Windows default */ streamOut: m.streamOut || null,
+    streamMode: !!m.streamMode, personalOut: (m.personalOut && snapshot && snapshot.outputs.some((o) => o.id === m.personalOut)) ? m.personalOut : null, /* unplugged -> Windows default */ streamOut: presentOut(m.streamOut),
     channels: m.channelList.map(({ id }) => {
       const ch = m.channels[id];
       return {
@@ -238,7 +307,7 @@ function engineConfig() {
       };
     }),
     mic: {
-      deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: mc.outId, gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
+      deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: micOutEffective(), gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
       hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && mc.aec.refId ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
       gainDb: mc.gainDb, muted: false, inStream: mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
     },
@@ -293,7 +362,7 @@ ipcMain.handle('mixer:removeChannel', async (_e, id) => {
   store.saveSoon(); await rerouteChannel('aux'); pushEngine(); pushMixer();
 });
 ipcMain.handle('mixer:renameChannel', (_e, id, label) => { const c = S().mixer.channelList.find((x) => x.id === id); if (c) c.label = String(label).slice(0, 24); store.saveSoon(); pushMixer(); });
-ipcMain.handle('mic:chain', (_e, patch) => { Object.assign(S().micChain, patch); store.saveSoon(); pushEngine(); pushMixer(); return S().micChain; });
+ipcMain.handle('mic:chain', (_e, patch) => { if (patch && 'outId' in patch) { const o = snapshot && snapshot.outputs.find((x) => x.id === patch.outId); patch = { ...patch, outName: o ? o.name : '', autoCable: true }; micPathNote = null; } Object.assign(S().micChain, patch); store.saveSoon(); pushEngine(); pushMixer(); return S().micChain; });
 ipcMain.handle('mixer:app', async (_e, proc, patch) => {
   proc = proc.toLowerCase();
   S().mixer.apps[proc] = { ...(S().mixer.apps[proc] || { volume: 1, muted: false }), ...patch }; store.saveSoon();
@@ -430,6 +499,7 @@ function autoConfigureHifi() {
   const d = hifi.detect(snapshot); if (!d.installed) return null;
   const m = S().mixer; const outs = snapshot.outputs; const done = [];
   if (!m.streamOut || !outs.some((o) => o.id === m.streamOut)) { m.streamOut = d.inputId; done.push('Stream mix → Hi-Fi Cable Input'); }
+  const mc = S().micChain; if (!presentOut(mc.outId) && !m.streamMode) { mc.outId = d.inputId; mc.outName = d.inputName; mc.enabled = true; mc.autoCable = true; done.push('Mic → Hi-Fi Cable Input (pick “' + d.outputName + '” as your mic in Discord / VRChat)'); }
   if (m.guard === undefined) m.guard = true;
   store.saveSoon(); pushEngine(); pushMixer();
   return { streamOut: m.streamOut, recordWith: d.outputName, changes: done };

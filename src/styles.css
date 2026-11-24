@@ -466,3 +466,13 @@ button.pill { cursor: pointer; }
 .modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(5,5,7,.72); display: grid; place-items: center; backdrop-filter: blur(2px); }
 .modal { width: min(760px, 92vw); max-height: 88vh; overflow: auto; padding: 20px 22px; border-color: var(--red-dim); }
 .modal h2 { margin: 0 0 6px; } .modal > p { color: var(--muted); margin: 0 0 12px; }
+
+/* v2.3.1 mic path */
+.micpath { padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.micpath-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mp-node { display: flex; align-items: center; gap: 8px; min-width: 190px; flex: 1; padding: 7px 10px; border: 1px solid var(--line2); border-radius: 6px; background: #0e1013; color: var(--silver); text-align: left; }
+.mp-node > div { display: flex; flex-direction: column; min-width: 0; flex: 1; } .mp-node b { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .mp-node small { font-size: 10px; color: var(--muted); }
+.mp-node .minimeter { width: 60px; flex: none; } .mp-node.mp-fx { cursor: pointer; } .mp-node.mp-fx.on { border-color: var(--red-dim); } .mp-node.bad { border-color: var(--red); background: rgba(229,35,47,.06); }
+.mp-arrow { color: var(--red2); font-size: 18px; }
+.micpath .warn-box .primary-btn { margin-left: 8px; padding: 5px 12px; }
+button.mp-node { display: flex !important; flex-direction: row !important; align-items: center; justify-content: flex-start; text-align: left; } button.mp-node > div { align-items: flex-start; }

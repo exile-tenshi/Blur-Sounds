@@ -5,6 +5,7 @@ import { EqEditor } from '../components/Eq.jsx';
 import Drawer from '../components/Drawer.jsx';
 import EngineAlert from '../EngineAlert.jsx';
 import { ListenPanel } from '../components/ListenSwitch.jsx';
+import { MicPath } from '../components/MicPath.jsx';
 
 const ICONS = { game: Icon.game, chat: Icon.headset, media: Icon.media, aux: Icon.aux, cable: Icon.cable };
 
@@ -108,6 +109,7 @@ export default function Mixer() {
         </div>
       </section>
       <ListenPanel />
+      <MicPath st={st} eng={eng} onOpenChain={() => setDrawer({ type: 'mic' })} />
 
       <section className="strips" style={{ gridTemplateColumns: `repeat(${chans.length + 1}, minmax(${streamMode ? 230 : 190}px, 1fr))` }}>
         {chans.map((c) => {
