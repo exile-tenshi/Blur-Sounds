@@ -145,10 +145,16 @@ export function SetupWizard({ onClose, rerun }) {
 
         {step.id === 'stream' && ready && <>
           <h1 className="sw-title">Streaming (optional)</h1>
-          <p className="sw-lead">How your <b>app audio</b> (game, music, Discord…) reaches Streamlabs / OBS. With one virtual cable, that cable is your mic, so Streamlabs / OBS simply capture your <b>desktop audio</b>. That works right away. For a separate stream mix with its own per-channel volumes, add a second free cable. Your mic is never in it unless you turn on <b>Mic on stream</b>.</p>
+          <p className="sw-lead">How your <b>app audio</b> (game, music, Discord…) reaches Streamlabs / OBS. With one virtual cable (your mic), either put the apps you stream <b>on the mic cable</b>, so Streamlabs / OBS only capture “Hi-Fi Cable Output”, or let them capture your <b>desktop audio</b>. For a stream mix nobody in voice chat hears, add a second free cable.</p>
+          {st.streamInfo && !st.streamInfo.secondCable && st.streamInfo.micOption && (
+            <div className="sw-choices">
+              <button className={`sw-choice${st.streamInfo.via === 'mic' ? ' on' : ''}`} onClick={() => window.bsp.invoke('stream:set', { via: 'mic', id: st.streamInfo.micOption.id })}><b>I stream: put my apps on the mic cable</b><small>Streamlabs / OBS: Mic/Aux = “{st.streamInfo.micOption.record}”, Desktop Audio = Disabled. Voice chat hears those apps too (Discord / VRChat are left out).</small></button>
+              <button className={`sw-choice${st.streamInfo.via === 'desktop' ? ' on' : ''}`} onClick={() => window.bsp.invoke('stream:set', { via: 'desktop' })}><b>Desktop audio</b><small>Streamlabs / OBS capture everything you hear; voice chat hears only your voice.</small></button>
+              <button className={`sw-choice${st.streamInfo.via === 'off' ? ' on' : ''}`} onClick={() => window.bsp.invoke('stream:set', { via: 'off' })}><b>I don't stream</b><small>You can change this any time in the Mixer.</small></button>
+            </div>)}
           {st.streamInfo && <StreamPath si={st.streamInfo} />}
           {st.streamInfo && (st.streamInfo.via === 'off' ? <Check ok>Streaming off. You can turn it on any time in the Mixer (Stream audio row).</Check>
-            : !st.streamInfo.warn && st.streamInfo.via !== 'none' ? <Check ok>Your app audio goes to <b>{st.streamInfo.via === 'desktop' ? `desktop audio (${st.streamInfo.desktop})` : st.streamInfo.dest?.name}</b>. Set up Streamlabs / OBS as shown above.</Check>
+            : !st.streamInfo.warn && st.streamInfo.via !== 'none' ? <Check ok>Your app audio goes to <b>{st.streamInfo.via === 'desktop' ? `desktop audio (${st.streamInfo.desktop})` : st.streamInfo.via === 'mic' ? `${st.streamInfo.dest?.name} together with your mic` : st.streamInfo.dest?.name}</b>. Set up Streamlabs / OBS as shown above.</Check>
             : <Check>Pick where your app audio goes (above).</Check>)}
         </>}
 

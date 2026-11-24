@@ -37,6 +37,8 @@ export function mockStream() {
     micRecord: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', micCable: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', secondCable: v === 'cable' ? { id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', record: 'CABLE Output (VB-Audio Virtual Cable)' } : null,
     options: v === 'cable' ? [{ id: 'c2', name: 'CABLE Input (VB-Audio Virtual Cable)', cable: true, record: 'CABLE Output (VB-Audio Virtual Cable)' }] : [{ id: 'o4', name: 'Realtek Digital Output (Realtek(R) Audio)', cable: false }],
     vbc: { installed: v === 'cable', phase: 'idle' }, hifiInstalled: true, pending: null, warn: null, dest: null };
+  base.micOption = { id: 'c1', name: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', record: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)' }; base.appsVolume = 0.6; base.includeVoice = false; base.voiceApps = ['Discord', 'VRChat'];
+  if (v === 'mic') return { ...base, via: 'mic', streamMode: true, dest: { id: 'c1', name: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', cable: true, record: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)' }, broadcastOn: ['Game', 'Media'] };
   if (v === 'desktop') return { ...base, via: 'desktop' };
   if (v === 'unset') return { ...base, via: 'unset', warn: 'unset' };
   if (v === 'none') return { ...base, via: 'none', warn: 'no-destination', savedName: null };
@@ -48,4 +50,15 @@ export function mockStream() {
 export function mockRate() {
   const bad = new URLSearchParams(location.search).get('rate') === 'mismatch';
   return { render: { id: 'c1', name: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', rate: 48000 }, capture: { id: 'c1o', name: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', rate: bad ? 44100 : 48000 }, ok: !bad, error: null };
+}
+
+// v2.4.2 updater mock: ?update=available|current|offline|ratelimit|downloading
+export function mockUpdate() {
+  const q = new URLSearchParams(location.search).get('update') || 'current';
+  const notes = '## Blur Sounds Pro 2.4.2\n\n- **EQ you can hear**: channel EQ now changes what you hear, live.\n- EQ presets: Flat, Bass boost, Vocal clarity, Footsteps / FPS, Treble, plus Reset.\n- Streaming with only Hi-Fi Cable: mic + streamed apps on the mic cable.\n- In-app updates from GitHub (this button).';
+  const base = { current: '2.4.1', latest: '2.4.2', notes, url: 'https://github.com/exile-tenshi/Blur-Sounds/releases/latest', checkedAt: Date.now() };
+  const st = q === 'available' ? { ...base, status: 'available' } : q === 'downloading' ? { ...base, status: 'downloading', progress: 0.42 }
+    : q === 'offline' ? { ...base, status: 'error', error: "Couldn't reach GitHub. Check your internet connection and try again." }
+    : q === 'ratelimit' ? { ...base, status: 'error', error: "GitHub's update check limit was reached for now. Try again after 5:42 PM." } : { ...base, current: '2.4.2', status: 'current' };
+  return (ch) => (ch === 'update:get' || ch === 'update:check' ? st : ch === 'update:run' ? { ...st, status: 'downloading', progress: 0.1 } : true);
 }

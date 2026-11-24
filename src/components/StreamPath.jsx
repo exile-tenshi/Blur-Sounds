@@ -26,6 +26,12 @@ export function CaptureHowTo({ si }) {
       {mic && <li>Your voice: <b>Mic/Auxiliary Device 1</b> = “<b>{mic}</b>” (your processed mic). Don't add it twice.</li>}
       <li>That records everything you hear on “{short(si.desktop)}”. The per-channel <b>stream</b> buttons don't apply in this mode. For a separate stream mix with its own volumes, install a second cable below.</li>
     </ol>);
+  if (si.via === 'mic' && si.dest) return (
+    <ol className="sp-how">
+      <li><b>Streamlabs</b>: Settings → Audio → <b>Mic/Auxiliary Device 1</b> = “<b>{si.dest.record}</b>” and <b>Desktop Audio Device 1</b> = <b>Disabled</b>. <b>OBS</b>: Settings → Audio → Mic/Auxiliary = “{si.dest.record}”, Desktop Audio = Disabled.</li>
+      <li>That one device carries your processed voice <b>and</b> the apps whose <Icon.stream size={12} /> stream button is on{si.broadcastOn.length ? ` (on now: ${si.broadcastOn.join(', ')})` : ' (none right now)'}. Your mic processing is applied to your voice only.</li>
+      <li>{si.includeVoice ? 'Voice-chat apps are included (you turned that on): people in calls may hear themselves.' : `Voice-chat apps (Discord, VRChat, TeamSpeak…) are left out so nobody hears themselves back${si.voiceApps?.length ? ` (left out now: ${si.voiceApps.join(', ')})` : ''}.`}</li>
+    </ol>);
   if ((si.via === 'cable' || si.via === 'output') && si.dest) return (
     <ol className="sp-how">
       {si.dest.cable
@@ -61,8 +67,8 @@ export function SecondCable({ si }) {
 export function StreamPath({ si }) {
   const { lv, max } = useStreamLevel(si); const [pick, setPick] = useState('');
   if (!si) return null;
-  const dest = si.via === 'desktop' ? `Desktop audio: ${short(si.desktop)}` : si.dest ? short(si.dest.name) : si.via === 'off' ? 'Off' : 'Nowhere';
-  const sub = si.via === 'desktop' ? 'Streamlabs / OBS capture what you hear' : si.dest ? (si.dest.cable ? `stream mix · capture “${short(si.dest.record)}”` : 'stream mix · Audio Output Capture') : si.via === 'off' ? "you don't stream" : 'no stream destination';
+  const dest = si.via === 'mic' && si.dest ? `${short(si.dest.name)}: mic + apps` : si.via === 'desktop' ? `Desktop audio: ${short(si.desktop)}` : si.dest ? short(si.dest.name) : si.via === 'off' ? 'Off' : 'Nowhere';
+  const sub = si.via === 'mic' ? `capture “${short(si.dest?.record)}” as Mic/Aux` : si.via === 'desktop' ? 'Streamlabs / OBS capture what you hear' : si.dest ? (si.dest.cable ? `stream mix · capture “${short(si.dest.record)}”` : 'stream mix · Audio Output Capture') : si.via === 'off' ? "you don't stream" : 'no stream destination';
   const bad = si.via === 'none' || si.warn === 'shared' || si.warn === 'unset';
   return (
     <section className="panel micpath streampath">
@@ -73,6 +79,7 @@ export function StreamPath({ si }) {
         <div className={`mp-node${bad ? ' bad' : ''}`}><Icon.stream size={14} /><div><b title={si.dest?.name || si.desktop}>{dest}</b><small>{sub}</small></div>{(si.dest || si.via === 'desktop') && <MiniMeter level={lv} />}</div>
         <div className="select sp-select"><select value="" onChange={(e) => { const [via, id] = e.target.value.split('|'); if (via) set(via, id); }}>
           <option value="">Change…</option>
+          {si.micOption && <option value={`mic|${si.micOption.id}`}>Mic cable ({short(si.micOption.name)}): mic + streamed apps</option>}
           <option value="desktop|">Desktop audio (works now, no install)</option>
           {si.options.map((o) => <option key={o.id} value={`${o.cable ? 'cable' : 'output'}|${o.id}`}>{o.cable ? 'Stream mix → ' : 'Stream mix → unused output: '}{o.name}</option>)}
           <option value="off|">Off (I don't stream)</option>
@@ -82,13 +89,20 @@ export function StreamPath({ si }) {
         {' '}<button className="primary-btn" onClick={() => set('desktop')}>Use desktop audio</button>{si.secondCable && <> <button className="primary-btn" onClick={() => set('cable', si.secondCable.id)}>Use {short(si.secondCable.name)}</button></>}</div>}
       {si.warn === 'shared' && <div className="warn-box"><b>Your stream mix and your mic share “{short(si.dest?.name)}”.</b> Discord / VRChat would hear your apps. <button className="primary-btn" onClick={() => set('desktop')}>Use desktop audio instead</button></div>}
       {si.warn === 'unset' && <div className="warn-box"><b>Your apps aren't going to your stream.</b> Streaming is off, but {si.broadcastOn.join(', ')} {si.broadcastOn.length > 1 ? 'are' : 'is'} set to broadcast. Choose how Streamlabs / OBS get your app audio:
-        {' '}<button className="primary-btn" onClick={() => set('desktop')}>Desktop audio (works now)</button>{si.secondCable && <> <button className="primary-btn" onClick={() => set('cable', si.secondCable.id)}>Stream mix → {short(si.secondCable.name)}</button></>} <button className="ghost-btn" onClick={() => set('off')}>I don't stream</button></div>}
-      {(si.via === 'desktop' || si.via === 'cable' || si.via === 'output') && <>
+        {' '}{si.micOption && <button className="primary-btn" onClick={() => set('mic', si.micOption.id)}>Mic cable: mic + apps</button>} <button className="primary-btn" onClick={() => set('desktop')}>Desktop audio (works now)</button>{si.secondCable && <> <button className="primary-btn" onClick={() => set('cable', si.secondCable.id)}>Stream mix → {short(si.secondCable.name)}</button></>} <button className="ghost-btn" onClick={() => set('off')}>I don't stream</button></div>}
+      {si.via === 'mic' && <>
+        <div className="warn-box amber"><b>Voice chat hears these apps too.</b> Discord / VRChat use “{si.dest?.record}” as your mic, so everyone in a call hears the apps you stream. Turn a channel's <Icon.stream size={12} /> button off to keep it out. For apps on stream only, add a second cable (VB-CABLE, free) below.</div>
+        <div className="field-row sp-apps"><span className="muted-text">Apps level on the cable</span>
+          <input type="range" min={0} max={150} value={Math.round((si.appsVolume ?? 0.6) * 100)} onChange={(e) => window.bsp.invoke('stream:micopts', { appsVolume: Number(e.target.value) / 100 })} />
+          <span className="muted-text small">{Math.round((si.appsVolume ?? 0.6) * 100)}%</span>
+          <label className="muted-text small"><input type="checkbox" checked={!!si.includeVoice} onChange={(e) => window.bsp.invoke('stream:micopts', { includeVoice: e.target.checked })} /> include voice-chat apps (echo risk)</label></div>
+      </>}
+      {(si.via === 'desktop' || si.via === 'cable' || si.via === 'output' || si.via === 'mic') && <>
         <CaptureHowTo si={si} />
         {max > 0.003 ? <p className="hint ok-text">✓ Audio is flowing to {si.via === 'desktop' ? `“${short(si.desktop)}”` : `“${short(si.dest?.name)}”`} (peak {Math.round(20 * Math.log10(max))} dB).</p>
           : <p className="hint">Play something (music, a video) and the meter above should move{si.via !== 'desktop' && !si.broadcastOn.length ? '. Every channel is muted on stream right now; turn a channel\'s stream button on' : ''}.</p>}
       </>}
-      {(si.via === 'desktop' || si.via === 'off' || si.via === 'unset') && <SecondCable si={si} />}
+      {(si.via === 'desktop' || si.via === 'off' || si.via === 'unset' || si.via === 'mic') && <SecondCable si={si} />}
     </section>
   );
 }

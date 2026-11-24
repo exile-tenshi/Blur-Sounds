@@ -239,7 +239,7 @@ function ChannelDrawer({ st, id, onClose }) {
         <Toggle small on={cfg.inRec} onChange={(v) => patch({ inRec: v })} label="Include in recordings" />
       </div>
       <h4 className="drawer-sub">Equalizer</h4>
-      <p className="hint">{cfg.mode === 'cable' ? 'Applied to what you hear, your stream mix, clips and recordings.' : 'In Direct mode the EQ shapes your stream mix, clips and recordings. Switch to a cable to EQ what you hear.'}</p>
+      <p className="hint">{cfg.mode === 'cable' ? 'Applied to what you hear, your stream mix, clips and recordings.' : 'Applied live to what you hear, your stream mix, clips and recordings. While it is on, Blur Sounds Pro plays this channel\'s apps through its EQ (about 40 ms extra delay); turn it off for untouched direct audio.'}</p>
       <EqEditor eq={cfg.eq} onChange={(eq) => patch({ eq })} />
       {!meta.builtin && <div className="row-gap" style={{ marginTop: 14 }}><button className="ghost-btn" onClick={async () => { await window.bsp.invoke('mixer:removeChannel', id); onClose(); }}><Icon.trash size={14} />Delete channel</button></div>}
     </Drawer>
@@ -322,6 +322,7 @@ function MicDrawer({ st, levels, mic, onClose }) {
       <div className="field-row"><span className="muted-text">Output gain</span><input type="range" className="grow" min={-12} max={12} step={0.5} value={mc.gainDb} onChange={(e) => patch({ gainDb: Number(e.target.value) })} /><span className="num">{mc.gainDb > 0 ? '+' : ''}{mc.gainDb}</span></div>
       <Toggle small on={mc.inStream} onChange={(v) => patch({ inStream: v })} label="Mic on stream (mix my mic into the stream mix)" />
       <h4 className="drawer-sub">Mic equalizer</h4>
+      <p className="hint">{mc.enabled ? 'Shapes what Discord / VRChat / your stream hear. Turn on “Hear myself” to listen to it.' : 'Turn on “Process my mic” for the mic EQ to apply.'}</p>
       <EqEditor eq={mc.eq} onChange={(eq) => patch({ eq })} mic />
     </Drawer>
   );

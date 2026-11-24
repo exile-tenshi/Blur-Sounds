@@ -35,7 +35,7 @@ public sealed class ProcessCapture : IDisposable
     [ComImport, Guid("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] interface IAgileObject { }
 
     public readonly int Pid; readonly FloatRing ring; AudioClient client; Thread thread; volatile bool running;
-    public string Error; public float Peak;
+    public string Error; public float Peak; public bool IsFloat;
     public ProcessCapture(int pid, FloatRing ring) { Pid = pid; this.ring = ring; }
 
     public void Start(bool includeTree = true)
@@ -52,9 +52,10 @@ public sealed class ProcessCapture : IDisposable
             if (!h.Done.Wait(3000)) throw new Exception("activation timeout");
             if (h.Hr != 0) Marshal.ThrowExceptionForHR(h.Hr);
             client = new AudioClient(h.Client);
-            var fmt = new WaveFormat(48000, 16, 2);
-            // loopback | eventcallback | autoconvert
-            client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback | AudioClientStreamFlags.AutoConvertPcm | AudioClientStreamFlags.SrcDefaultQuality, 200000, 0, fmt, Guid.Empty);
+            // v2.4.2: 32-bit float, so a turned-down app (EQ what you hear) keeps full resolution when scaled back up.
+            var fmt = WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+            try { client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback | AudioClientStreamFlags.AutoConvertPcm | AudioClientStreamFlags.SrcDefaultQuality, 200000, 0, fmt, Guid.Empty); IsFloat = true; }
+            catch { client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback | AudioClientStreamFlags.AutoConvertPcm | AudioClientStreamFlags.SrcDefaultQuality, 200000, 0, new WaveFormat(48000, 16, 2), Guid.Empty); IsFloat = false; }
         }
         finally { Marshal.FreeHGlobal(pp); Marshal.FreeHGlobal(ppv); }
         running = true;
@@ -84,8 +85,8 @@ public sealed class ProcessCapture : IDisposable
                     if ((flags & AudioClientBufferFlags.Silent) != 0) Array.Clear(fl, 0, n);
                     else unsafe
                     {
-                        short* s = (short*)data;
-                        for (int i = 0; i < n; i++) { float v = s[i] / 32768f; fl[i] = v; if (v > pk) pk = v; else if (-v > pk) pk = -v; }
+                        if (IsFloat) { float* f = (float*)data; for (int i = 0; i < n; i++) { float v = f[i]; fl[i] = v; if (v > pk) pk = v; else if (-v > pk) pk = -v; } }
+                        else { short* s = (short*)data; for (int i = 0; i < n; i++) { float v = s[i] / 32768f; fl[i] = v; if (v > pk) pk = v; else if (-v > pk) pk = -v; } }
                     }
                     cap.ReleaseBuffer(frames);
                     ring.Write(fl, n);

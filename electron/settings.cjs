@@ -103,7 +103,7 @@ class Store {
     this.file = path.join(dir, 'settings.json');
     fs.mkdirSync(dir, { recursive: true });
     let saved = {};
-    try { saved = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch {}
+    try { saved = JSON.parse(fs.readFileSync(this.file, 'utf8').replace(/^\uFEFF/, '')); } catch {} // tolerate a BOM (settings saved by Notepad / PowerShell)
     // v2.4.0: no saved settings = a new PC / new profile -> first-run auto-setup + setup wizard.
     this.fresh = !saved || typeof saved !== 'object' || !saved.mixer;
     this.data = deepMerge(defaults(), saved);

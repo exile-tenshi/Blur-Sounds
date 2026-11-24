@@ -8,6 +8,7 @@ const hifi = require('./hificable.cjs');
 const { Chatbox } = require('./chatbox.cjs');
 const { importMagicChatbox } = require('./mcb.cjs');
 const setup = require('./setup.cjs');
+const { Updater } = require('./updater.cjs');
 
 const APP_NAME = 'Blur Sounds Pro';
 app.setName(APP_NAME);
@@ -59,10 +60,26 @@ function chatMixFactor(id) {
   if (id === 'chat') return x < 0 ? 1 + x : 1;
   return 1;
 }
+// v2.4.2 "EQ what you hear": a Direct channel with its EQ on is played through the engine. Windows applies an app's
+// session volume before process loopback (and a muted app can't be captured), so the app is turned down to 1% and the
+// engine scales its capture back up x100 (float, no quality loss), EQs it and plays it on the same device.
+// Only apps the engine is actually capturing are turned down, and they are put back on quit / crash.
+const HEAR_DUCK = 0.01;
+let engineCaptured = new Set();
+function hearChannel(id) {
+  const ch = S().mixer.channels[id]; if (!ch || S().mixer.eqHear === false) return false;
+  return ch.mode !== 'cable' && !!(ch.eq && ch.eq.enabled) && helperStatus.status === 'running';
+}
+function hearSession(s) { return !s.system && hearChannel(channelFor(s)) && engineCaptured.has(s.pid); }
+function normalVolume(s) {
+  const id = channelFor(s); const ch = S().mixer.channels[id] || { volume: 1 }; const a = appCfg(s.process) || { volume: 1 };
+  return Math.max(0, Math.min(1, a.volume * ch.volume * chatMixFactor(id)));
+}
 function effective(s) {
   const id = channelFor(s);
   const ch = S().mixer.channels[id] || { volume: 1, muted: false };
   const a = appCfg(s.process) || { volume: 1, muted: false };
+  if (hearSession(s)) return { volume: Math.max(0, Math.min(1, a.volume)) * HEAR_DUCK, muted: !!(a.muted || ch.muted), restore: normalVolume(s), hear: true };
   // Cable channels: the engine applies channel volume/ChatMix/EQ, so the app session only carries the app's own level.
   if (ch.mode === 'cable' && ch.cableId) return { volume: Math.max(0, Math.min(1, a.volume)), muted: !!a.muted };
   return { volume: Math.max(0, Math.min(1, a.volume * ch.volume * chatMixFactor(id))), muted: !!(a.muted || ch.muted) };
@@ -70,7 +87,7 @@ function effective(s) {
 
 async function applySession(s, force) {
   const e = effective(s);
-  if (force || Math.abs(e.volume - s.volume) > 0.005) await helper.call('setSessionVolume', { pid: s.pid, volume: e.volume });
+  if (force || Math.abs(e.volume - s.volume) > (e.hear ? 0.0005 : 0.005)) await helper.call('setSessionVolume', e.hear ? { pid: s.pid, volume: e.volume, restore: e.restore } : { pid: s.pid, volume: e.volume });
   if (force || e.muted !== s.muted) await helper.call('setSessionMute', { pid: s.pid, mute: e.muted });
 }
 
@@ -266,8 +283,14 @@ function recordNameFor(out) {
 // Mic reaches the cable through the stream mix already: don't also write it straight in (doubled voice).
 function micOutEffective() {
   const m = S().mixer; const mc = S().micChain; const id = presentOut(mc.outId);
+  if (micCableMode()) return id; // v2.4.2: mic + streamed apps share the cable; the mic still goes in on its own sink
   if (id && m.streamMode && mc.inStream && presentOut(m.streamOut) === id) return null;
   return id;
+}
+function micCableMode() { const m = S().mixer; const id = presentOut(S().micChain.outId); return !!(m.streamMode && m.streamVia === 'mic' && id && presentOut(m.streamOut) === id); }
+function streamExcludePids() {
+  if (!micCableMode() || S().mixer.micCableVoice) return [];
+  return visibleSessions().filter((s) => setup.isVoiceApp(s.process)).map((s) => s.pid);
 }
 function micPath() {
   if (!snapshot) return null;
@@ -442,7 +465,8 @@ ipcMain.handle('setup:clipboard', (_e, text) => { require('electron').clipboard.
 // ---------------- v2.4.1 stream destination ----------------
 function streamInfoFull() {
   if (!snapshot) return null;
-  return { ...setup.streamInfo(S(), snapshot), vbc: vbcStatus(), hifiInstalled: hifi.detect(snapshot).installed, pending: S().mixer.streamPending || null };
+  const voiceApps = [...new Set(visibleSessions().filter((s) => setup.isVoiceApp(s.process)).map((s) => s.name || s.process))];
+  return { ...setup.streamInfo(S(), snapshot), voiceApps, vbc: vbcStatus(), hifiInstalled: hifi.detect(snapshot).installed, pending: S().mixer.streamPending || null };
 }
 // via: 'off' | 'desktop' | 'cable' | 'output' (with id)
 function setStream({ via, id } = {}) {
@@ -453,12 +477,17 @@ function setStream({ via, id } = {}) {
     if (o.id === presentOut(mc.outId)) return { ok: false, error: `“${o.name}” is your virtual mic. The stream mix needs a different device, or Discord / VRChat would hear your apps.`, stream: streamInfoFull() };
     if (o.id === snapshot.defaultOutput) return { ok: false, error: `“${o.name}” is what you listen on. Use “Desktop audio” instead.`, stream: streamInfoFull() };
     m.streamMode = true; m.streamVia = setup.isVirtualOut(o) ? 'cable' : 'output'; m.streamOut = o.id; m.streamOutName = o.name;
+  } else if (via === 'mic') {
+    const id = presentOut(mc.outId); const o = id && snapshot.outputs.find((x) => x.id === id);
+    if (!o) return { ok: false, error: 'Your mic isn\'t going to a virtual cable yet. Set up the virtual cable first.', stream: streamInfoFull() };
+    m.streamMode = true; m.streamVia = 'mic'; m.streamOut = o.id; m.streamOutName = o.name;
   } else if (via === 'desktop' || via === 'off') { m.streamMode = false; m.streamVia = via; }
   else return { ok: false, error: 'unknown destination', stream: streamInfoFull() };
   store.saveSoon(); seenPids.clear(); pushEngine(); helper.call('refresh'); pushMixer();
   return { ok: true, stream: streamInfoFull() };
 }
 ipcMain.handle('stream:set', async (_e, o) => setStream(o));
+ipcMain.handle('stream:micopts', (_e, o = {}) => { const m = S().mixer; if (typeof o.appsVolume === 'number') m.micCableAppsVolume = Math.max(0, Math.min(1.5, o.appsVolume)); if (typeof o.includeVoice === 'boolean') m.micCableVoice = o.includeVoice; store.saveSoon(); pushEngine(); pushMixer(); return streamInfoFull(); });
 // ---- second cable (standard VB-CABLE) for the stream mix: official download at click time, verified, run elevated ----
 let vbcState = { phase: 'idle' };
 function vbcStatus() { return { ...hifi.detectVb(snapshot), phase: vbcState.phase, step: vbcState.step, pct: vbcState.pct, error: vbcState.error, verified: vbcState.verified, page: hifi.VBC.page, donate: hifi.VBC.donate, version: 'VBCABLE_Driver_Pack46.zip' }; }
@@ -492,19 +521,21 @@ function engineConfig() {
   const micKnown = !m.mic.deviceId || !snapshot || !snapshot.inputs || snapshot.inputs.some((i) => i.id === m.mic.deviceId);
   const micId = (micKnown && m.mic.deviceId) || (snapshot && (snapshot.defaultCommsInput || snapshot.defaultInput)) || null;
   return {
+    streamGain: micCableMode() ? Math.max(0, Math.min(1.5, m.micCableAppsVolume ?? 0.6)) : 1, streamExclude: streamExcludePids(),
     streamMode: !!m.streamMode, personalOut: (m.personalOut && snapshot && snapshot.outputs.some((o) => o.id === m.personalOut)) ? m.personalOut : null, /* unplugged -> Windows default */ streamOut: presentOut(m.streamOut),
     channels: m.channelList.map(({ id }) => {
       const ch = m.channels[id];
       return {
         id, mode: ch.mode === 'cable' && !presentOut(ch.cableId) ? 'direct' : ch.mode, cableId: presentOut(ch.cableId), volume: ch.volume * chatMixFactor(id), muted: ch.muted,
         streamVolume: ch.streamVolume, streamMuted: ch.streamMuted, inClip: ch.inClip, inRec: ch.inRec, eq: ch.eq,
+        hear: hearChannel(id), comp: hearChannel(id) ? 1 / HEAR_DUCK : 1, hearOut: presentOut(ch.output) || null,
         pids: sessions.filter((s) => !s.system && channelFor(s) === id).map((s) => s.pid),
       };
     }),
     mic: {
       deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: micOutEffective(), gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
       hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && presentOut(mc.aec.refId) ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
-      gainDb: mc.gainDb, muted: false, inStream: mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
+      gainDb: mc.gainDb, muted: false, inStream: micCableMode() ? false : mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
     },
     voice: { enabled: !!(c.enabled && c.voice.enabled), phrase: c.voice.phrase || 'clip it', modelPath: voiceModelPath() },
     clip: { enabled: !!c.enabled, bufferSeconds: Math.max(30, (c.seconds || 30) + 5), source: c.audioSource || 'auto', systemDevice: c.systemDevice || null },
@@ -528,20 +559,30 @@ function voiceModelPath() {
   return cands.find((p) => fs.existsSync(p)) || cands[0];
 }
 
-ipcMain.handle('mixer:channel', async (_e, ch, patch) => {
+ipcMain.handle('mixer:channel', async (_e, ch, patch) => patchChannel(ch, patch));
+async function patchChannel(ch, patch) {
   const c = S().mixer.channels[ch]; if (!c) return;
   if (patch.mode === 'cable' && patch.cableId === undefined && !c.cableId) return { ok: false, error: 'pick a cable first' };
   if (isGuarded(patch.cableId) || isGuarded(patch.output)) return { ok: false, error: 'That device carries your stream / virtual mic. Apps on it would always be broadcast, so Blur Sounds Pro blocks it.' };
   const routeChanged = ['output', 'mode', 'cableId'].some((k) => k in patch && patch[k] !== c[k]);
+  const wasHear = hearChannel(ch);
   Object.assign(c, patch); store.saveSoon();
+  // EQ band / preset edits only need the new filter settings (debounced); no session changes
+  if (!routeChanged && Object.keys(patch).every((k) => k === 'eq') && wasHear === hearChannel(ch)) { pushEngine(); return { ok: true }; }
+  // EQ on/off changes the path: the engine switches first, then the app's own level follows (turned down only once its
+  // capture is confirmed), so there is no gap and at most a moment of doubled audio.
+  if (wasHear !== hearChannel(ch)) {
+    clearTimeout(engineTimer); await helper.call('engineConfig', { config: engineConfig() });
+    if (hearChannel(ch)) { for (const ms of [150, 400, 900]) setTimeout(() => helper.call('engineStatus').then((r) => r && r.ok !== false && onEngineState(r.result)).catch(() => {}), ms); }
+  }
   if (routeChanged) await rerouteChannel(ch); else await applyChannel(ch);
   pushEngine(); helper.call('refresh');
   return { ok: true };
-});
+}
 ipcMain.handle('mixer:get', () => { pushMixer(); return true; });
 ipcMain.handle('mixer:global', async (_e, patch) => {
   Object.assign(S().mixer, patch);
-  if (patch.streamMode === true && snapshot) { const m = S().mixer; if (!presentOut(m.streamOut) || m.streamOut === presentOut(S().micChain.outId)) { const sc = setup.findStreamCable(snapshot, presentOut(S().micChain.outId)); if (sc) { m.streamOut = sc.id; m.streamOutName = sc.name; m.streamVia = 'cable'; } } }
+  if (patch.streamMode === true && snapshot && !micCableMode()) { const m = S().mixer; const micId = presentOut(S().micChain.outId); if (!presentOut(m.streamOut) || m.streamOut === micId) { const sc = setup.findStreamCable(snapshot, micId); if (sc) { m.streamOut = sc.id; m.streamOutName = sc.name; m.streamVia = 'cable'; } else if (micId) { /* v2.4.2: only one cable -> mic + streamed apps on it */ m.streamOut = micId; m.streamOutName = (snapshot.outputs.find((o) => o.id === micId) || {}).name || ''; m.streamVia = 'mic'; } } }
   if (patch.streamMode === false && S().mixer.streamVia !== 'desktop') S().mixer.streamVia = 'off';
   store.saveSoon();
   if ('chatMix' in patch) { await applyChannel('game'); await applyChannel('chat'); }
@@ -606,7 +647,20 @@ ipcMain.handle('media:control', (_e, action) => helper.call('mediaControl', { ac
 helper.on('snapshot', (d) => onSnapshot(d).catch(() => {}));
 helper.on('levels', (d) => send('mixer:levels', d));
 let engineState = null;
-helper.on('engine', (d) => { engineState = d; send('engine:state', { engine: d, media: media.status() }); });
+helper.on('engine', (d) => onEngineState(d));
+function onEngineState(d) {
+  if (!d) return;
+  engineState = d; send('engine:state', { engine: d, media: media.status() });
+  // v2.4.2: (re)apply session levels when the set of captured apps changes, so "EQ what you hear" only ever turns down
+  // an app whose audio the engine really has.
+  const cap = new Set(Array.isArray(d && d.captured) ? d.captured : []);
+  const changed = cap.size !== engineCaptured.size || [...cap].some((p) => !engineCaptured.has(p));
+  if (changed) { const was = engineCaptured; engineCaptured = cap; for (const s of visibleSessions()) if (hearChannel(channelFor(s)) && (cap.has(s.pid) !== was.has(s.pid))) applySession(s, true).catch(() => {}); }
+}
+async function restoreHearSessions() {
+  engineCaptured = new Set();
+  for (const s of visibleSessions()) if (hearChannel(channelFor(s))) await helper.call('setSessionVolume', { pid: s.pid, volume: normalVolume(s) }).catch(() => {});
+}
 helper.on('voice', async (d) => { const r = await media.saveClip('voice'); clipDone(r, `Heard “${d.text}”`); });
 helper.on('status', (st) => { if (st === 'running') { seenPids.clear(); pushEngine(); } });
 helper.on('media', (d) => { chatbox.setMedia(d); send('media:state', d); });
@@ -816,6 +870,30 @@ ipcMain.handle('app:info', () => ({
   version: app.getVersion(), userData: app.getPath('userData'), helperExe, isDev,
   tools: toolPaths().map((t) => ({ ...t, exists: fs.existsSync(t.path) })),
 }));
+// v2.4.2 in-app updater (public GitHub releases, SHA-256 verified; see updater.cjs)
+const updater = new Updater({ app, log: (m) => helperLogLine(m), send: (st) => send('update:state', st) });
+let updateResult = null;
+// Update self-test (only with a separate BSP_PROFILE_DIR): no audio engine, checks the feed and runs the update once.
+const UPDATE_SELFTEST = !!(process.env.BSP_PROFILE_DIR && process.env.BSP_SELFTEST_UPDATE);
+async function updateSelfTest() {
+  const dir = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(dir, { recursive: true });
+  const flag = path.join(dir, 'update-selftest-ran'); const rep = { version: app.getVersion(), at: new Date().toISOString(), result: updateResult };
+  if (fs.existsSync(flag)) { rep.note = 'already ran'; fs.writeFileSync(path.join(dir, 'update-selftest-' + app.getVersion() + '.json'), JSON.stringify(rep, null, 2)); return; }
+  fs.writeFileSync(flag, '1');
+  rep.check = await updater.check(); rep.check = { status: rep.check.status, latest: rep.check.latest, asset: rep.check.asset && rep.check.asset.name, error: rep.check.error };
+  if (updater.state.status === 'available') { const d = await updater.download(); rep.download = { status: d.status, sha: d.sha, error: d.error }; if (d.status === 'ready') rep.install = updater.install(); }
+  fs.writeFileSync(path.join(dir, 'update-selftest-' + app.getVersion() + '.json'), JSON.stringify(rep, null, 2));
+  if (rep.install && rep.install.ok) setTimeout(() => { quitting = true; app.quit(); }, 400);
+}
+ipcMain.handle('update:get', () => ({ ...updater.state, result: updateResult }));
+ipcMain.handle('update:check', () => updater.check());
+ipcMain.handle('update:run', async () => {
+  if (updater.state.status !== 'ready') { const st = await updater.download(); if (st.status !== 'ready') return st; }
+  const r = updater.install(); if (!r.ok) return updater.set({ status: 'error', error: r.error });
+  setTimeout(() => { quitting = true; app.quit(); }, 400);
+  return updater.state;
+});
+ipcMain.handle('update:dismissResult', () => { updateResult = null; return true; });
 ipcMain.handle('app:openPath', (_e, p) => shell.openPath(p || app.getPath('userData')));
 function toolPaths() {
   const pf = process.env.ProgramFiles || 'C:\\Program Files';
@@ -888,6 +966,12 @@ function createWindow() {
   if (process.env.VITE_DEV_URL) win.loadURL(process.env.VITE_DEV_URL);
   else win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.webContents.on('did-finish-load', () => { send('helper:status', helperStatus); pushMixer(); registerHotkeys(); });
+  win.webContents.once('did-finish-load', () => {
+    updateResult = updater.markHealthy(); // tells a waiting updater the new version started
+    if (updateResult) send('update:state', { ...updater.state, result: updateResult });
+    if (UPDATE_SELFTEST) setTimeout(() => updateSelfTest().catch((e) => helperLogLine('update selftest: ' + e.stack)), 3000);
+    else if (S().app.autoUpdateCheck !== false) setTimeout(() => updater.check({ quiet: true }).catch(() => {}), 8000);
+  });
 }
 
 function createTray() {
@@ -973,14 +1057,36 @@ async function setupSelfTest() {
   }
   store.saveNow(); fs.writeFileSync(path.join(dir, 'setup-selftest.json'), JSON.stringify(rep, null, 2));
 }
+// v2.4.2 EQ self-test (test profiles only): switches one channel's EQ through off / flat / +6 dB @ 1 kHz / flat / off,
+// 6 s each, and logs when each phase started so an external meter can be lined up with it.
+async function eqSelfTest(id) {
+  const dir = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(dir, { recursive: true });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms)); const rep = { channel: id, phases: [] };
+  const base = () => JSON.parse(JSON.stringify(S().mixer.channels[id].eq));
+  const flat = (on) => ({ ...base(), enabled: on, preset: 'flat', preampDb: 0, bands: base().bands.map((b) => ({ ...b, g: 0 })) });
+  const boost = () => { const e = flat(true); e.preset = 'custom'; e.bands[3] = { ...e.bands[3], f: 1000, q: 1, g: 6, on: true }; return e; };
+  await wait(4000);
+  for (const [name, eq] of [['off', flat(false)], ['flat', flat(true)], ['peak 1 kHz +6 dB', boost()], ['flat again', flat(true)], ['off again', flat(false)]]) {
+    await patchChannel(id, { eq }); rep.phases.push({ name, at: new Date().toISOString() }); fs.writeFileSync(path.join(dir, 'eq-selftest.json'), JSON.stringify(rep, null, 2));
+    await wait(6000); rep.phases[rep.phases.length - 1].captured = [...engineCaptured]; rep.phases[rep.phases.length - 1].hearError = engineState && engineState.hearError;
+  }
+  rep.done = new Date().toISOString(); fs.writeFileSync(path.join(dir, 'eq-selftest.json'), JSON.stringify(rep, null, 2));
+}
 app.whenReady().then(() => {
   // Allow device labels for the soundboard output picker.
   session.defaultSession.setPermissionCheckHandler(() => true);
   session.defaultSession.setPermissionRequestHandler((_wc, _p, cb) => cb(true));
   if (!S().app.importedMagicChatbox) { try { importMagicChatbox(S()); store.saveNow(); } catch {} }
-  createWindow(); createTray(); helper.start(); media.syncRing();
+  createWindow(); createTray(); if (!UPDATE_SELFTEST) helper.start(); media.syncRing();
   runListenArg(listenArg(process.argv));
+  if (process.env.BSP_SELFTEST_EQ && process.env.BSP_PROFILE_DIR) win.webContents.once('did-finish-load', () => setTimeout(() => eqSelfTest(process.env.BSP_SELFTEST_EQ).catch((e) => helperLogLine('eq selftest: ' + e.stack)), 2000));
   if (process.argv.includes('--setup-selftest') && process.env.BSP_PROFILE_DIR) win.webContents.once('did-finish-load', () => setTimeout(() => setupSelfTest().catch((e) => { try { fs.writeFileSync(path.join(app.getPath('userData'), 'logs', 'setup-selftest.json'), JSON.stringify({ error: e.stack })); } catch {} }), 1500));
 });
-app.on('before-quit', () => { quitting = true; try { if (S().chatbox.live) chatbox.setLive(false); } catch {} store.saveNow(); media.shutdown(); helper.stop(); globalShortcut.unregisterAll(); });
+let hearRestored = false;
+app.on('before-quit', (ev) => {
+  if (!hearRestored && helperStatus.status === 'running' && S().mixer.channelList.some(({ id }) => hearChannel(id))) {
+    ev.preventDefault(); hearRestored = true;
+    Promise.race([restoreHearSessions(), new Promise((r) => setTimeout(r, 1500))]).finally(() => app.quit()); return;
+  }
+  quitting = true; try { if (S().chatbox.live) chatbox.setLive(false); } catch {} store.saveNow(); media.shutdown(); helper.stop(); globalShortcut.unregisterAll(); });
 app.on('window-all-closed', () => app.quit());

@@ -74,6 +74,10 @@ static class Program
             Console.WriteLine(SysStats.Get("1.1.1.1").ToJsonString()); Console.WriteLine(Adl.Probe()); return 0;
         }
         if (args.Length > 0 && args[0] == "--echorec") return EchoRec.Run(args);
+        if (args.Length > 1 && args[0] == "--loopmute") { var th = new Thread(() => LoopMuteTest(int.Parse(args[1]))); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); return 0; }
+        if (args.Length > 0 && args[0] == "--eqtest") { string r = null; var th = new Thread(() => { try { r = Engine.EqTest(); } catch (Exception e) { r = "EQ CHECK FAILED " + e; } }); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); Console.Write(r); return r.Contains("FAILED") ? 1 : 0; }
+        if (args.Length > 2 && args[0] == "--tonelevel") { var th = new Thread(() => ToneLevel.Run(args[1], double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture), args.Length > 3 ? args[3] : "1000,250")); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); return 0; }
+        if (args.Length > 2 && args[0] == "--tone") { var th = new Thread(() => ToneTest.Play(args[1], double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture), args.Length > 3 ? args[3] : "440", args.Length > 4 ? double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture) : 0.05)); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); return 0; }
         if (args.Length > 0 && args[0] == "--pitchtest") { var r = PitchCheck.Run(); Console.Write(r); return r.Contains("FAILED") ? 1 : 0; }
         if (args.Length > 2 && args[0] == "--setrate") { Console.WriteLine(PolicyConfig.SetRate(args[1], int.Parse(args[2])).ToJsonString()); return 0; }
         if (args.Length > 2 && args[0] == "--tonetest") return ToneTest.Run(args[1], args[2], args.Length > 3 ? double.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture) : 3, args.Length > 4 ? double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture) : 0.05);
@@ -96,10 +100,15 @@ static class Program
             if (string.IsNullOrWhiteSpace(line)) continue;
             Commands.Add(line);
         }
+        // stdin closed (the app quit or crashed): put turned-down app sessions back before exiting
+        bool any; lock (Restore) any = Restore.Count > 0;
+        if (any) { Commands.Add("{\"id\":0,\"cmd\":\"restoreSessions\"}"); Thread.Sleep(1200); }
         return 0;
     }
 
     static readonly System.Collections.Concurrent.BlockingCollection<string> Commands = new();
+    static readonly Dictionary<int, float> Restore = new();
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<int, long> Ducked = new();
 
     // Core Audio work runs on MTA threads: one for commands, one for snapshots, one for meters.
     static void StartMta(Action loop)
@@ -162,7 +171,19 @@ static class Program
             switch (cmd)
             {
                 case "snapshot": result = Snapshot(); break;
-                case "setSessionVolume": ForPid((int)req["pid"], s => s.SimpleAudioVolume.Volume = Clamp((float)(double)req["volume"])); break;
+                case "setSessionVolume":
+                {
+                    int sp = (int)req["pid"]; bool duck = req["restore"] != null;
+                    // v2.4.2 "EQ what you hear": the engine only scales an app back up once its session really is turned down
+                    // (and stops before it is turned back up), so there is never a loud burst while the volume changes.
+                    if (!duck) Ducked.TryRemove(sp, out _);
+                    ForPid(sp, s => s.SimpleAudioVolume.Volume = Clamp((float)(double)req["volume"]));
+                    if (duck) Ducked[sp] = DateTime.UtcNow.AddMilliseconds(250).Ticks; // let audio captured before the change drain first
+                    // a session turned down for "EQ what you hear" is put back if the app goes away without doing it
+                    lock (Restore) { if (duck) Restore[sp] = Clamp((float)(double)req["restore"]); else Restore.Remove(sp); }
+                    break;
+                }
+                case "restoreSessions": Ducked.Clear(); lock (Restore) { foreach (var (rp, rv) in Restore.ToList()) { try { ForPid(rp, s => s.SimpleAudioVolume.Volume = rv); } catch { } } Restore.Clear(); } break;
                 case "setSessionMute": ForPid((int)req["pid"], s => s.SimpleAudioVolume.Mute = (bool)req["mute"]); break;
                 case "setDeviceVolume": Dev((string)req["deviceId"]).AudioEndpointVolume.MasterVolumeLevelScalar = Clamp((float)(double)req["volume"]); break;
                 case "setDeviceMute": Dev((string)req["deviceId"]).AudioEndpointVolume.Mute = (bool)req["mute"]; break;
@@ -201,6 +222,23 @@ static class Program
     {
         if (string.IsNullOrEmpty(id)) return Enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
         return Enumerator.GetDevice(id);
+    }
+
+    // Diagnostic: does process loopback still capture an app whose session is muted / at 0 volume?
+    static int LoopMuteTest(int pid)
+    {
+        var en = new MMDeviceEnumerator(); var ss = new List<AudioSessionControl>();
+        foreach (var d in en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)) { var sm = d.AudioSessionManager; sm.RefreshSessions(); for (int i = 0; i < sm.Sessions.Count; i++) if ((int)sm.Sessions[i].GetProcessID == pid) ss.Add(sm.Sessions[i]); }
+        var ring = new FloatRing(48000 * 4); var pc = new ProcessCapture(pid, ring); pc.Start(); var buf = new float[48000 * 4];
+        float Measure(int ms) { Thread.Sleep(300); ring.Read(buf, ring.Count, 48000 * 8); Thread.Sleep(ms); int n = ring.Count; ring.Read(buf, n, 48000 * 8); float pk = 0; for (int i = 0; i < n; i++) pk = Math.Max(pk, Math.Abs(buf[i])); return pk; }
+        string Db(float v) => v > 0 ? (20 * Math.Log10(v)).ToString("F1") + " dB" : "silent";
+        Console.WriteLine($"sessions for pid {pid}: {ss.Count}");
+        Console.WriteLine("normal:        " + Db(Measure(1500)));
+        foreach (var s in ss) s.SimpleAudioVolume.Mute = true; Console.WriteLine("session muted: " + Db(Measure(1500)));
+        foreach (var s in ss) { s.SimpleAudioVolume.Mute = false; s.SimpleAudioVolume.Volume = 0f; } Console.WriteLine("volume 0:      " + Db(Measure(1500)));
+        foreach (var s in ss) s.SimpleAudioVolume.Volume = 0.1f; Console.WriteLine("volume 0.1:    " + Db(Measure(1500)));
+        foreach (var s in ss) s.SimpleAudioVolume.Volume = 1f; Console.WriteLine("restored:      " + Db(Measure(1500)));
+        pc.Dispose(); return 0;
     }
 
     static void ForPid(int pid, Action<AudioSessionControl> act)

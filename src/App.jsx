@@ -11,6 +11,7 @@ import EngineAlert from './EngineAlert.jsx';
 import { ListenQuick } from './components/ListenSwitch.jsx';
 import { HifiFirstRun } from './components/HifiCable.jsx';
 import { SetupWizard, HealBanner } from './components/SetupWizard.jsx';
+import { UpdateBadge, UpdateToast } from './components/Updater.jsx';
 
 const NAV = [
   { id: 'mixer', label: 'Mixer', icon: Icon.mixer },
@@ -48,6 +49,7 @@ export default function App() {
           <span className={`pill ${helper.status === 'running' ? 'ok' : 'warn'}`} title={helper.status === 'running' ? '' : [helper.message, helper.hint].filter(Boolean).join('\n')}><i />Audio engine {helper.status === 'running' ? 'online' : helper.status === 'failed' ? 'failed' : helper.status}</span>
           {helper.status === 'running' && <ListenQuick />}
           <RecPill go={go} />
+          <UpdateBadge go={go} />
           <span className={`pill ${cb && cb.live ? 'live' : ''}`}><i />VRChat chatbox {cb && cb.live ? 'live' : 'off'}</span>
         </div>
         <div className="win-controls">
@@ -79,6 +81,7 @@ export default function App() {
       </main>
       <SoundEngine settings={settings} />
       <ClipToast settings={settings} />
+      <UpdateToast />
     </div>
   );
 }

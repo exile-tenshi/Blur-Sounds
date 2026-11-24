@@ -525,3 +525,17 @@ button.mp-node { display: flex !important; flex-direction: row !important; align
 .sw-body .streampath { margin: 0 0 8px; }
 .bad-text { color: var(--red2); }
 .reset-chain { margin: 8px 0 4px; gap: 12px; }
+.warn-box.amber { border-color: rgba(214,160,60,.55); background: rgba(214,160,60,.08); }
+.sp-apps { margin: 6px 16px 10px; gap: 10px; flex-wrap: wrap; } .sp-apps input[type=range] { width: 180px; accent-color: var(--red); }
+.sw-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 12px; }
+.sw-choice { text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03); color: var(--silver); cursor: pointer; }
+.sw-choice b { display: block; color: #fff; margin-bottom: 4px; font-size: 13px; } .sw-choice small { font-size: 11px; line-height: 1.4; display: block; }
+.sw-choice.on { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset, 0 0 18px rgba(220,30,40,.25); }
+.eq-reset { margin-left: 8px; }
+/* v2.4.2 updater */
+.pill.update { color: #fff; border-color: var(--red-dim); cursor: pointer; background: linear-gradient(180deg, rgba(200,30,40,.22), rgba(120,10,20,.18)); } .pill.update i { background: var(--red2); box-shadow: 0 0 10px var(--red-glow); }
+.pill.update:hover { border-color: var(--red2); }
+.upd-bar { height: 4px; margin-top: 8px; background: #0c0d10; border: 1px solid var(--line2); border-radius: 3px; overflow: hidden; max-width: 340px; } .upd-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--red-dim), var(--red2)); transition: width .25s; }
+.upd-notes { margin: 0 16px 10px; border: 1px solid var(--line2); border-radius: 5px; background: #0f1013; } .upd-notes-head { padding: 8px 12px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--silver); border-bottom: 1px solid var(--line2); } .upd-notes-head a { color: var(--red2); }
+.upd-notes pre { margin: 0; padding: 10px 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; font: 12px/1.5 inherit; font-family: inherit; color: var(--muted); }
+.bad-text { color: #ff8a8a !important; }

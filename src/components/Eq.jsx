@@ -6,7 +6,8 @@ export const EQ_PRESETS = {
   bass: { label: 'Bass boost', g: [0, 6, 2, 0, 0, 1, 0] },
   footsteps: { label: 'Footsteps (FPS)', g: [0, -4, -2, 1, 5, 3, 0] },
   immersive: { label: 'Immersive', g: [0, 4, 0, -1, 2, 4, 0] },
-  voice: { label: 'Voice clarity', g: [0, -4, -2, 1, 4, 2, 0] },
+  voice: { label: 'Vocal clarity', g: [0, -4, -2, 1, 4, 2, 0] },
+  treble: { label: 'Treble', g: [0, 0, 0, 0, 1, 6, 0] },
   bright: { label: 'Bright', g: [0, -1, 0, 0, 2, 5, 0] },
   warm: { label: 'Warm', g: [0, 3, 2, 0, -1, -2, 0] },
   broadcast: { label: 'Broadcast mic', g: [1, -2, -3, 1, 3, 2, 0], cut: 90 },
@@ -66,10 +67,17 @@ export function EqCurve({ eq, height = 130 }) {
   );
 }
 
+const FLAT = [
+  { type: 'lowcut', f: 30, g: 0, q: 0.7, on: false }, { type: 'lowshelf', f: 90, g: 0, q: 0.7, on: true }, { type: 'peak', f: 250, g: 0, q: 1.0, on: true },
+  { type: 'peak', f: 1000, g: 0, q: 1.0, on: true }, { type: 'peak', f: 3000, g: 0, q: 1.0, on: true }, { type: 'highshelf', f: 9000, g: 0, q: 0.7, on: true }, { type: 'highcut', f: 20000, g: 0, q: 0.7, on: false },
+];
 const TYPES = { lowcut: 'Low cut', lowshelf: 'Low shelf', peak: 'Peak', highshelf: 'High shelf', highcut: 'High cut' };
 export function EqEditor({ eq, onChange, mic }) {
-  const setBand = (i, patch) => onChange({ ...eq, preset: 'custom', bands: eq.bands.map((b, j) => (j === i ? { ...b, ...patch } : b)) });
-  const presets = Object.entries(EQ_PRESETS).filter(([k]) => (mic ? ['flat', 'broadcast', 'podcast', 'demud', 'voice', 'warm', 'bright'] : ['flat', 'bass', 'footsteps', 'immersive', 'voice', 'bright', 'warm']).includes(k));
+  // v2.4.2: touching a band turns the EQ on (before, moving a slider did nothing until the toggle was switched on)
+  const setBand = (i, patch) => onChange({ ...eq, enabled: true, preset: 'custom', bands: eq.bands.map((b, j) => (j === i ? { ...b, ...patch } : b)) });
+  const order = mic ? ['flat', 'bass', 'voice', 'treble', 'broadcast', 'podcast', 'demud', 'warm'] : ['flat', 'bass', 'voice', 'footsteps', 'treble', 'immersive', 'warm'];
+  const presets = order.map((k) => [k, EQ_PRESETS[k]]);
+  const reset = () => onChange({ ...eq, preset: 'flat', preampDb: 0, bands: FLAT.map((b) => ({ ...b })) });
   return (
     <div className="eq">
       <div className="row-gap wrap">
@@ -78,6 +86,7 @@ export function EqEditor({ eq, onChange, mic }) {
         <div className="chips">
           {presets.map(([k, p]) => <button key={k} className={`chip${eq.preset === k ? ' on' : ''}`} onClick={() => onChange(applyPreset(eq, k))}>{p.label}</button>)}
         </div>
+        <button className="ghost-btn eq-reset" onClick={reset} title="All bands back to 0 dB">Reset</button>
       </div>
       <EqCurve eq={eq} />
       <div className="eq-bands">

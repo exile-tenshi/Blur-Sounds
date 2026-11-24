@@ -44,7 +44,7 @@ export function MicPath({ st, eng, onOpenChain }) {
         <button className={`mp-node mp-fx${p.processing ? ' on' : ''}`} onClick={onOpenChain} title="Open the mic chain"><Icon.settings size={14} /><div><b>{p.processing ? 'Processed' : 'Raw (no processing)'}</b><small>gate · noise · comp</small></div><MiniMeter level={eng.micPost || 0} /></button>
         <span className="mp-arrow">›</span>
         <div className={`mp-node${p.out ? '' : ' bad'}`}><Icon.cable size={14} /><div><b title={p.out?.name}>{p.out ? short(p.out.name) : 'Nowhere'}</b><small>{p.out ? (p.out.via === 'stream' ? 'via your stream mix' : 'virtual mic cable') : 'not sent to any cable'}</small></div><MiniMeter level={outPk > 0 ? outPk : 0} /></div>
-        {p.streamMode && <div className="mp-stream" title="Off: your mic is NOT mixed into the stream mix that Streamlabs / OBS capture. It still goes to your virtual mic for VRChat / Discord."><Toggle small on={!!p.onStream} onChange={(v) => window.bsp.invoke('mic:chain', { inStream: v })} label="Mic on stream" /></div>}
+        {p.streamMode && st.stream?.via !== 'mic' && <div className="mp-stream" title="Off: your mic is NOT mixed into the stream mix that Streamlabs / OBS capture. It still goes to your virtual mic for VRChat / Discord."><Toggle small on={!!p.onStream} onChange={(v) => window.bsp.invoke('mic:chain', { inStream: v })} label="Mic on stream" /></div>}
         <button className="ghost-btn" disabled={t && (t.phase === 'rec' || t.phase === 'play')} onClick={run}><Icon.play size={13} /> {t?.phase === 'rec' ? `Recording… ${t.left}` : t?.phase === 'play' ? 'Playing back…' : 'Mic test'}</button>
       </div>
       {p.out && <p className="hint">In Discord / VRChat choose <b>“{p.out.recordName}”</b> as your microphone.</p>}

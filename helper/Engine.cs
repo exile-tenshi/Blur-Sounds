@@ -66,8 +66,10 @@ sealed class OutputSink : IDisposable
     public readonly string DeviceId; WasapiOut wo; BufferedWaveProvider bwp; byte[] bytes = new byte[0];
     public string Error; public readonly int Rate, Channels; public float Peak; public long Written;
     RateOut conv;
-    public OutputSink(MMDeviceEnumerator en, string id)
+    readonly int maxQueueMs;
+    public OutputSink(MMDeviceEnumerator en, string id, int latencyMs = 30, int maxQueueMs = 120)
     {
+        this.maxQueueMs = maxQueueMs;
         DeviceId = id;
         var dev = en.GetDevice(id);
         int rate = 48000, chans = 2;
@@ -78,7 +80,7 @@ sealed class OutputSink : IDisposable
             try
             {
                 bwp = new BufferedWaveProvider(WaveFormat.CreateIeeeFloatWaveFormat(r, c)) { DiscardOnBufferOverflow = true, BufferDuration = TimeSpan.FromMilliseconds(600), ReadFully = true };
-                wo = new WasapiOut(dev, AudioClientShareMode.Shared, true, 30);
+                wo = new WasapiOut(dev, AudioClientShareMode.Shared, true, latencyMs);
                 wo.Init(bwp); wo.Play(); Rate = r; Channels = c; conv = new RateOut(r, c); last = null; break;
             }
             catch (Exception e) { last = e; try { wo?.Dispose(); } catch { } wo = null; }
@@ -89,7 +91,7 @@ sealed class OutputSink : IDisposable
     public void Write(float[] stereo, int count)
     {
         // keep latency bounded: if more than 120 ms queued, drop this block
-        if (bwp.BufferedDuration.TotalMilliseconds > 120) return;
+        if (bwp.BufferedDuration.TotalMilliseconds > maxQueueMs) return;
         float pk = 0; for (int i = 0; i < count; i++) { var a = Math.Abs(stereo[i]); if (a > pk) pk = a; }
         if (pk > Peak) Peak = pk; Written += count / 2;
         float[] src = stereo; int n = count;
@@ -105,8 +107,11 @@ sealed class ChannelCfg
 {
     public string Id; public string Mode = "direct"; public string CableId; public int[] Pids = Array.Empty<int>();
     public float Vol = 1, StreamVol = 1; public bool Muted, StreamMuted; public bool InClip = true, InRec = true;
-    public Equalizer Eq = new();
+    public Equalizer Eq = new(), EqS = new(); // EqS: the stream copy when some of the channel's apps are left out of the stream
     public float Peak;
+    // v2.4.2 "EQ what you hear" for Direct channels: the app's session is turned down to Comp^-1 (Windows applies it before
+    // process loopback), the capture is scaled back up by Comp, EQ'd and played to HearOut. Process loopback can't capture a muted app.
+    public bool Hear; public float Comp = 1; public string HearOut;
 }
 
 public sealed class Engine
@@ -119,6 +124,8 @@ public sealed class Engine
     readonly Dictionary<string, ChannelCfg> chans = new();
     DeviceSource mic; string micId;
     OutputSink personal, stream, micOut;
+    float streamGain = 1; HashSet<int> streamExclude = new();
+    readonly Dictionary<string, OutputSink> hearSinks = new(); readonly Dictionary<string, float[]> hearBus = new(); readonly Dictionary<string, Limiter> hearLim = new();
     readonly FloatRing micRing = new(48000 * 2);
     // mic chain
     readonly NoiseGate gate = new(); readonly Compressor comp = new(); readonly Equalizer micEq = new(); readonly Limiter micLim = new();
@@ -155,6 +162,8 @@ public sealed class Engine
         lock (l)
         {
             streamMode = (bool?)cfg["streamMode"] ?? false;
+            streamGain = (float)Math.Clamp((double?)cfg["streamGain"] ?? 1, 0, 2);
+            streamExclude = new HashSet<int>(((cfg["streamExclude"] as JsonArray) ?? new JsonArray()).Select(p => (int)p));
             // ----- channels -----
             var seen = new HashSet<string>(); var wantCables = new HashSet<string>(); var wantPids = new HashSet<int>();
             bool needCaptures = streamMode || ((bool?)cfg["clip"]?["enabled"] ?? false) || ((bool?)cfg["record"]?["active"] ?? false);
@@ -167,10 +176,12 @@ public sealed class Engine
                 ch.Vol = (float)((double?)c["volume"] ?? 1); ch.Muted = (bool?)c["muted"] ?? false;
                 ch.StreamVol = (float)((double?)c["streamVolume"] ?? 1); ch.StreamMuted = (bool?)c["streamMuted"] ?? false;
                 ch.InClip = (bool?)c["inClip"] ?? true; ch.InRec = (bool?)c["inRec"] ?? true;
-                ch.Eq.Configure(c["eq"]);
+                ch.Eq.Configure(c["eq"]); ch.EqS.Configure(c["eq"]);
+                ch.Hear = (bool?)c["hear"] ?? false; ch.Comp = (float)Math.Clamp((double?)c["comp"] ?? 1, 1, 1000); ch.HearOut = (string)c["hearOut"];
+                if (!ch.Hear) ch.Comp = 1;
                 ch.Pids = ((c["pids"] as JsonArray) ?? new JsonArray()).Select(p => (int)p).ToArray();
                 if (ch.Mode == "cable" && !string.IsNullOrEmpty(ch.CableId) && ch.CableId != personalId && ch.CableId != streamId) wantCables.Add(ch.CableId);
-                else if (needCaptures) foreach (var p in ch.Pids) wantPids.Add(p);
+                else if (needCaptures || ch.Hear) foreach (var p in ch.Pids) wantPids.Add(p);
             }
             foreach (var k in chans.Keys.Where(k => !seen.Contains(k)).ToList()) chans.Remove(k);
             // cable loopbacks
@@ -190,6 +201,11 @@ public sealed class Engine
             string pid2 = anyCable ? (personalId ?? DefaultRender()) : null;
             personal = Swap(personal, pid2, "personal");
             stream = Swap(stream, streamMode ? streamId : null, "stream");
+            // v2.4.2: one low-latency sink per device that EQ'd Direct channels play on
+            var wantHear = new HashSet<string>();
+            foreach (var ch in chans.Values) if (ch.Hear && ch.Mode != "cable") { ch.HearOut ??= DefaultRender(); if (ch.HearOut != null) wantHear.Add(ch.HearOut); }
+            foreach (var k in hearSinks.Keys.Where(k => !wantHear.Contains(k)).ToList()) { hearSinks[k]?.Dispose(); hearSinks.Remove(k); hearBus.Remove(k); hearLim.Remove(k); }
+            foreach (var id in wantHear) if (!hearSinks.ContainsKey(id)) { try { hearSinks[id] = new OutputSink(en, id, 15, 60); hearBus[id] = new float[9600]; hearLim[id] = new Limiter(); } catch (Exception e) { Err("eq output", e); } }
             // ----- mic -----
             var m = cfg["mic"];
             chainOn = (bool?)m?["chain"] ?? false;
@@ -290,14 +306,7 @@ public sealed class Engine
         for (int i = 0; i < avail; i++) { float v = ch > 1 ? (micStereoTmp[i * 2] + micStereoTmp[i * 2 + 1]) * 0.5f : micStereoTmp[i * 2]; micMono[i] = v; if (Math.Abs(v) > pre) pre = Math.Abs(v); }
         if (pre > MicPeakPre) MicPeakPre = pre;
         if (voiceOn) { try { Voice.Feed(micMono, avail); } catch (Exception e) { Err("voice", e); } }
-        if (chainOn && !bypass)
-        {
-            // HPF -> echo cancel -> DeepFilterNet/RNNoise, then the voice gate (much easier once the noise floor is gone)
-            try { vc.Process(micMono, avail); } catch (Exception e) { Err("voice chain", e); }
-            gate.Process(micMono, avail);
-            micEq.Process(micMono, avail, 1);
-            comp.Process(micMono, avail);
-        }
+        MicChain(micMono, avail);
         float g = micMuted ? 0 : micGain; float post = 0;
         for (int i = 0; i < avail; i++) { micMono[i] *= g; if (Math.Abs(micMono[i]) > post) post = Math.Abs(micMono[i]); }
         micLim.Process(micMono, avail);
@@ -307,6 +316,55 @@ public sealed class Engine
         micRing.Write(st, st.Length);
         micOut?.Write(st, st.Length);
         if (monitor != null) { if (monitorVol != 1) for (int i = 0; i < st.Length; i++) st[i] *= monitorVol; monitor.Write(st, st.Length); }
+    }
+
+    void MicChain(float[] mono, int n)
+    {
+        if (!chainOn || bypass) return;
+        // HPF -> echo cancel -> DeepFilterNet/RNNoise, then the voice gate (much easier once the noise floor is gone)
+        try { vc.Process(mono, n); } catch (Exception e) { Err("voice chain", e); }
+        gate.Process(mono, n);
+        micEq.Process(mono, n, 1);
+        comp.Process(mono, n);
+    }
+
+    // v2.4.2 EQ check: tones through the real mic-chain code (configured from the same JSON the app sends) and through a
+    // playback channel's EQ, reporting the gain at each frequency.
+    public static string EqTest()
+    {
+        var sb = new System.Text.StringBuilder(); bool ok = true;
+        string Bands(string type, double f, double g) => $"[{{\"type\":\"lowcut\",\"f\":30,\"g\":0,\"q\":0.7,\"on\":false}},{{\"type\":\"lowshelf\",\"f\":90,\"g\":{(type == "lowshelf" ? g : 0)},\"q\":0.7,\"on\":true}},{{\"type\":\"peak\",\"f\":250,\"g\":{(type == "peak" && f == 250 ? g : 0)},\"q\":1,\"on\":true}},{{\"type\":\"peak\",\"f\":1000,\"g\":{(type == "peak" && f == 1000 ? g : 0)},\"q\":1,\"on\":true}},{{\"type\":\"peak\",\"f\":3000,\"g\":{(type == "peak" && f == 3000 ? g : 0)},\"q\":1,\"on\":true}},{{\"type\":\"highshelf\",\"f\":9000,\"g\":{(type == "highshelf" ? g : 0)},\"q\":0.7,\"on\":true}},{{\"type\":\"highcut\",\"f\":20000,\"g\":0,\"q\":0.7,\"on\":false}}]";
+        double Rms(float[] x, int from) { double a = 0; for (int i = from; i < x.Length; i++) a += x[i] * x[i]; return Math.Sqrt(a / (x.Length - from)); }
+        float[] Tone(double f, int ch) { var t = new float[48000 * ch]; for (int i = 0; i < 48000; i++) for (int c = 0; c < ch; c++) t[i * ch + c] = (float)(0.1 * Math.Sin(2 * Math.PI * f * i / 48000)); return t; }
+        var cases = new[] { ("peak", 1000.0, 6.0, 1000.0, 6.0), ("peak", 1000.0, 6.0, 250.0, 0.0), ("peak", 1000.0, 6.0, 4000.0, 0.0), ("peak", 250.0, 6.0, 250.0, 6.0), ("peak", 3000.0, -6.0, 3000.0, -6.0), ("lowshelf", 90.0, 6.0, 40.0, 6.0), ("highshelf", 9000.0, 6.0, 16000.0, 6.0) };
+        // mic chain: gate / NS / comp / HPF / AEC off so only the EQ shapes the level
+        var eng = new Engine(new MMDeviceEnumerator());
+        foreach (var (type, f, g, at, want) in cases)
+        {
+            foreach (var path in new[] { "mic", "playback" })
+            {
+                var eqJson = JsonNode.Parse($"{{\"enabled\":true,\"preampDb\":0,\"bands\":{Bands(type, f, g)}}}");
+                double gotDb;
+                if (path == "mic")
+                {
+                    eng.Configure(JsonNode.Parse($"{{\"channels\":[],\"mic\":{{\"deviceId\":null,\"meter\":false,\"chain\":true,\"gate\":{{\"enabled\":false}},\"ns\":{{\"enabled\":false}},\"comp\":{{\"enabled\":false}},\"hpf\":{{\"enabled\":false}},\"aec\":{{\"enabled\":false}},\"eq\":{eqJson.ToJsonString()}}}}}"));
+                    var x = Tone(at, 1); double before = Rms(x, 9600);
+                    for (int p = 0; p < x.Length; p += 480) { var blk = new float[480]; Array.Copy(x, p, blk, 0, 480); eng.MicChain(blk, 480); Array.Copy(blk, 0, x, p, 480); }
+                    gotDb = 20 * Math.Log10(Rms(x, 9600) / before);
+                }
+                else
+                {
+                    var e = new Equalizer(); e.Configure(eqJson); var x = Tone(at, 2); double before = Rms(x, 19200);
+                    for (int p = 0; p < x.Length; p += 960) { var blk = new float[960]; Array.Copy(x, p, blk, 0, 960); e.Process(blk, 480, 2); Array.Copy(blk, 0, x, p, 960); }
+                    gotDb = 20 * Math.Log10(Rms(x, 19200) / before);
+                }
+                bool pass = Math.Abs(gotDb - want) < (want == 0 ? 1.0 : 0.6); ok &= pass;
+                sb.AppendLine($"{(pass ? "PASS" : "FAIL")} {path,-8} {type} {f} Hz {g:+0;-0} dB -> tone {at} Hz changed {gotDb:+0.00;-0.00} dB (expected ~{want:+0;-0;0})");
+            }
+        }
+        eng.Reset();
+        sb.AppendLine(ok ? "ALL EQ CHECKS PASSED" : "EQ CHECK FAILED");
+        return sb.ToString();
     }
 
     void Start()
@@ -321,7 +379,7 @@ public sealed class Engine
     void Loop()
     {
         var sw = Stopwatch.StartNew(); long produced = 0;
-        float[] chBuf = new float[9600], src = new float[9600], pBus = new float[9600], sBus = new float[9600], cBus = new float[9600], rBus = new float[9600], micBuf = new float[9600];
+        float[] chBuf = new float[9600], exBuf = new float[9600], src = new float[9600], pBus = new float[9600], sBus = new float[9600], cBus = new float[9600], rBus = new float[9600], micBuf = new float[9600];
         var lastStatus = DateTime.UtcNow;
         while (running)
         {
@@ -336,21 +394,32 @@ public sealed class Engine
                 try
                 {
                     Array.Clear(pBus, 0, n); Array.Clear(sBus, 0, n); Array.Clear(cBus, 0, n); Array.Clear(rBus, 0, n);
-                    bool chatMixApplied = false;
+                    foreach (var hb in hearBus.Values) Array.Clear(hb, 0, n);
+                    bool chatMixApplied = false; long nowTicks = DateTime.UtcNow.Ticks;
                     foreach (var ch in chans.Values)
                     {
-                        Array.Clear(chBuf, 0, n); bool has = false;
+                        Array.Clear(chBuf, 0, n); bool has = false, excluded = false;
                         if (ch.Mode == "cable" && ch.CableId != null && cables.TryGetValue(ch.CableId, out var cs))
                         { cs.Ring.Read(src, n, 9600); Add(chBuf, src, n, 1); has = true; }
                         else foreach (var p in ch.Pids)
-                            if (procRings.TryGetValue(p, out var r)) { r.Read(src, n, 9600); Add(chBuf, src, n, 1); has = true; }
+                            if (procRings.TryGetValue(p, out var r))
+                            {
+                                // Hear: only an app whose session is already turned down is scaled up by Comp (else silence for that moment, never a burst)
+                                float g = !ch.Hear ? 1 : (Program.Ducked.TryGetValue(p, out var dt) && dt <= nowTicks ? 1 : 0);
+                                r.Read(src, n, ch.Hear ? 2880 : 9600); Add(chBuf, src, n, g); has = true;
+                                if (streamMode && streamExclude.Contains(p)) { if (!excluded) { Array.Clear(exBuf, 0, n); excluded = true; } Add(exBuf, src, n, g); }
+                            }
                         if (!has) { ch.Peak = 0; continue; }
+                        if (ch.Comp != 1) { for (int i = 0; i < n; i++) chBuf[i] *= ch.Comp; if (excluded) for (int i = 0; i < n; i++) exBuf[i] *= ch.Comp; }
+                        // stream copy without the left-out apps (voice chat on the mic cable), EQ'd on its own filter state
+                        if (excluded) { for (int i = 0; i < n; i++) exBuf[i] = chBuf[i] - exBuf[i]; ch.EqS.Process(exBuf, frames, 2); }
                         ch.Eq.Process(chBuf, frames, 2);
                         float pk = 0; for (int i = 0; i < n; i++) { var a = Math.Abs(chBuf[i]); if (a > pk) pk = a; }
                         ch.Peak = Math.Max(ch.Peak * 0.7f, pk * (ch.Muted ? 0 : ch.Vol));
                         if (ch.Mode == "cable" && !ch.Muted) Add(pBus, chBuf, n, ch.Vol);
-                        float bv = streamMode ? (ch.StreamMuted ? 0 : ch.StreamVol) : (ch.Muted ? 0 : ch.Vol);
-                        if (streamMode) Add(sBus, chBuf, n, bv);
+                        else if (ch.Hear && !ch.Muted && ch.HearOut != null && hearBus.TryGetValue(ch.HearOut, out var hb2)) Add(hb2, chBuf, n, ch.Vol);
+                        float bv = streamMode ? (ch.StreamMuted ? 0 : ch.StreamVol * (ch.Hear ? ch.Vol : 1)) : (ch.Muted ? 0 : ch.Vol); // Hear: the session no longer carries the channel volume, so apply it here to keep stream levels as before
+                        if (streamMode) Add(sBus, excluded ? exBuf : chBuf, n, bv);
                         float pv = ch.Muted ? 0 : ch.Vol; // clips & recordings follow what you hear, not the stream mix
                         if (ch.InClip) Add(cBus, chBuf, n, pv);
                         if (ch.InRec) Add(rBus, chBuf, n, pv);
@@ -385,7 +454,8 @@ public sealed class Engine
                         if (micInRec) Add(rBus, micBuf, n, 1);
                     }
                     if (personal != null) { Clip(pBus, n); personal.Write(pBus, n); }
-                    if (stream != null) { Clip(sBus, n); stream.Write(sBus, n); }
+                    foreach (var (hid, hs) in hearSinks) { var hb = hearBus[hid]; hearLim[hid].Process(hb, n); Clip(hb, n); hs.Write(hb, n); }
+                    if (stream != null) { if (streamGain != 1) for (int i = 0; i < n; i++) sBus[i] *= streamGain; Clip(sBus, n); stream.Write(sBus, n); }
                     if (clipOn)
                     {
                         Clip(cBus, n); float dk = 0, mk = 0;
@@ -409,14 +479,17 @@ public sealed class Engine
 
     public JsonObject Levels()
     {
-        var o = new JsonObject(); var pp = new JsonObject();
+        var o = new JsonObject(); var pp = new JsonObject(); JsonArray captured; string hearErr;
         lock (l)
         {
             foreach (var c in chans.Values) { o[c.Id] = Math.Round(c.Peak, 3); }
             // v2.3: each captured app's own level (pre channel volume/mute), so its bar moves with its own audio
-            foreach (var p in procs.Values) { pp[p.Pid.ToString()] = Math.Round(p.Peak, 3); p.Peak *= 0.5f; }
+            var comp = new Dictionary<int, float>(); foreach (var c in chans.Values) if (c.Comp != 1) foreach (var q in c.Pids) comp[q] = c.Comp;
+            foreach (var p in procs.Values) { pp[p.Pid.ToString()] = Math.Round(Math.Min(1, p.Peak * (comp.TryGetValue(p.Pid, out var k) ? k : 1)), 3); p.Peak *= 0.5f; }
+            captured = new JsonArray(procs.Values.Where(p => p.Error == null).Select(p => (JsonNode)p.Pid).ToArray());
+            hearErr = string.Join("; ", hearSinks.Values.Where(h => h?.Error != null).Select(h => h.Error));
         }
-        var r = new JsonObject { ["channels"] = o, ["procs"] = pp, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
+        var r = new JsonObject { ["channels"] = o, ["procs"] = pp, ["captured"] = captured, ["hearError"] = hearErr == "" ? null : hearErr, ["micPre"] = Math.Round(MicPeakPre, 3), ["micPost"] = Math.Round(MicPeakPost, 3), ["gr"] = Math.Round(comp.GainReductionDb, 1), ["gate"] = gate.Open, ["vad"] = Math.Round(vc.Vad, 2) };
         // v2.3.1: what actually went into the virtual-mic / stream cables
         var mo = micOut; var so = stream; r["micOutPk"] = mo != null ? Math.Round(mo.Peak, 3) : -1; r["streamPk"] = so != null ? Math.Round(so.Peak, 3) : -1; if (mo != null) mo.Peak *= 0.5f; if (so != null) so.Peak *= 0.5f;
         r["ns"] = new JsonObject { ["engine"] = vc.NsActive, ["cutDb"] = Math.Round(vc.NsCutDb, 1), ["lsnr"] = Math.Round(vc.Lsnr, 1), ["cpuMs"] = Math.Round(vc.CpuMs, 2), ["error"] = vc.NsError,
@@ -447,6 +520,9 @@ public sealed class Engine
                 ["clip"] = new JsonObject { ["source"] = clipSource, ["using"] = ClipUsing, ["systemDevice"] = sysLoop?.DeviceId, ["systemError"] = sysLoop?.Error, ["enabled"] = clipOn, ["buffered"] = Math.Round(Math.Min(clipWritten, clipRing.Length) / 96000.0, 1), ["capacity"] = clipRing.Length / 96000 },
                 ["record"] = new JsonObject { ["active"] = rec != null, ["seconds"] = Math.Round(recFrames / 48000.0, 1), ["path"] = recPath },
                 ["errors"] = errs, ["sourceErrors"] = srcErr,
+                ["captured"] = new JsonArray(procs.Values.Where(p => p.Error == null).Select(p => (JsonNode)p.Pid).ToArray()),
+                ["hearError"] = hearSinks.Values.Any(h => h?.Error != null) ? string.Join("; ", hearSinks.Values.Where(h => h?.Error != null).Select(h => h.Error)) : null,
+                ["ducked"] = new JsonArray(Program.Ducked.Keys.Select(k => (JsonNode)k).ToArray()),
             };
         }
     }
@@ -495,6 +571,7 @@ public sealed class Engine
             foreach (var c in cables.Values) c.Dispose(); cables.Clear();
             foreach (var p in procs.Values) p.Dispose(); procs.Clear(); procRings.Clear();
             personal?.Dispose(); personal = null; stream?.Dispose(); stream = null; micOut?.Dispose(); micOut = null;
+            foreach (var hs in hearSinks.Values) hs?.Dispose(); hearSinks.Clear(); hearBus.Clear(); hearLim.Clear();
             monitor?.Dispose(); monitor = null; try { aecRef?.Dispose(); } catch { } aecRef = null; aecRefId = null; vc.Reference = null;
             chans.Clear(); streamMode = false;
             try { sysLoop?.Dispose(); } catch { } sysLoop = null; clipSysWant = null;
@@ -506,6 +583,21 @@ public sealed class Engine
 // recorded from a capture endpoint (e.g. Hi-Fi Cable Output) through the engine's DeviceSource (-> 48 kHz).
 static class ToneTest
 {
+    // Test source: plays sine tones (comma list, Hz) on a render device (id or name prefix) for secs at level each.
+    public static void Play(string dev, double secs, string freqs, double level)
+    {
+        var en = new MMDeviceEnumerator(); string id = dev;
+        foreach (var d in en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)) if (d.ID == dev || d.FriendlyName.StartsWith(dev, StringComparison.OrdinalIgnoreCase)) { id = d.ID; break; }
+        var fs = freqs.Split(',').Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var sink = new OutputSink(en, id); var sw = Stopwatch.StartNew(); long made = 0; var blk = new float[960];
+        while (sw.Elapsed.TotalSeconds < secs)
+        {
+            long target = (long)(sw.Elapsed.TotalSeconds * 48000) + 2400;
+            while (made < target) { for (int i = 0; i < 480; i++) { double v = 0; foreach (var f in fs) v += level * Math.Sin(2 * Math.PI * f * (made + i) / 48000.0); blk[i * 2] = (float)v; blk[i * 2 + 1] = (float)v; } sink.Write(blk, 960); made += 480; }
+            Thread.Sleep(5);
+        }
+        sink.Dispose();
+    }
     public static int Run(string renderId, string captureId, double secs, double level)
     {
         var en = new MMDeviceEnumerator(); var sink = new OutputSink(en, renderId); var src = new DeviceSource(en, captureId, captureId == renderId); // same id = loopback of that output
@@ -525,5 +617,29 @@ static class ToneTest
             ["sentHz"] = 440, ["gotHz"] = Math.Round(f, 2), ["cents"] = f > 0 ? Math.Round(1200 * Math.Log2(f / 440), 1) : null, ["peakDb"] = pk > 0 ? Math.Round(20 * Math.Log10(pk), 1) : null };
         o["pass"] = f > 0 && Math.Abs(1200 * Math.Log2(f / 440)) < 10;
         Console.WriteLine(o.ToJsonString()); return 0;
+    }
+}
+
+// v2.4.2: level of given frequencies on an output (WASAPI loopback, Goertzel), one line per 500 ms with a UTC timestamp.
+static class ToneLevel
+{
+    public static void Run(string renderId, double secs, string freqs)
+    {
+        var fs = freqs.Split(',').Select(x => double.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var en = new MMDeviceEnumerator(); var src = new DeviceSource(en, renderId, en.GetDevice(renderId).DataFlow == DataFlow.Render); // output: loopback, input: record it
+        var sw = Stopwatch.StartNew(); var win = new List<float>(); double rmsAcc = 0; var rd = new float[48000 * 2];
+        Console.WriteLine($"device {en.GetDevice(renderId).FriendlyName}");
+        while (sw.Elapsed.TotalSeconds < secs)
+        {
+            Thread.Sleep(20); int got = src.Ring.Count; if (got > 0) { src.Ring.Read(rd, Math.Min(got, rd.Length), 48000 * 8); for (int k = 0; k + 1 < Math.Min(got, rd.Length); k += 2) win.Add((rd[k] + rd[k + 1]) * 0.5f); }
+            if (win.Count >= 24000)
+            {
+                var x = win.Take(24000).ToArray(); win.RemoveRange(0, 24000);
+                var parts = fs.Select(f => { double w = 2 * Math.PI * f / 48000, c = 2 * Math.Cos(w), s1 = 0, s2 = 0; foreach (var v in x) { double s0 = v + c * s1 - s2; s2 = s1; s1 = s0; } double p = Math.Sqrt(s1 * s1 + s2 * s2 - c * s1 * s2) * 2 / x.Length; return $"{f}Hz={(p > 1e-7 ? 20 * Math.Log10(p) : -140):F1}dB"; });
+                rmsAcc = Math.Sqrt(x.Select(v => (double)v * v).Average());
+                Console.WriteLine($"{DateTime.UtcNow:HH:mm:ss.fff} " + string.Join(" ", parts) + $" all={(rmsAcc > 1e-7 ? 20 * Math.Log10(rmsAcc) : -140):F1}dB");
+            }
+        }
+        src.Dispose();
     }
 }

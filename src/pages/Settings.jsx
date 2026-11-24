@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Toggle } from '../components/Controls.jsx';
+import { UpdatePanel } from '../components/Updater.jsx';
 
 export default function Settings({ settings, update }) {
   const [info, setInfo] = useState(null);
@@ -8,6 +9,7 @@ export default function Settings({ settings, update }) {
   const cb = settings.chatbox;
   return (
     <div className="page settings-page">
+      <UpdatePanel settings={settings} update={update} />
       <section className="panel">
         <div className="panel-head"><h3>Setup wizard</h3></div>
         <div className="setting"><div><b>Run setup again</b><p className="muted-text">Walk through speakers, mic, virtual cable, Discord / VRChat, streaming and the VRChat chatbox again, with a check at each step.{settings.app.setup?.skipped ? ' (You skipped it last time.)' : ''}</p></div>

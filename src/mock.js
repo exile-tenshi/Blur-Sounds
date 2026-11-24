@@ -1,5 +1,5 @@
 import SHARE from '../electron/sharepresets.json';
-import { mockSetup, mockStream, mockRate } from './mocksetup.js';
+import { mockSetup, mockStream, mockRate, mockUpdate } from './mocksetup.js';
 // Browser-only preview data (used when not running inside Electron, e.g. for screenshots).
 export function installMock() {
   const listeners = {};
@@ -73,11 +73,12 @@ export function installMock() {
     return parts.filter(Boolean).join('\n');
   };
   setInterval(() => { const p = compose(); emit('chatbox:state', { preview: p, live: settings.chatbox.live, lastSentAt: Date.now() - 1200, sendCount: 214, media, focus: media.focus, parts: { weather: '🌧️ 46°F Light rain · H 51° L 39°', pc: '🖥️ GPU 55% 47°C', time: '🕒 10:41 PM', nowPlaying: '🎵 Song Title ᵇʸ Artist' }, weather: { data: { temp: 46, feels: 41, hum: 88, wind: 9, icon: '🌧️', cond: 'Light rain', hi: 51, lo: 39, rain: 80, unit: '°F', windUnit: 'mph', city: 'Springfield', region: 'Somewhere', via: 'ipwho.is', at: Date.now() - 120000 } }, sys: { cpu: 18, gpu: 55, gpuTemp: 47, vramUsed: 6.3, vramTotal: 16, gpuName: 'AMD Radeon GPU', ping: 14, idleSec: 3 }, osc: { port: 9001, lastAt: Date.now(), muted: false, hr: 82 }, vrc: { world: { name: 'Night Drive' }, players: 23 }, twitch: { data: { channel: 'yourchannel', live: false } }, stopwatch: { running: false, sec: 0 } }); }, 250);
-  const setupMock = mockSetup();
+  const setupMock = mockSetup(); const updMock = mockUpdate();
   settings.app.setup = { done: !qp.get('setup') };
   window.bsp = {
     invoke: async (ch, ...a) => {
       if (String(ch).startsWith('setup:')) return setupMock(ch, a[0]);
+      if (String(ch).startsWith('update:')) return updMock(ch);
       if (ch === 'settings:get') return settings;
       if (ch === 'settings:set') { let o = settings; const k = a[0]; for (let i = 0; i < k.length - 1; i++) o = o[k[i]]; o[k[k.length - 1]] = a[1]; return settings; }
       if (ch === 'app:info') return { version: '1.0.0', userData: 'C:\\Users\\you\\AppData\\Roaming\\Blur Sounds Pro', tools: [
@@ -95,7 +96,7 @@ export function installMock() {
         : { installed: true, inputName: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', outputName: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', phase: 'idle', page: 'https://vb-audio.com/Cable/', donate: 'https://vb-audio.com/Voicemeeter/Donationware.htm', driver: { registered: true, device: 'VB-Audio Hi-Fi Cable', deviceStatus: 'OK' } };
       return null;
     },
-    onListen: on('listen:switched'), onListenMissing: on('listen:missing'), onHifi: on('hifi:state'),
+    onUpdate: on('update:state'), onListen: on('listen:switched'), onListenMissing: on('listen:missing'), onHifi: on('hifi:state'),
     onMixer: (cb) => { setTimeout(() => cb(state()), 30); return on('mixer:state')(cb); },
     onLevels: on('mixer:levels'), onMedia: (cb) => { setTimeout(() => cb(media), 30); return () => {}; }, onHelper: (cb) => { setTimeout(() => cb({ status: 'running' }), 10); return () => {}; },
     onChatbox: on('chatbox:state'), onEngine: (cb) => { setTimeout(() => cb(engine), 20); return () => {}; }, onClipSaved: on('clip:saved'), onRecSaved: on('rec:saved'), onSoundTrigger: on('x'), onSoundStop: on('y'), onHotkeyErrors: on('z'), fileUrl: (p) => p,

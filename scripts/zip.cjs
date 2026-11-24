@@ -8,4 +8,7 @@ z=zipfile.ZipFile('../BlurSoundsPro-${v}-win-x64.zip','w',zipfile.ZIP_DEFLATED,c
 for r,d,f in os.walk('.'):
   for x in f:
     p=os.path.join(r,x); z.write(p,os.path.relpath(p,'.'))
-z.close()`], { stdio: 'inherit' });
+z.close()
+import hashlib
+n='BlurSoundsPro-${v}-win-x64.zip'; h=hashlib.sha256(open('../'+n,'rb').read()).hexdigest()
+open('../'+n+'.sha256','w').write(h+'  '+n+chr(10)); print('sha256', h)`], { stdio: 'inherit' });

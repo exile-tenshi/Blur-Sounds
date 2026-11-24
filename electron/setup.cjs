@@ -169,7 +169,8 @@ function streamInfo(st, snap) {
   const broadcastOn = (m.channelList || []).filter((c) => m.channels[c.id] && !m.channels[c.id].streamMuted && (m.channels[c.id].streamVolume ?? 1) > 0).map((c) => c.label);
   let via; let warn = null;
   if (m.streamMode) {
-    if (so && so.id !== micId) via = isVirtualOut(so) ? 'cable' : 'output';
+    if (so && so.id === micId && m.streamVia === 'mic') via = 'mic';
+    else if (so && so.id !== micId) via = isVirtualOut(so) ? 'cable' : 'output';
     else if (so) { via = 'cable'; warn = 'shared'; }
     else { via = 'none'; warn = 'no-destination'; }
   } else if (m.streamVia === 'desktop') via = 'desktop';
@@ -187,7 +188,12 @@ function streamInfo(st, snap) {
     micRecord: micOut ? recordSideOf(snap, micOut).name : null, micCable: micOut ? micOut.name : null,
     secondCable: second ? { id: second.id, name: second.name, record: recordSideOf(snap, second).name } : null,
     options,
+    micOption: micOut ? { id: micOut.id, name: micOut.name, record: recordSideOf(snap, micOut).name } : null,
+    appsVolume: m.micCableAppsVolume ?? 0.6, includeVoice: !!m.micCableVoice,
   };
 }
+// v2.4.2: voice-chat apps are left out of the "mic cable" stream mix by default, or people would hear themselves back.
+const VOICE_RX = /^(discord|discordptb|discordcanary|vrchat|teamspeak|ts3client_win64|ts3client_win32|mumble|skype|ms-teams|teams|zoom|slack|guilded|telegram|whatsapp|signal|element|revolt|parsec)$/i;
+function isVoiceApp(proc) { return VOICE_RX.test(String(proc || '').replace(/\.exe$/i, '')); }
 
-module.exports = { streamInfo,  autoSetup, heal, pickSpeakers, pickMic, findMicCable, findStreamCable, recordSideOf, detectAll, isVirtualOut, isRealMic, guessChannel, looksLikeSpeakers, sameName, MIC_CABLE_RX };
+module.exports = { streamInfo, isVoiceApp,  autoSetup, heal, pickSpeakers, pickMic, findMicCable, findStreamCable, recordSideOf, detectAll, isVirtualOut, isRealMic, guessChannel, looksLikeSpeakers, sameName, MIC_CABLE_RX };
