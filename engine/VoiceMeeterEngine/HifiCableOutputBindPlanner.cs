@@ -39,9 +39,12 @@ internal static class HifiCableOutputBindPlanner
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmExtensible, false, false);
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StudioPcmPacked, true, false);
 
-        // Last resort: 48 kHz float with Windows SRC to whatever the device requires.
+        // Shared-mode with Windows SRC — required when Input/Output formats diverge or
+        // PolicyConfig could not force 48 kHz clean audio.
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, true, true);
         AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamFloat, false, true);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmExtensible, true, true);
+        AddAttempt(attempts, AudioClientShareMode.Shared, HifiCableWaveFormats.StreamPcmPacked, true, true);
 
         return attempts;
     }
