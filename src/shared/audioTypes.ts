@@ -1,3 +1,7 @@
+import type { NoiseSuppressionSettings } from './noiseSuppression.js'
+
+export type { NoiseSuppressionSettings }
+
 export type AudioDeviceKind = 'input' | 'output'
 
 export type RouteTarget = 'hifi-cable'
@@ -55,6 +59,9 @@ export interface MicrophoneSlot {
   deviceId?: string
   muted: boolean
   volume: number
+  /** @deprecated use noiseSuppressionSettings.enabled */
+  noiseSuppression?: boolean
+  noiseSuppressionSettings?: NoiseSuppressionSettings
 }
 
 export interface DeviceSelection {
@@ -120,6 +127,9 @@ export interface EngineStatus {
   underrunCount: number
   selectedMicrophoneReady: boolean
   selectedInputReady: boolean
+  /** False when Hi-Fi Cable Output keep-alive capture is not running. */
+  hifiOutputActive?: boolean
+  hifiOutputError?: string
   outputLevel: number
   outputPullLevel?: number
   mixPullLevel?: number
@@ -158,6 +168,12 @@ export interface SetMicrophoneMutedPayload {
 export interface SetMicrophoneVolumePayload {
   slotId?: string
   volume: number
+}
+
+export interface SetMicrophoneNoiseSuppressionPayload {
+  slotId?: string
+  noiseSuppression?: boolean
+  settings?: Partial<NoiseSuppressionSettings>
 }
 
 export interface SetRouteVolumePayload {

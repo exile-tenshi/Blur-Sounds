@@ -97,5 +97,7 @@
 !macroend
 
 Function .onInstSuccess
-  MessageBox MB_OK|MB_ICONINFORMATION "Blur Sounds is installed.$\r$\n$\r$\nBlur Sounds requires VB-Audio Hi-Fi Cable.$\r$\n$\r$\nDownload from vb-audio.com/Cable if Hi-Fi Cable Input is missing.$\r$\n$\r$\nSet both Hi-Fi Cable Input and Output to 24 bit, 384000 Hz (Studio Quality) in Windows Sound → Advanced."
+  MessageBox MB_YESNO|MB_ICONINFORMATION "Blur Sounds is installed.$\r$\n$\r$\nBlur Sounds requires VB-Audio Hi-Fi Cable & ASIO Bridge.$\r$\n$\r$\nDownload:$\r$\nhttp://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip$\r$\n$\r$\nInstall that package if Hi-Fi Cable Input is missing, then set both Hi-Fi Cable Input and Output to 24 bit, 48000 Hz in Windows Sound → Advanced.$\r$\n$\r$\nOpen the Hi-Fi Cable download now?" IDNO blur_skip_hifi_download
+  ExecShell "open" "http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip"
+  blur_skip_hifi_download:
 FunctionEnd
