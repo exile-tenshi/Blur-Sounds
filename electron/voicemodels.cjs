@@ -9,14 +9,14 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 
 const REL = 'https://github.com/exile-tenshi/Blur-Sounds/releases/download/voice-models-v1/';
-// v2.5.1: voices re-exported with a continuous excitation (phase0/noise inputs) so streaming doesn't sound robotic
-const REL2 = 'https://github.com/exile-tenshi/Blur-Sounds/releases/download/voice-models-v2/';
+// voice-models-v2 (phase0/noise inputs) also exists; the engine loads either export. In A/B tests the v1 files sound the
+// same with the 2.5.1 engine, so 2.5.1 keeps v1 and nobody has to re-download. A FILES entry can name `replaces` to upgrade.
 const FILES = {
   rmvpe: { name: 'rmvpe.onnx', url: 'https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/rmvpe.onnx', sha: '5370e71ac80af8b4b7c793d27efd51fd8bf962de3a7ede0766dac0befa3660fd', size: 361688443, label: 'RMVPE pitch tracker' },
   contentvec: { name: 'bsp-contentvec-768-l12.onnx', url: REL + 'bsp-contentvec-768-l12.onnx', sha: '3c074a68b0c17818fa226275a7be6e2e993126f569fcae733ccd659197a4cea5', size: 377711777, label: 'ContentVec speech features' },
-  lyra: { name: 'bsp-voice-lyra-32k-v2.onnx', url: REL2 + 'bsp-voice-lyra-32k-v2.onnx', sha: 'a513eafa4d5b0872c6edc6578709ea94e9906604849d60c3a31c938edf593f41', size: 112556141, label: 'Lyra voice', replaces: 'bsp-voice-lyra-32k.onnx' },
+  lyra: { name: 'bsp-voice-lyra-32k.onnx', url: REL + 'bsp-voice-lyra-32k.onnx', sha: '6d1def6716718013d4becad7f4c76766cf852f1f1b1a7b61fb578fa48658f37d', size: 112559689, label: 'Lyra voice' },
   lyraSpk: { name: 'bsp-voice-lyra-32k.spk', url: REL + 'bsp-voice-lyra-32k.spk', sha: 'eac764691cc22c5038e14a097857adafe83f6463957544ae117362a52ebff8a1', size: 111616, label: 'Lyra voice (speaker table)' },
-  vctk: { name: 'bsp-voices-vctk-32k-v2.onnx', url: REL2 + 'bsp-voices-vctk-32k-v2.onnx', sha: '5f8be1f8d0c5bca2e0e6c09ae71f38e638efb95b2c3930f7171c9dff8908afe6', size: 112556141, label: 'Studio voice pack', replaces: 'bsp-voices-vctk-32k.onnx' },
+  vctk: { name: 'bsp-voices-vctk-32k.onnx', url: REL + 'bsp-voices-vctk-32k.onnx', sha: 'ae7ba752deb26e90edbdf823ff95bff3faab839fbb3277b82d708f1b4ec38f78', size: 112559689, label: 'Studio voice pack' },
   vctkSpk: { name: 'bsp-voices-vctk-32k.spk', url: REL + 'bsp-voices-vctk-32k.spk', sha: '91d0758cf1311a0ffffb7e462b49e173152cbd253cac3f3e7946e30734064e4f', size: 111616, label: 'Studio voice pack (speaker table)' },
 };
 const BASE = ['contentvec', 'rmvpe'];

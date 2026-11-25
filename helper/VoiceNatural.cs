@@ -81,7 +81,7 @@ public sealed class NatSounds
     bool Active(long f) => f >= 0 && f < featDone && fAct[f & FMask];
     bool Voiced(long f) => f >= 0 && f < featDone && fF0[f & FMask] > 0;
     readonly double[] x = new double[NatModel.NIn], p = new double[3]; bool inEvent; int laughHold2, evRun;
-    public double EnterThr = 0.75, StayThr = 0.5;
+    public double EnterThr = 0.8, StayThr = 0.5;
 
     // 22 context features, identical to nsc/feat.py context()
     void Context(long f, double[] o)
@@ -128,10 +128,10 @@ public sealed class NatSounds
             Context(f, x); NatModel.Predict(x, p);
             // breaths / sniffles / sighs are unvoiced (or very quiet): never pull a loud voiced speech frame onto the dry path
             bool laughy = p[2] > p[1];
-            double ev = laughy ? p[2] : (!v || r < sl - 10 ? p[1] : 0);
+            double ev = laughy ? p[2] : ((!v || r < sl - 10) && x[0] < 0.35 ? p[1] : 0); // x[0] = voiced share of the last 120 ms + look-ahead: breaths sit in gaps, not inside words
             inEvent = ev > (inEvent ? StayThr : EnterThr);
-            evRun = inEvent ? evRun + 1 : 0;   // debounce: 3 frames (30 ms) before anything changes
-            cls = evRun < 3 ? (byte)1 : laughy ? (byte)4 : (byte)2;
+            evRun = inEvent ? evRun + 1 : 0;   // debounce: 4 frames (40 ms) before anything changes
+            cls = evRun < 4 ? (byte)1 : laughy ? (byte)4 : (byte)2;
         }
         else { inEvent = false; evRun = 0; }
         if (cls == 4) { laughing = true; laughHold2 = 20; } else if (laughHold2 > 0) laughHold2--; else laughing = false;
