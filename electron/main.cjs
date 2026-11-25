@@ -214,7 +214,7 @@ async function onSnapshot(snap) {
   await guardDefault().catch(() => {});
   checkListeningDevice();
   // v2.6.5: repair a stream mix left "on" with destination 'off'/'desktop' (stale device from before)
-  if (!streamChecked) { streamChecked = true; if (m.streamMode && !['cable', 'output', 'mic'].includes(m.streamVia) && repickStream()) dirty = true; }
+  if (!streamChecked) { streamChecked = true; if (streamFix265()) dirty = true; }
   if (!appsSanitized) { // v2.6.2: earlier versions could save a leftover 1% duck as an app's own level
     appsSanitized = true;
     for (const [k, a] of Object.entries(m.apps || {})) if (a && isDuckLevel(a.volume)) { a.volume = 1; dirty = true; helperLogLine(`app level for ${k} was a leftover 1% duck, reset to 100%`); }
@@ -356,6 +356,25 @@ function repickStream() {
   m.streamMode = true; helperLogLine(`stream mix -> ${m.streamOutName} (${m.streamVia})`); return true;
 }
 let streamChecked = false;
+// v2.6.5 one-time repair on update. Streamed apps (music) must go straight out the cable, never reach the cable by
+// being picked up by the mic. With only one virtual cable (Hi-Fi Cable carrying the mic) that means "with my mic" mode:
+// apps are written onto the cable directly, next to the processed mic. A stream left pointing at a physical output
+// (e.g. Realtek Digital Output) or at nothing sent the music nowhere useful, so people only heard it leaking in
+// through the mic. Echo cancellation is turned on so music from your speakers / headset is taken back out of the mic.
+function streamFix265() {
+  if (!snapshot) return false;
+  const m = S().mixer; const mc = S().micChain; const micId = presentOut(mc.outId);
+  let changed = false;
+  if (m.streamMode && !['cable', 'output', 'mic'].includes(m.streamVia)) changed = repickStream() || changed;
+  if (!m.streamFix265) {
+    m.streamFix265 = true; changed = true;
+    const so = m.streamMode && presentOut(m.streamOut) ? snapshot.outputs.find((o) => o.id === m.streamOut) : null;
+    const single = micId && !setup.findStreamCable(snapshot, micId);
+    if (single && so && m.streamVia === 'output' && !setup.isVirtualOut(so)) { m.streamVia = 'off'; repickStream(); }
+    if (micCableMode() && mc.aec && !mc.aec.enabled) { mc.aec.enabled = true; helperLogLine('echo cancellation on: apps are on the mic cable, so keep them out of the mic itself'); }
+  }
+  return changed;
+}
 function micCableMode() { const m = S().mixer; const id = presentOut(S().micChain.outId); return !!(m.streamMode && m.streamVia === 'mic' && id && presentOut(m.streamOut) === id); }
 function streamExcludePids() {
   if (!micCableMode() || S().mixer.micCableVoice) return [];

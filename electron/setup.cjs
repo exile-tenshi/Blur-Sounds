@@ -83,6 +83,13 @@ function autoSetup(st, snap, { full = true } = {}) {
   changes.push(cable ? `Mic → “${cable.name}” (pick “${sum.recordName}” as the mic in Discord / VRChat)` : 'No virtual cable yet (install Hi-Fi Cable to use the processed mic in Discord / VRChat)');
   const sc = findStreamCable(snap, cable && cable.id);
   if (sc) { m.streamMode = true; m.streamVia = 'cable'; m.streamOut = sc.id; m.streamOutName = sc.name; sum.stream = sc.name; sum.streamRecord = recordSideOf(snap, sc).name; changes.push(`Stream mix → “${sc.name}” (no mic)`); }
+  else if (cable && (full || !present(snap.outputs, m.streamOut) || m.streamOut === mc.outId)) {
+    // v2.6.5: one cable = the cable is your mic. Apps you turn on for the stream are written straight onto the cable next to
+    // the processed mic ("with my mic"), never picked up through the mic. Nothing streams until you switch an app's Stream on.
+    m.streamMode = true; m.streamVia = 'mic'; m.streamOut = cable.id; m.streamOutName = cable.name; m.streamFix265 = true; sum.stream = cable.name;
+    if (full) for (const [id, ch] of Object.entries(m.channels || {})) ch.streamMuted = id !== 'media'; // only music by default; game / chat / aux stay off the mic cable sum.streamRecord = recordSideOf(snap, cable).name;
+    changes.push(`Stream: apps you put on stream go straight out “${cable.name}” with your mic (Streamlabs / OBS: Mic/Aux “${sum.streamRecord}”, Desktop audio off)`);
+  }
   else if (full || !present(snap.outputs, m.streamOut) || m.streamOut === mc.outId) {
     // v2.4.1: one cable (or none) = the cable is your mic. Your apps still stream: Streamlabs / OBS capture your
     // desktop audio (the Windows default speakers) directly. A second cable can be installed later for a separate mix.
