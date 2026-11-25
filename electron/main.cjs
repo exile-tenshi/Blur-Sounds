@@ -878,7 +878,7 @@ const vmodels = new VoiceModels({ dir: path.join(app.getPath('userData'), 'voice
 const VC = () => S().voiceChanger;
 function vcEngineConfig() {
   const v = VC(); if (!v || !v.enabled) return { enabled: false };
-  if (v.engine === 'dsp') return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.dsp.pitch, autoPitch: !!v.autoPitch, targetHz: v.dsp.targetHz, formant: v.dsp.formant };
+  if (v.engine === 'dsp') return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.autoPitch ? (v.pitch || 0) : v.dsp.pitch, autoPitch: !!v.autoPitch, // auto pitch: the shift comes from the target, the slider is a fine-tune targetHz: v.dsp.targetHz, formant: v.dsp.formant };
   const r = vmodels.resolve(v.voice, v.custom); const p = vmodels.paths();
   if (!r || vmodels.need(v.voice, v.custom).length || !fs.existsSync(r.modelPath)) return { enabled: false }; // models not downloaded yet: mic stays untouched
   const r2 = v.blendWith ? vmodels.resolve(v.blendWith, v.custom) : null;

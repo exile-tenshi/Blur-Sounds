@@ -161,7 +161,9 @@ export default function Voice() {
             <div className="fx-head"><b>Pitch</b></div>
             <div className="fx-head"><Toggle small on={v.autoPitch} onChange={(on) => set({ autoPitch: on })} /><span className="muted-text small">Auto pitch (aim for a target)</span></div>
             {v.autoPitch && <label>Target pitch <span>{v.dsp.targetHz} Hz</span><input type="range" min={80} max={300} value={v.dsp.targetHz} onChange={(e) => set({ dsp: { targetHz: Number(e.target.value) } })} /></label>}
-            <label>{v.autoPitch ? 'Fine-tune' : 'Pitch'} <span>{v.dsp.pitch > 0 ? '+' : ''}{v.dsp.pitch} semitones</span><input type="range" min={-24} max={24} step={0.5} value={v.dsp.pitch} onChange={(e) => set({ dsp: { pitch: Number(e.target.value) } })} /></label>
+            {v.autoPitch
+              ? <label>Fine-tune <span>{v.pitch > 0 ? '+' : ''}{v.pitch || 0} semitones</span><input type="range" min={-6} max={6} step={0.5} value={v.pitch || 0} onChange={(e) => set({ pitch: Number(e.target.value) })} /></label>
+              : <label>Pitch <span>{v.dsp.pitch > 0 ? '+' : ''}{v.dsp.pitch} semitones</span><input type="range" min={-24} max={24} step={0.5} value={v.dsp.pitch} onChange={(e) => set({ dsp: { pitch: Number(e.target.value) } })} /></label>}
           </div>
           <div className="fx">
             <div className="fx-head"><b>Formant</b><span className="fx-tag">vocal-tract size</span></div>
