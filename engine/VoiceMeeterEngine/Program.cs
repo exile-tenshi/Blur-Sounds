@@ -27,7 +27,9 @@ internal static class Program
         }
 
         using var engine = new AudioEngine();
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(150));
+        // ~100ms keeps mic/music level meters snappy. Session COM peaks stay on a 2s cache
+        // inside GetTelemetry so this tick rate does not re-freeze the helper.
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
 
         var telemetryTask = Task.Run(async () =>
         {
@@ -35,7 +37,20 @@ internal static class Program
             while (await timer.WaitForNextTickAsync())
             {
                 recoveryCounter += 1;
-                if (recoveryCounter % 8 == 0)
+                // App Library session peaks ~every 2s off the hot meter path.
+                if (recoveryCounter % 20 == 0)
+                {
+                    engine.RefreshSessionPeaksInBackground();
+                }
+
+                // Keep Hi-Fi Cable Output open (~every 1s) — required for Input→Output loop.
+                if (recoveryCounter % 10 == 0)
+                {
+                    engine.EnsureHifiOutputKeepAlive();
+                }
+
+                // Recover stuck loopbacks about every 15 seconds, and only for hard failures.
+                if (recoveryCounter % 150 == 0)
                 {
                     await engine.RecoverLoopbackSourcesAsync();
                 }

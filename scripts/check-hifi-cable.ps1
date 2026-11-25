@@ -35,7 +35,9 @@ if ($cables.Installed) {
 
 Write-Host ""
 Write-Host "WARNING: VB-Audio Hi-Fi Cable was not detected on this PC."
-Write-Host "Download Hi-Fi Cable & ASIO Bridge from https://vb-audio.com/Cable/index.htm"
+Write-Host "Download Hi-Fi Cable & ASIO Bridge from:"
+Write-Host "http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip"
+Write-Host "Product page: https://vb-audio.com/Cable/index.htm"
 Write-Host ""
 Write-Host "The installer will still be built. Install Hi-Fi Cable on target machines before streaming."
 Write-Host ""
