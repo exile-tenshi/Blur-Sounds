@@ -153,16 +153,54 @@ static class Program
     // (2.4.2-2.6.1: a duck left behind by an unclean exit stayed at 1% forever, because the next run saw the volume
     // already "right", never registered it as turned down, and so the engine kept that app silent.)
     static readonly Dictionary<int, long> staleSince = new();
+    // v2.6.3: the apps turned down right now are also kept in ducked.json (by process name). If the helper is killed
+    // outright (Task Manager, a crash, the app being force-closed), the next start puts any of them still at 1% back.
+    // Windows remembers an app's volume across restarts, so a lost duck would otherwise stick even after a reboot.
+    static readonly string DuckFile = Path.Combine(Environment.GetEnvironmentVariable("BSP_STATE_DIR") is string sd && sd.Length > 0 ? sd
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Blur Sounds Pro"), "ducked.json");
+    static readonly Dictionary<int, string> duckNames = new();
+    static bool leftoversDone;
+    static string ProcName(int pid) { lock (duckNames) { if (duckNames.TryGetValue(pid, out var n)) return n; } try { using var p = Process.GetProcessById(pid); var n = p.ProcessName.ToLowerInvariant(); lock (duckNames) duckNames[pid] = n; return n; } catch { return null; } }
+    static void SaveDucks()
+    {
+        try
+        {
+            var o = new JsonObject();
+            lock (Restore) foreach (var (p, v) in Restore) { var n = ProcName(p); if (n != null) o[n] = Math.Max(v, (double?)o[n] ?? 0); }
+            Directory.CreateDirectory(Path.GetDirectoryName(DuckFile));
+            var tmp = DuckFile + ".tmp"; File.WriteAllText(tmp, o.ToJsonString()); File.Move(tmp, DuckFile, true);
+        }
+        catch { }
+    }
+    static void RestoreLeftovers()
+    {
+        JsonObject saved = null;
+        try { if (File.Exists(DuckFile)) saved = JsonNode.Parse(File.ReadAllText(DuckFile)) as JsonObject; } catch { }
+        if (saved == null || saved.Count == 0) return;
+        List<(int pid, AudioSessionControl s, string deviceId)> list; lock (AudioLock) list = Sessions;
+        foreach (var (pid, sc, _) in list)
+        {
+            if (pid <= 0 || Ducked.ContainsKey(pid)) continue;
+            var n = ProcName(pid); if (n == null || saved[n] == null) continue;
+            float v; try { v = sc.SimpleAudioVolume.Volume; } catch { continue; }
+            if (v > 0.0105f) continue;
+            float rv = (float)Math.Clamp((double?)saved[n] ?? 1, 0.02, 1);
+            try { sc.SimpleAudioVolume.Volume = rv; } catch { continue; }
+            Send(new JsonObject { ["event"] = "hearFallback", ["data"] = new JsonObject { ["pid"] = pid, ["reason"] = "left at 1% by a previous run", ["volume"] = rv } });
+        }
+        SaveDucks();
+    }
     static void DuckWatchdog()
     {
         var eng = Eng; long now = DateTime.UtcNow.Ticks;
+        if (!leftoversDone) { List<(int pid, AudioSessionControl s, string deviceId)> l0; lock (AudioLock) l0 = Sessions; if (l0 != null && l0.Count > 0) { leftoversDone = true; RestoreLeftovers(); } }
         foreach (var (pid, at) in Ducked.ToArray())
         {
             if (now - at < TimeSpan.TicksPerSecond * 2) continue; // give a fresh duck time to start playing
             var why = eng == null ? "engine not running" : eng.HearProblem(pid);
             if (why == null) continue;
             float rv; lock (Restore) { if (!Restore.TryGetValue(pid, out rv)) rv = 1f; Restore.Remove(pid); }
-            Ducked.TryRemove(pid, out _);
+            Ducked.TryRemove(pid, out _); SaveDucks();
             try { ForPid(pid, x => x.SimpleAudioVolume.Volume = rv); } catch { }
             Send(new JsonObject { ["event"] = "hearFallback", ["data"] = new JsonObject { ["pid"] = pid, ["reason"] = why, ["volume"] = rv } });
         }
@@ -242,9 +280,10 @@ static class Program
                     if (duck) Ducked[sp] = DateTime.UtcNow.AddMilliseconds(250).Ticks; // let audio captured before the change drain first
                     // a session turned down for "EQ what you hear" is put back if the app goes away without doing it
                     lock (Restore) { if (duck) Restore[sp] = Clamp((float)(double)req["restore"]); else Restore.Remove(sp); }
+                    SaveDucks();
                     break;
                 }
-                case "restoreSessions": Ducked.Clear(); lock (Restore) { foreach (var (rp, rv) in Restore.ToList()) { try { ForPid(rp, s => s.SimpleAudioVolume.Volume = rv); } catch { } } Restore.Clear(); } break;
+                case "restoreSessions": Ducked.Clear(); lock (Restore) { foreach (var (rp, rv) in Restore.ToList()) { try { ForPid(rp, s => s.SimpleAudioVolume.Volume = rv); } catch { } } Restore.Clear(); } SaveDucks(); break;
                 case "setSessionMute": ForPid((int)req["pid"], s => s.SimpleAudioVolume.Mute = (bool)req["mute"]); break;
                 case "setDeviceVolume": Dev((string)req["deviceId"]).AudioEndpointVolume.MasterVolumeLevelScalar = Clamp((float)(double)req["volume"]); break;
                 case "setDeviceMute": Dev((string)req["deviceId"]).AudioEndpointVolume.Mute = (bool)req["mute"]; break;

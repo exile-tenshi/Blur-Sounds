@@ -58,7 +58,11 @@ class Helper extends EventEmitter {
     this.setStatus('starting'); this.log('starting ' + this.exePath);
     const started = Date.now();
     let p;
-    try { p = spawn(this.exePath, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    // v2.6.3: detached, so Windows doesn't kill the helper together with the app (Node puts children in a kill-on-close
+    // job). If the app is force-closed or crashes, the helper sees its input close, puts any app it turned down back to
+    // normal volume, and exits on its own. BSP_STATE_DIR: where it keeps the list of turned-down apps (ducked.json).
+    const env = { ...process.env }; if (this.logFile) env.BSP_STATE_DIR = path.dirname(path.dirname(this.logFile));
+    try { p = spawn(this.exePath, [], { windowsHide: true, detached: true, env, stdio: ['pipe', 'pipe', 'pipe'] }); }
     catch (e) { const info = explainSpawnError(e); this.log('spawn failed: ' + e.message); this.setStatus('error', info); return; }
     this.proc = p; let spawnErr = null;
     readline.createInterface({ input: p.stdout }).on('line', (line) => {
@@ -105,7 +109,8 @@ class Helper extends EventEmitter {
       setTimeout(() => { if (this.pending.has(id)) { this.pending.delete(id); resolve({ ok: false, error: 'timeout' }); } }, 5000);
     });
   }
-  stop() { this.stopping = true; clearTimeout(this.timer); try { this.proc && this.proc.kill(); } catch {} }
+  // v2.6.3: close its input first so it can put turned-down apps back, then make sure it's gone
+  stop() { this.stopping = true; clearTimeout(this.timer); const p = this.proc; if (!p) return; try { p.stdin.end(); } catch {} setTimeout(() => { try { if (p.exitCode == null) p.kill(); } catch {} }, 1500); }
 }
 
 module.exports = { Helper, explainExit, explainSpawnError };
