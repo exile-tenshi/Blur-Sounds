@@ -248,6 +248,7 @@ function ChannelDrawer({ st, id, onClose }) {
 
 function MicDrawer({ st, levels, mic, onClose }) {
   const [mc, setMc] = useState(st.micChain);
+  const [canUndo, setCanUndo] = useState(false); useEffect(() => { window.bsp.invoke('micchain:canUndo').then((v) => setCanUndo(!!v)).catch(() => {}); }, []); // v2.6.1
   const patch = (p) => { const n = { ...mc, ...p }; setMc(n); window.bsp.invoke('mic:chain', p); };
   const sub = (k, p) => patch({ [k]: { ...mc[k], ...p } });
   const isSonarMic = /sonar/i.test(mic?.name || '');
@@ -272,7 +273,8 @@ function MicDrawer({ st, levels, mic, onClose }) {
         </div>
       </div>
       <div className="row-between reset-chain"><span className="muted-text small">Sounds odd (muffled, robotic, cut off, too bassy)? Go back to the safe starting settings.</span>
-        <button className="ghost-btn" onClick={async () => { if (!window.confirm('Reset the mic chain?\n\nGate, noise suppression, echo cancel, high-pass, compressor, EQ, gain and “Hear myself” go back to the safe defaults. Your mic, your virtual mic cable, “Process my mic” and “Mic on stream” stay as they are.')) return; const n = await window.bsp.invoke('micchain:reset'); if (n) setMc(n); }}>Reset mic chain</button></div>
+        <button className="ghost-btn" onClick={async () => { if (!window.confirm('Reset the mic chain?\n\nGate, noise suppression, echo cancel, high-pass, compressor, EQ, gain and “Hear myself” go back to the safe defaults. Your mic, your virtual mic cable, “Process my mic” and “Mic on stream” stay as they are.')) return; const n = await window.bsp.invoke('micchain:reset'); if (n) { setMc(n); setCanUndo(true); } }}>Reset mic chain</button>
+        {canUndo && <button className="ghost-btn" onClick={async () => { const n = await window.bsp.invoke('micchain:undoReset'); if (n) setMc(n); setCanUndo(false); }}>Undo reset</button>}</div>
       {mc.bypass && <p className="warn-box">Compare mode: everyone (stream, VRChat, Discord) is hearing your raw mic right now. Flip back to After when you're done.</p>}
       {mc.monitor?.enabled && <p className="hint">“Hear myself” plays your mic into {(st.outputs.find((o) => o.id === st.settings.personalOut) || {}).name || 'your headphones'}. Use headphones, not speakers, or it will feed back.</p>}
       <div className="fx-grid">

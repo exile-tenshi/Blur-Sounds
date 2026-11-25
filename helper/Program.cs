@@ -52,6 +52,26 @@ static class Program
         Console.Out.WriteLine(r.ToJsonString()); return 0;
     }
 
+    // v2.6.1: run a 48 kHz mono wav through the real mic voice chain (HPF 90 Hz + noise suppression) and report which engine ran.
+    static int NsTest(string inWav, string outWav, string engine, double amount, string model)
+    {
+        float[] x; int sr;
+        using (var wr = new WaveFileReader(inWav)) { var rd = wr.ToSampleProvider(); sr = rd.WaveFormat.SampleRate; int ch = rd.WaveFormat.Channels; var all = new List<float>(); var buf = new float[48000 * ch]; int got; while ((got = rd.Read(buf, 0, buf.Length)) > 0) for (int i = 0; i < got; i += ch) all.Add(buf[i]); x = all.ToArray(); }
+        if (sr != 48000) { Console.WriteLine("ERROR input must be 48 kHz"); return 1; }
+        model ??= Path.Combine(AppContext.BaseDirectory, "..", "models", "deepfilter", "DeepFilterNet3_onnx.tar.gz");
+        using var vc = new VoiceChain { HpfOn = true, HpfFreq = 90, NsOn = engine != "off", NsEngine = engine, NsAmount = amount, ModelPath = model };
+        var blk = new float[480]; var sw = Stopwatch.StartNew();
+        // DeepFilterNet loads in the background: feed silence until it is running (or failed), like the live engine does
+        while (engine == "deep" && vc.NsActive != "DeepFilterNet3" && string.IsNullOrEmpty(vc.NsError) && sw.ElapsedMilliseconds < 15000) { Array.Clear(blk); vc.Process(blk, 480); Thread.Sleep(5); }
+        for (int i = 0; i < 20; i++) { Array.Clear(blk); vc.Process(blk, 480); }
+        var y = new float[x.Length]; sw.Restart();
+        for (int p = 0; p + 480 <= x.Length; p += 480) { Array.Copy(x, p, blk, 0, 480); vc.Process(blk, 480); Array.Copy(blk, 0, y, p, 480); }
+        double ms = sw.Elapsed.TotalMilliseconds;
+        using (var w = new WaveFileWriter(outWav, WaveFormat.CreateIeeeFloatWaveFormat(48000, 1))) w.WriteSamples(y, 0, y.Length);
+        Console.WriteLine(new JsonObject { ["engine"] = vc.NsActive, ["error"] = vc.NsError, ["realtimeFactor"] = Math.Round(ms / (x.Length / 48.0), 4) }.ToJsonString());
+        return vc.NsActive == "off" && engine != "off" ? 2 : 0;
+    }
+
     static void Send(JsonObject o)
     {
         var s = o.ToJsonString();
@@ -80,6 +100,7 @@ static class Program
         if (args.Length > 2 && args[0] == "--tone") { var th = new Thread(() => ToneTest.Play(args[1], double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture), args.Length > 3 ? args[3] : "440", args.Length > 4 ? double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture) : 0.05)); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); return 0; }
         if (args.Length > 3 && args[0] == "--vctest") { string r = null; var th = new Thread(() => { try { r = VoiceChanger.Test(args[1], args[2], args[3], args.Length > 4 && args[4] == "realtime"); } catch (Exception e) { r = "ERROR " + e.Message; } }); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); Console.WriteLine(r); return r.StartsWith("ERROR") ? 1 : 0; }
         if (args.Length > 1 && args[0] == "--calib") { JsonNode r = null; var th = new Thread(() => { try { r = Calib.Run(JsonNode.Parse(File.ReadAllText(args[1])), (t, p) => Console.Error.WriteLine($"{p:P0} {t}")); } catch (Exception e) { r = new JsonObject { ["error"] = e.ToString() }; } }); th.SetApartmentState(ApartmentState.MTA); th.Start(); th.Join(); Console.WriteLine(r.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })); return r["error"] != null && r["candidates"] == null ? 1 : 0; }
+        if (args.Length > 4 && args[0] == "--nstest") return NsTest(args[1], args[2], args[3], double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture), args.Length > 5 ? args[5] : null); // v2.6.1
         if (args.Length > 0 && args[0] == "--bustest") { var r = BusMixer.Test(); Console.Write(r); return r.Contains("FAILED") ? 1 : 0; }
         if (args.Length > 0 && args[0] == "--pitchtest") { var r = PitchCheck.Run(); Console.Write(r); return r.Contains("FAILED") ? 1 : 0; }
         if (args.Length > 2 && args[0] == "--setrate") { Console.WriteLine(PolicyConfig.SetRate(args[1], int.Parse(args[2])).ToJsonString()); return 0; }

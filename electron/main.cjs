@@ -425,10 +425,19 @@ ipcMain.handle('cable:fixRate', async () => { rateTried.clear(); rateState.error
 // v2.4.1: "Reset mic chain" = safe processing defaults. Device picks, the virtual-mic cable, on/off and Mic on stream are kept.
 ipcMain.handle('micchain:reset', () => {
   const mc = S().micChain; const d = defaults().micChain;
+  S().app.micChainBeforeReset = JSON.parse(JSON.stringify(mc)); // v2.6.1: Undo reset
   const keep = { enabled: mc.enabled, outId: mc.outId, outName: mc.outName, inStream: mc.inStream, aecRef: mc.aec && mc.aec.refId };
   for (const k of Object.keys(d)) mc[k] = JSON.parse(JSON.stringify(d[k]));
   Object.assign(mc, { enabled: keep.enabled, outId: keep.outId, outName: keep.outName, inStream: keep.inStream }); mc.aec.refId = keep.aecRef || null;
   store.saveSoon(); pushEngine(); pushMixer(); return mc;
+});
+// v2.6.1: put back the mic chain from just before the last "Reset mic chain" (devices / cable / on-off are kept as they are now).
+ipcMain.handle('micchain:canUndo', () => !!S().app.micChainBeforeReset);
+ipcMain.handle('micchain:undoReset', () => {
+  const prev = S().app.micChainBeforeReset; if (!prev) return null; const mc = S().micChain;
+  for (const k of ['gate', 'ns', 'hpf', 'aec', 'comp', 'eq', 'gainDb', 'clearcast', 'monitor', 'bypass']) if (k in prev) mc[k] = JSON.parse(JSON.stringify(prev[k]));
+  if (mc.aec && prev.aec) mc.aec.refId = prev.aec.refId || null;
+  delete S().app.micChainBeforeReset; store.saveSoon(); pushEngine(); pushMixer(); return mc;
 });
 function setupState() {
   const snap = snapshot; const m = S().mixer; const mc = S().micChain;
