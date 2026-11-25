@@ -131,6 +131,7 @@ internal sealed class AppLoopbackSource : IDisposable
         bool includeProcessTree = true,
         bool isHiFiOutput = false)
     {
+        _ = isHiFiOutput;
         var captureSampleRate = mixFormat.SampleRate;
 
         var capture = await ProcessLoopbackPool.AcquireAsync(
@@ -139,6 +140,7 @@ internal sealed class AppLoopbackSource : IDisposable
             captureSampleRate,
             mixFormat.Channels);
         var captureFormat = capture.WaveFormat;
+        // Simple FIFO (main's working music path) — avoid SmoothCapture live trim on loopback.
         var captureBuffer = new FifoCaptureBuffer(
             captureFormat,
             maxMilliseconds: LatencyTuning.LoopbackCaptureMaxMilliseconds,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioControlApi } from '../../shared/audioApi'
 import { audioChannels } from '../../shared/audioApi'
 import { DEFAULT_INPUT_GAIN, type RouteEqualizerSettings } from '../../shared/audioConstants'
@@ -20,6 +20,7 @@ import {
   sortVoicemeeterDevices,
 } from '../../shared/audioLabels'
 import type { AudioSnapshot } from '../../shared/audioTypes'
+import type { NoiseSuppressionSettings } from '../../shared/noiseSuppression'
 import {
   HIFI_CABLE_DOWNLOAD_URL,
   HIFI_CABLE_PRODUCT_URL,
@@ -74,9 +75,16 @@ function resolveAudioControl(): AudioControlApi | undefined {
     setRouteMuted: (payload) => ipcRenderer.invoke(audioChannels.setRouteMuted, payload),
     setMicrophoneMuted: (payload) => ipcRenderer.invoke(audioChannels.setMicrophoneMuted, payload),
     setMicrophoneVolume: (payload) => ipcRenderer.invoke(audioChannels.setMicrophoneVolume, payload),
-    openHifiCablePlaybackSettings: () => ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
+    setMicrophoneNoiseSuppression: (payload) =>
+      ipcRenderer.invoke(audioChannels.setMicrophoneNoiseSuppression, payload),
+    setMicrophoneEqualizer: (payload) =>
+      ipcRenderer.invoke(audioChannels.setMicrophoneEqualizer, payload),
+    openHifiCablePlaybackSettings: () =>
+      ipcRenderer.invoke(audioChannels.openHifiCablePlaybackSettings),
     openHifiCableRecordingSettings: () => ipcRenderer.invoke(audioChannels.openHifiCableRecordingSettings),
     applyHifiCableStudioSettings: () => ipcRenderer.invoke(audioChannels.applyHifiCableStudioSettings),
+    probeHifiCable: () => ipcRenderer.invoke(audioChannels.probeHifiCable) as Promise<string>,
+    setHifiListen: (enabled: boolean) => ipcRenderer.invoke(audioChannels.setHifiListen, enabled),
     subscribeSnapshot: (listener) => {
       const wrappedListener = (_event: Electron.IpcRendererEvent, snapshot: AudioSnapshot) => {
         listener(snapshot)
@@ -96,6 +104,10 @@ export function useAudioControlState() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [isEngineBusy, setIsEngineBusy] = useState(false)
+  const engineBusyRef = useRef(false)
+  const lastTelemetryUiAtRef = useRef(0)
+  const pendingTelemetryRef = useRef<AudioSnapshot | undefined>(undefined)
+  const telemetryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     let isMounted = true
@@ -130,15 +142,39 @@ export function useAudioControlState() {
 
     void loadSnapshot()
 
+    const flushTelemetry = () => {
+      telemetryTimerRef.current = undefined
+      const pending = pendingTelemetryRef.current
+      pendingTelemetryRef.current = undefined
+      if (pending && isMounted) {
+        lastTelemetryUiAtRef.current = Date.now()
+        setSnapshot(pending)
+      }
+    }
+
     const unsubscribe = audioControl
       ? audioControl.subscribeSnapshot((nextSnapshot) => {
-          setSnapshot(nextSnapshot)
+          // Match main-process level telemetry (~100ms) so meters track speech/music again.
+          const now = Date.now()
+          if (now - lastTelemetryUiAtRef.current >= 100) {
+            lastTelemetryUiAtRef.current = now
+            setSnapshot(nextSnapshot)
+            return
+          }
+
+          pendingTelemetryRef.current = nextSnapshot
+          if (!telemetryTimerRef.current) {
+            telemetryTimerRef.current = setTimeout(flushTelemetry, 100)
+          }
         })
       : () => {}
 
     return () => {
       isMounted = false
       unsubscribe()
+      if (telemetryTimerRef.current) {
+        clearTimeout(telemetryTimerRef.current)
+      }
     }
   }, [])
 
@@ -149,6 +185,9 @@ export function useAudioControlState() {
           (device) => device.kind === 'input' && isSelectableMicrophoneDevice(device.name),
         )
         .sort((left, right) => {
+          if (left.isAvailable !== right.isAvailable) {
+            return left.isAvailable ? -1 : 1
+          }
           const priorityDifference = getMicrophonePriority(left.name) - getMicrophonePriority(right.name)
           return priorityDifference !== 0 ? priorityDifference : left.name.localeCompare(right.name)
         }),
@@ -206,6 +245,43 @@ export function useAudioControlState() {
       }),
     )
   }, [snapshot.selection])
+
+  const ensureMicrophoneDevice = useCallback(
+    async (deviceId: string): Promise<string | undefined> => {
+      const audioControl = resolveAudioControl()
+      if (!audioControl || !deviceId) {
+        return undefined
+      }
+
+      const slots = normalizeMicrophoneSlots(snapshot.selection)
+      const existing = slots.find((slot) => slot.deviceId === deviceId)
+      if (existing) {
+        return existing.id
+      }
+
+      const emptySlot = slots.find((slot) => !slot.deviceId)
+      if (emptySlot) {
+        const next = await audioControl.setDeviceSelection({
+          microphones: updateMicrophoneSlot(slots, emptySlot.id, { deviceId }),
+        })
+        setSnapshot(next)
+        return emptySlot.id
+      }
+
+      const withNewSlot = addMicrophoneSlot(slots)
+      const newSlot = withNewSlot[withNewSlot.length - 1]
+      if (!newSlot) {
+        return undefined
+      }
+
+      const next = await audioControl.setDeviceSelection({
+        microphones: updateMicrophoneSlot(withNewSlot, newSlot.id, { deviceId }),
+      })
+      setSnapshot(next)
+      return newSlot.id
+    },
+    [snapshot.selection],
+  )
 
   const addMicrophoneSlotToSelection = useCallback(async () => {
     const audioControl = resolveAudioControl()
@@ -281,6 +357,26 @@ export function useAudioControlState() {
     setSnapshot(await audioControl.applyHifiCableStudioSettings())
   }, [])
 
+  const probeHifiCable = useCallback(async () => {
+    const audioControl = resolveAudioControl()
+    if (!audioControl) {
+      return ''
+    }
+
+    const report = await audioControl.probeHifiCable()
+    setSnapshot(await audioControl.getSnapshot())
+    return report
+  }, [])
+
+  const setHifiListen = useCallback(async (enabled: boolean) => {
+    const audioControl = resolveAudioControl()
+    if (!audioControl) {
+      return
+    }
+
+    setSnapshot(await audioControl.setHifiListen(enabled))
+  }, [])
+
   const toggleRoute = useCallback(async (appId: string, enabled: boolean) => {
     const audioControl = resolveAudioControl()
     if (!audioControl) {
@@ -332,6 +428,44 @@ export function useAudioControlState() {
     setSnapshot(await audioControl.setMicrophoneVolume({ slotId, volume }))
   }, [])
 
+  const setMicrophoneNoiseSuppression = useCallback(
+    async (
+      slotId: string,
+      noiseSuppression: boolean | NoiseSuppressionSettings | Partial<NoiseSuppressionSettings>,
+    ) => {
+      const audioControl = resolveAudioControl()
+      if (!audioControl) {
+        return
+      }
+
+      if (typeof noiseSuppression === 'boolean') {
+        setSnapshot(
+          await audioControl.setMicrophoneNoiseSuppression({ slotId, noiseSuppression }),
+        )
+        return
+      }
+
+      setSnapshot(
+        await audioControl.setMicrophoneNoiseSuppression({
+          slotId,
+          settings: noiseSuppression,
+        }),
+      )
+    },
+    [],
+  )
+
+  const setMicrophoneEqualizer = useCallback(
+    async (slotId: string, equalizer: RouteEqualizerSettings) => {
+      const audioControl = resolveAudioControl()
+      if (!audioControl) {
+        return
+      }
+      setSnapshot(await audioControl.setMicrophoneEqualizer({ slotId, equalizer }))
+    },
+    [],
+  )
+
   const refreshSnapshot = useCallback(async () => {
     const audioControl = resolveAudioControl()
     if (!audioControl) {
@@ -342,10 +476,11 @@ export function useAudioControlState() {
 
   const startEngine = useCallback(async () => {
     const audioControl = resolveAudioControl()
-    if (!audioControl || isEngineBusy) {
+    if (!audioControl || engineBusyRef.current) {
       return
     }
 
+    engineBusyRef.current = true
     setIsEngineBusy(true)
     try {
       setSnapshot(await audioControl.startEngine())
@@ -353,16 +488,18 @@ export function useAudioControlState() {
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : 'Unable to start the audio engine.')
     } finally {
+      engineBusyRef.current = false
       setIsEngineBusy(false)
     }
-  }, [isEngineBusy])
+  }, [])
 
   const stopEngine = useCallback(async () => {
     const audioControl = resolveAudioControl()
-    if (!audioControl || isEngineBusy) {
+    if (!audioControl || engineBusyRef.current) {
       return
     }
 
+    engineBusyRef.current = true
     setIsEngineBusy(true)
     try {
       setSnapshot(await audioControl.stopEngine())
@@ -370,9 +507,10 @@ export function useAudioControlState() {
     } catch (stopError) {
       setError(stopError instanceof Error ? stopError.message : 'Unable to stop the audio engine.')
     } finally {
+      engineBusyRef.current = false
       setIsEngineBusy(false)
     }
-  }, [isEngineBusy])
+  }, [])
 
   return {
     snapshot,
@@ -383,17 +521,22 @@ export function useAudioControlState() {
     playbackDevices,
     updateSelection,
     selectMicrophoneSlot,
+    ensureMicrophoneDevice,
     addMicrophoneSlotToSelection,
     removeMicrophoneSlotFromSelection,
     openHifiCablePlaybackSettings,
     openHifiCableRecordingSettings,
     applyHifiCableStudioSettings,
+    probeHifiCable,
+    setHifiListen,
     toggleRoute,
     setRouteVolume,
     setRouteEqualizer,
     setRouteMuted,
     setMicrophoneMuted,
     setMicrophoneVolume,
+    setMicrophoneNoiseSuppression,
+    setMicrophoneEqualizer,
     refreshSnapshot,
     startEngine,
     stopEngine,

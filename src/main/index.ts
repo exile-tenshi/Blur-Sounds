@@ -4,6 +4,17 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, nativeImage } from 'electron'
 import type { RoutingStore } from './audio/routingStore.js'
 import { registerAudioIpc } from './ipc/audioIpc.js'
+import { registerClipIpc } from './ipc/clipIpc.js'
+import { registerSettingsIpc } from './ipc/settingsIpc.js'
+import { registerVideoStudioIpc } from './ipc/videoStudioIpc.js'
+import { ClipKeybindService } from './recording/clipKeybinds.js'
+import { ClipVoiceCommandService } from './recording/clipVoiceCommands.js'
+import { SettingsStore } from './settings/settingsStore.js'
+
+// Keep the WebGL2 preview compositor working on machines with older/blocklisted
+// GPUs (and headless/software-GL environments) by allowing a SwiftShader fallback.
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-unsafe-swiftshader')
 
 const devServerUrl = process.env.VITE_DEV_SERVER_URL
 const currentDir = dirname(fileURLToPath(import.meta.url))
@@ -14,6 +25,8 @@ const appIconPath = app.isPackaged
   : join(currentDir, '..', 'public', 'icon.png')
 
 let audioStore: RoutingStore | undefined
+let clipKeybinds: ClipKeybindService | undefined
+let clipVoiceCommands: ClipVoiceCommandService | undefined
 
 mkdirSync(appDataRoot, { recursive: true })
 mkdirSync(sessionDataRoot, { recursive: true })
@@ -21,8 +34,16 @@ mkdirSync(sessionDataRoot, { recursive: true })
 app.setPath('userData', appDataRoot)
 app.setPath('sessionData', sessionDataRoot)
 app.setName('Blur Sounds')
+app.setAppUserModelId('com.blursounds.app')
+app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 function shutdownAudioStore(): void {
+  clipVoiceCommands?.stop()
+  clipVoiceCommands = undefined
+  clipKeybinds?.unregisterAll()
+  clipKeybinds = undefined
+
   if (!audioStore) {
     return
   }
@@ -38,9 +59,9 @@ async function createMainWindow(): Promise<void> {
   const icon = nativeImage.createFromPath(appIconPath)
 
   const mainWindow = new BrowserWindow({
-    width: 1440,
+    width: 1480,
     height: 960,
-    minWidth: 1120,
+    minWidth: 1180,
     minHeight: 760,
     backgroundColor: '#0b1220',
     title: 'Blur Sounds',
@@ -53,7 +74,13 @@ async function createMainWindow(): Promise<void> {
     },
   })
 
+  const settings = new SettingsStore()
+  clipKeybinds = new ClipKeybindService(settings)
+  clipVoiceCommands = new ClipVoiceCommandService(settings, clipKeybinds)
+  registerSettingsIpc(mainWindow, settings)
   audioStore = registerAudioIpc(mainWindow)
+  registerClipIpc(mainWindow, settings, clipKeybinds, clipVoiceCommands)
+  registerVideoStudioIpc(mainWindow)
 
   mainWindow.on('closed', () => {
     shutdownAudioStore()
@@ -88,3 +115,7 @@ app.on('before-quit', () => {
   shutdownAudioStore()
 })
 
+app.on('will-quit', () => {
+  clipVoiceCommands?.stop()
+  clipKeybinds?.unregisterAll()
+})

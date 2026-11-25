@@ -22,20 +22,32 @@ internal sealed class EqualizerSampleProvider : ISampleProvider
         1.25f,
         1.35f,
     ];
+    /// <summary>Wider Q for mic path — peaking EQ with music Q rings like a “vroom” on desk taps.</summary>
+    private static readonly float[] VoiceBandQ =
+    [
+        0.7f,
+        0.75f,
+        0.8f,
+        0.85f,
+        0.85f,
+        0.8f,
+    ];
 
     private readonly ISampleProvider source;
     private readonly object filterLock = new();
     private readonly int channels;
+    private readonly float[] bandQ;
     private BiQuadFilter[][] bandFilters;
     private float[] appliedBandDb = new float[FrequenciesHz.Length];
     private int[] activeBandIndices = [];
     private bool enabled = true;
 
-    public EqualizerSampleProvider(ISampleProvider source)
+    public EqualizerSampleProvider(ISampleProvider source, bool voiceFriendly = false)
     {
         this.source = source;
         WaveFormat = source.WaveFormat;
         channels = Math.Max(1, WaveFormat.Channels);
+        bandQ = voiceFriendly ? VoiceBandQ : BandQ;
         bandFilters = CreateFilterBank();
     }
 
@@ -158,7 +170,7 @@ internal sealed class EqualizerSampleProvider : ISampleProvider
             target[band][channel] = BiQuadFilter.PeakingEQ(
                 WaveFormat.SampleRate,
                 FrequenciesHz[band],
-                BandQ[band],
+                bandQ[band],
                 gainDb);
         }
     }
