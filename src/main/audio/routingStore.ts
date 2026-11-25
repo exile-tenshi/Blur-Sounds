@@ -7,6 +7,7 @@ import type {
   RoutedInput,
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
+  SetMicrophoneNoiseSuppressionPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteMutedPayload,
@@ -37,8 +38,10 @@ import { remapStaleApplicationRoutes } from '../../shared/appRouteRemap.js'
 import { createDefaultEngineStatus, normalizeEngineStatus } from '../../shared/engineStatus.js'
 import {
   detectHifiCableDependency,
+  describeHifiFormatStartBlocker,
   findHifiCablePlaybackDevice,
   findHifiCableRecordingDevice,
+  formatHifiCableRecordingUnavailableMessage,
   formatHifiCableUnavailableMessage,
   getHifiCableSelectionDefaults,
   isHifiCablePlaybackDevice,
@@ -171,9 +174,7 @@ function resolveInputDeviceId(
 
   return (
     preferredInput?.id ??
-    outputDevices.find((device) => isHifiCablePlaybackDevice(device.name))?.id ??
-    outputDevices.find((device) => device.isDefault)?.id ??
-    outputDevices[0]?.id
+    outputDevices.find((device) => isHifiCablePlaybackDevice(device.name))?.id
   )
 }
 
@@ -194,10 +195,13 @@ export class RoutingStore {
   private telemetryByAppId = new Map<string, EngineRouteTelemetry>()
   private telemetryEmitTimer?: ReturnType<typeof setTimeout>
   private lastTelemetryEmitAt = 0
-  private readonly telemetryEmitIntervalMs = 66
+  /** Keep level meters near real-time; remap/list work stays on slower timers. */
+  private readonly telemetryEmitIntervalMs = 100
   private lastRouteRemapAt = 0
   private readonly routeRemapIntervalMs = 2000
   private hifiCableFormatStatus?: HifiCableFormatResult
+  private pendingMixSync = false
+  private mixSyncInFlight?: Promise<void>
 
   constructor() {
     this.engine.subscribe((status, routeTelemetry) => {
@@ -206,6 +210,41 @@ export class RoutingStore {
       this.applyTelemetryToRoutes()
       this.maybeRemapApplicationRoutes()
       this.scheduleTelemetryEmit()
+    })
+  }
+
+  /** Coalesce rapid volume/EQ/NS updates so the UI never waits on a backlog of engine IPC. */
+  private scheduleMixSync(): void {
+    if (!this.canSyncMixLevels()) {
+      return
+    }
+
+    this.pendingMixSync = true
+    if (this.mixSyncInFlight) {
+      return
+    }
+
+    this.mixSyncInFlight = (async () => {
+      while (this.pendingMixSync) {
+        this.pendingMixSync = false
+        if (!this.canSyncMixLevels()) {
+          break
+        }
+
+        try {
+          await this.engine.updateMix(this.selection, this.getSortedRoutes())
+        } catch (error) {
+          this.setEngineError(
+            error instanceof Error ? error.message : 'Unable to update mix levels.',
+          )
+          break
+        }
+      }
+    })().finally(() => {
+      this.mixSyncInFlight = undefined
+      if (this.pendingMixSync) {
+        this.scheduleMixSync()
+      }
     })
   }
 
@@ -348,14 +387,8 @@ export class RoutingStore {
       this.engineStatus.sessionLevels,
     )
 
-    const hifiCable = detectHifiCableDependency(devices)
-    if (hifiCable.playbackReady) {
-      try {
-        this.hifiCableFormatStatus = await this.engine.configureHifiCable()
-      } catch {
-        // Format apply is best-effort during refresh; users can retry manually.
-      }
-    }
+    // Do not auto-apply Hi-Fi Cable PolicyConfig on every refresh — that COM/registry
+    // work can freeze the UI for seconds. Users apply via Setup / Start stream.
 
     if (this.isEngineActive()) {
       try {
@@ -395,19 +428,21 @@ export class RoutingStore {
       nextRecordingId = resolveRecordingDeviceId(inputDevice, recordingDevices)
     }
 
+    // Preserve noise-suppression fields — stripping them made Noise look like the mic
+    // was never picked up after Track mic / device changes.
     let nextMicrophones = payload.microphones
-      ? payload.microphones.map((slot) => ({
-          id: slot.id,
-          deviceId: slot.deviceId,
-          muted: slot.muted ?? false,
-          volume: clampVolume(slot.volume ?? DEFAULT_INPUT_GAIN),
-        }))
+      ? normalizeMicrophoneSlots({ microphones: payload.microphones })
       : normalizeMicrophoneSlots(this.selection)
 
     if (payload.microphoneId !== undefined) {
       const firstSlot = nextMicrophones[0] ?? createDefaultMicrophoneSlots()[0]
       nextMicrophones = [
-        { ...firstSlot, deviceId: payload.microphoneId || undefined },
+        {
+          ...firstSlot,
+          deviceId: payload.microphoneId || undefined,
+          noiseSuppression: firstSlot.noiseSuppression,
+          noiseSuppressionSettings: firstSlot.noiseSuppressionSettings,
+        },
         ...nextMicrophones.slice(1),
       ]
     }
@@ -454,10 +489,7 @@ export class RoutingStore {
       microphones: updateMicrophoneSlot(slots, slotId, { muted: payload.muted }),
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -474,8 +506,52 @@ export class RoutingStore {
       microphones: updateMicrophoneSlot(slots, slotId, { volume: clampVolume(payload.volume) }),
     }
 
+    this.scheduleMixSync()
+    return this.emitCachedSnapshot()
+  }
+
+  async setMicrophoneNoiseSuppression(
+    payload: SetMicrophoneNoiseSuppressionPayload,
+  ): Promise<AudioSnapshot> {
+    const slots = normalizeMicrophoneSlots(this.selection)
+    const slotId = payload.slotId ?? slots.find((slot) => slot.deviceId)?.id ?? slots[0]?.id
+
+    if (!slotId) {
+      return this.emitCachedSnapshot()
+    }
+
+    const current = slots.find((slot) => slot.id === slotId)
+    const nextSettings = {
+      ...(current?.noiseSuppressionSettings ?? {}),
+      ...(payload.settings ?? {}),
+      enabled:
+        payload.settings?.enabled ??
+        payload.noiseSuppression ??
+        current?.noiseSuppressionSettings?.enabled ??
+        current?.noiseSuppression ??
+        false,
+    }
+
+    this.selection = {
+      ...this.selection,
+      microphones: updateMicrophoneSlot(slots, slotId, {
+        noiseSuppression: nextSettings.enabled,
+        noiseSuppressionSettings: nextSettings,
+      }),
+    }
+
+    // Re-bind mics when the engine is live so NS applies to a real capture source,
+    // not only volume state on an unbound slot.
     if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
+      try {
+        await this.ensureEngineRunning()
+      } catch (error) {
+        this.setEngineError(
+          error instanceof Error ? error.message : 'Unable to apply noise suppression.',
+        )
+      }
+    } else {
+      this.scheduleMixSync()
     }
 
     return this.emitCachedSnapshot()
@@ -534,10 +610,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -549,10 +622,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -564,10 +634,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -599,6 +666,36 @@ export class RoutingStore {
     return this.emitCachedSnapshot()
   }
 
+  /** Plays a test tone into Hi-Fi Cable Input and reports whether Output hears it. */
+  async probeHifiCable(): Promise<string> {
+    try {
+      if (this.isEngineActive()) {
+        await this.engine.stop()
+      }
+
+      const report = await this.engine.probeHifiCable()
+      const passed =
+        /meterPeak=(?!0\.000)\d+\.\d+/.test(report) ||
+        /capturePeak=(?!0\.000)\d+\.\d+/.test(report)
+      this.engineStatus = {
+        ...createDefaultEngineStatus(),
+        helperConnected: this.engineStatus.helperConnected,
+        state: 'stopped',
+        message: passed
+          ? `Hi-Fi Cable test passed — Output heard the tone. Start stream, then point Discord at Hi-Fi Cable Output.\n${report}`
+          : `Hi-Fi Cable test failed — tone did not reach Output. Check Playback → Hi-Fi Cable Input Advanced is 48 kHz · 24-bit (same as Output), exclusive mode off on both.\n${report}`,
+      }
+      this.emitCachedSnapshot()
+      return report
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to test Hi-Fi Cable.'
+      this.setEngineError(message)
+      this.emitCachedSnapshot()
+      return message
+    }
+  }
+
   async startEngine(): Promise<AudioSnapshot> {
     if (this.devices.length === 0) {
       await this.refreshDevices()
@@ -612,14 +709,26 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
+    if (!hifiCable.recordingReady) {
+      this.setEngineError(formatHifiCableRecordingUnavailableMessage())
+      return this.emitCachedSnapshot()
+    }
+
+    // Hi-Fi Cable is bit-perfect — refuse Start when Input/Output MixFormats diverge
+    // or are not clean 48 kHz. Soft-continuing here was the main "no audio through Hi-Fi" bug.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
+      const formatBlocker = describeHifiFormatStartBlocker(result)
+      if (formatBlocker) {
+        this.setEngineError(formatBlocker)
+        return this.emitCachedSnapshot()
+      }
     } catch (error) {
       this.setEngineError(
         error instanceof Error
           ? error.message
-          : 'Unable to apply Hi-Fi Cable studio settings before starting.',
+          : 'Unable to apply Hi-Fi Cable clean audio settings. Set both endpoints to 48 kHz · 24-bit in Windows Sound.',
       )
       return this.emitCachedSnapshot()
     }
@@ -640,6 +749,20 @@ export class RoutingStore {
       this.setEngineError(
         error instanceof Error ? error.message : 'Unable to start the audio engine.',
       )
+      return this.emitCachedSnapshot()
+    }
+
+    // Keep-alive on Hi-Fi Cable Output is required for the VB-Audio Input→Output loop.
+    if (this.engineStatus.hifiOutputActive === false) {
+      const keepAliveError =
+        this.engineStatus.hifiOutputError ||
+        'Hi-Fi Cable Output keep-alive did not start. Enable Recording → Hi-Fi Cable Output, leave ASIO Bridge on Pass-Through, then Start again.'
+      try {
+        await this.engine.stop()
+      } catch {
+        // Still surface the keep-alive failure below.
+      }
+      this.setEngineError(keepAliveError)
     }
 
     return this.emitCachedSnapshot()
