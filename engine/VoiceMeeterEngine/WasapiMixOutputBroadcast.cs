@@ -97,7 +97,7 @@ internal sealed class WasapiMixOutputBroadcast : IMixOutputBroadcast
     {
         if (outputFormat.SampleRate == source.WaveFormat.SampleRate)
         {
-            return new OutputStageSampleProvider(source, bufferMilliseconds: 120);
+            return new OutputStageSampleProvider(source, bufferMilliseconds: LatencyTuning.OutputStageBufferMilliseconds);
         }
 
         return new StudioRateOutputSampleProvider(source, outputFormat.SampleRate);
