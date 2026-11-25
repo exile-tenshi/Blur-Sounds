@@ -79,7 +79,7 @@ function defaults() {
     // v2.5.0 voice changer: OFF until you turn it on. AI voices download on first use.
     voiceChanger: {
       enabled: false, engine: 'ai', voice: 'lyra', preset: 'm2f', bypass: false, hotkey: '',
-      pitch: 0, autoPitch: true, targetHz: 205, quality: 'balanced', device: 'gpu', f0: 'auto', expressive: 1, envMix: 0.35, blendWith: null, blend: 0,
+      pitch: 0, autoPitch: true, targetHz: 205, quality: 'balanced', device: 'gpu', f0: 'auto', expressive: 0.4, envMix: 0.7, blendWith: null, blend: 0, natural: true, natBlend: 0.75,
       dsp: { pitch: 11, formant: 17, targetHz: 210 }, custom: [],
     },
     clips: {

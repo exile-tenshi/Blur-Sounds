@@ -66,7 +66,7 @@ export default function App() {
             <n.icon size={20} /><span>{n.label}</span>
           </button>
         ))}
-        <div className="rail-foot">v2.5</div>
+        <div className="rail-foot">v2.5.1</div>
       </nav>
       {helper.status === 'running' && !wizard && settings.app.setup?.done && <HifiFirstRun settings={settings} update={update} />}
       {wizard && <SetupWizard rerun={wizard === 'rerun'} onClose={async () => { setWizard(null); setSettings({ ...(await window.bsp.invoke('settings:get')) }); }} />}

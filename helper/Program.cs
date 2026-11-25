@@ -204,6 +204,22 @@ static class Program
                 case "ping": result = "pong"; break;
                 case "sysStats": result = SysStats.Get((string)req["pingHost"]); break;
                 case "refresh": SnapNow.Set(); break;
+                // v2.6.0 voice changer calibration
+                case "vcRecStart": Eng.CalStart((string)req["path"], (string)req["rawPath"], (double?)req["maxSec"] ?? 35); break;
+                case "vcRecStop": result = Eng.CalStop(); break;
+                case "vcRecState": result = Eng.CalState(); break;
+                case "vcCalibrate":
+                {
+                    var rq = req.DeepClone();
+                    var th = new Thread(() =>
+                    {
+                        JsonNode res;
+                        try { res = Calib.Run(rq, (t, p) => Send(new JsonObject { ["event"] = "vcCalib", ["data"] = new JsonObject { ["stage"] = t, ["pct"] = Math.Round(p, 3) } })); }
+                        catch (Exception e) { res = new JsonObject { ["error"] = e.Message }; }
+                        Send(new JsonObject { ["event"] = "vcCalib", ["data"] = new JsonObject { ["done"] = true, ["result"] = res } });
+                    }) { IsBackground = true, Name = "bsp-calib" };
+                    th.SetApartmentState(ApartmentState.MTA); th.Start(); result = "started"; break;
+                }
                 default: err = "unknown command " + cmd; break;
             }
         }

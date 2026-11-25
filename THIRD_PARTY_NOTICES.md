@@ -10,6 +10,7 @@ Blur Sounds Pro release builds include these third-party components. They are do
 - **.NET 8 runtime** (bundled inside `BspAudioHelper.exe`): MIT, Copyright .NET Foundation and Contributors. https://github.com/dotnet/runtime
 - **NAudio 2.2.1**: MIT. https://github.com/naudio/NAudio
 - **Electron, React, Vite**: MIT.
+- **Natural-sounds classifier weights** (`helper/NatModel.cs`): trained by this project on the VocalSound dataset (Gong et al., ICASSP 2022, CC BY 4.0, https://github.com/YuanGongND/vocalsound), CMU ARCTIC speech (free use, Carnegie Mellon University) and LibriSpeech (CC BY 4.0). No audio from these datasets is included.
 - **Weather data**: Open-Meteo (https://open-meteo.com), CC BY 4.0. IP location: ipwho.is and ip-api.com (free tiers).
 
 ## VB-Audio Hi-Fi Cable (not included)

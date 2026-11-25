@@ -886,7 +886,8 @@ function vcEngineConfig() {
     enabled: true, engine: 'ai', bypass: !!v.bypass, cvPath: p.cvPath, f0Path: p.f0Path, voicePath: r.modelPath, spkPath: r.spkPath, sid: r.sid,
     sid2: r2 && r2.modelPath === r.modelPath ? r2.sid : -1, blend: v.blend || 0,
     pitch: v.pitch || 0, autoPitch: !!v.autoPitch, targetHz: v.targetHz || r.targetHz, quality: v.quality || 'balanced', device: v.device || 'gpu', f0: v.f0 || 'auto',
-    expressive: v.expressive ?? 1, envMix: v.envMix ?? 0.35,
+    expressive: v.expressive ?? (r.tuned ? r.tuned.expressive : 0.5), envMix: v.envMix ?? (r.tuned ? r.tuned.envMix : 0.7),
+    natural: v.natural !== false, natBlend: v.natBlend ?? 0.75,
   };
 }
 function vcState() { const v = VC(); return { settings: v, models: vmodels.status(v.custom), hotkeyError: vcHotkeyError }; }
@@ -894,7 +895,7 @@ let vcHotkeyError = null;
 function vcPatch(p) {
   const v = VC();
   for (const k of Object.keys(p || {})) { if (k === 'dsp') v.dsp = { ...v.dsp, ...p.dsp }; else v[k] = p[k]; }
-  if (p && p.voice && !('targetHz' in p)) { const r = vmodels.resolve(p.voice, v.custom); if (r) v.targetHz = r.targetHz; }
+  if (p && p.voice && !('targetHz' in p)) { const r = vmodels.resolve(p.voice, v.custom); if (r) { v.targetHz = r.targetHz; if (r.tuned && !('expressive' in p)) { v.expressive = r.tuned.expressive; v.envMix = r.tuned.envMix; } } }
   store.saveSoon(); pushEngine(); if (p && 'hotkey' in p) registerHotkeys(); send('vc:state', vcState()); return vcState();
 }
 ipcMain.handle('vc:get', () => vcState());
@@ -917,6 +918,8 @@ ipcMain.handle('vc:removeCustom', (_e, id) => {
   v.custom = (v.custom || []).filter((x) => x.id !== id); if (v.voice === id) v.voice = 'lyra'; store.saveSoon(); pushEngine(); return vcState();
 });
 ipcMain.handle('vc:openFolder', () => shell.openPath(vmodels.dir));
+// v2.5.1: upgrade voices downloaded by 2.5.0 to the v2 (non-robotic streaming) export, quietly, once the app is up
+setTimeout(() => { const k = vmodels.outdated(); if (k.length) { helperLogLine('voice models: upgrading ' + k.join(', ')); vmodels.download(k).then(() => { pushEngine(); send('vc:state', vcState()); }).catch((e) => helperLogLine('voice model upgrade failed: ' + e.message)); } }, 15000);
 
 const updater = new Updater({ app, log: (m) => helperLogLine(m), send: (st) => send('update:state', st) });
 let updateResult = null;

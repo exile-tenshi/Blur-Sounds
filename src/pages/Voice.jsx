@@ -6,9 +6,9 @@ import { keyToAccel } from './Soundboard.jsx';
 
 const MB = (b) => `${Math.round(b / 1048576)} MB`;
 const QUAL = [
-  { id: 'fast', label: 'Fast', sub: 'Lowest delay (about 170 ms on a fast GPU). Slightly rougher on word edges.' },
-  { id: 'balanced', label: 'Balanced', sub: 'Recommended. About 220 ms on a fast GPU, cleanest for the delay.' },
-  { id: 'quality', label: 'Best', sub: 'Smoothest sound, about 380 ms. For recordings, not live talk.' },
+  { id: 'fast', label: 'Fast', sub: 'About 240 ms on a fast GPU. Good for quick back-and-forth; a little less smooth.' },
+  { id: 'balanced', label: 'Natural', sub: 'Recommended. About 310 ms on a fast GPU. Looks ahead a little so words never sound robotic.' },
+  { id: 'quality', label: 'Studio', sub: 'Smoothest, about 410 ms. For recordings and slower conversation.' },
 ];
 
 export default function Voice() {
@@ -130,8 +130,16 @@ export default function Voice() {
             <label>Blend with <span>{v.blendWith ? `${Math.round((v.blend || 0) * 100)}%` : 'off'}</span></label>
             <Select value={v.blendWith} onChange={(x) => set({ blendWith: x, blend: x ? (v.blend || 0.3) : 0 })} options={[{ value: null, label: 'No blend' }, ...models.voices.filter((x) => x.id !== v.voice && x.model && voice && x.model === voice.model).map((x) => ({ value: x.id, label: x.name }))]} />
             {v.blendWith && <label>Mix <span>{Math.round((v.blend || 0) * 100)}%</span><input type="range" min={0} max={100} value={Math.round((v.blend || 0) * 100)} onChange={(e) => set({ blend: Number(e.target.value) / 100 })} /></label>}
-            <label>Expressiveness <span>{Math.round((v.expressive ?? 1) * 100)}%</span><input type="range" min={0} max={150} value={Math.round((v.expressive ?? 1) * 100)} onChange={(e) => set({ expressive: Number(e.target.value) / 100 })} /></label>
-            <label>Follow my loudness <span>{Math.round((1 - (v.envMix ?? 0.35)) * 100)}%</span><input type="range" min={0} max={100} value={Math.round((1 - (v.envMix ?? 0.35)) * 100)} onChange={(e) => set({ envMix: 1 - Number(e.target.value) / 100 })} /></label>
+            <label>Expressiveness <span>{Math.round((v.expressive ?? 0.5) * 100)}%</span><input type="range" min={0} max={150} value={Math.round((v.expressive ?? 0.5) * 100)} onChange={(e) => set({ expressive: Number(e.target.value) / 100 })} /></label>
+            <label>Follow my loudness <span>{Math.round((1 - (v.envMix ?? 0.7)) * 100)}%</span><input type="range" min={0} max={100} value={Math.round((1 - (v.envMix ?? 0.7)) * 100)} onChange={(e) => set({ envMix: 1 - Number(e.target.value) / 100 })} /></label>
+            {voice && voice.tuned && (Math.abs((v.expressive ?? 0.5) - voice.tuned.expressive) > 0.01 || Math.abs((v.envMix ?? 0.7) - voice.tuned.envMix) > 0.01) &&
+              <button className="chip" onClick={() => set({ expressive: voice.tuned.expressive, envMix: voice.tuned.envMix, targetHz: voice.targetHz })}>Use the tuned settings for {voice.name}</button>}
+          </div>
+          <div className="fx">
+            <div className="fx-head"><Toggle small on={v.natural !== false} onChange={(on) => set({ natural: on })} /><b>Natural sounds</b><span className="fx-tag">laughs · sniffles · breaths</span></div>
+            <p className="hint">AI voices turn laughs, sniffles, coughs and breaths into garbled half-words. With this on, those moments use your real sound, shifted to match the voice, and blend back into the AI voice for speech.</p>
+            {v.natural !== false && <label>Real-sound blend <span>{Math.round((v.natBlend ?? 0.75) * 100)}%</span><input type="range" min={0} max={100} value={Math.round((v.natBlend ?? 0.75) * 100)} onChange={(e) => set({ natBlend: Number(e.target.value) / 100 })} /></label>}
+            {v.enabled && ch.natural && <p className="hint">Now: {ch.natural.now} · laughs {ch.natural.laughs} · other sounds {ch.natural.noises}</p>}
           </div>
         </section>
 
@@ -145,7 +153,7 @@ export default function Voice() {
             <span className="muted-text small" style={{ marginLeft: 12 }}>Pitch tracker</span>
             {[['auto', 'Auto'], ['rmvpe', 'RMVPE (best)'], ['yin', 'YIN (light)']].map(([id, l]) => <button key={id} className={`chip${(v.f0 || 'auto') === id ? ' on' : ''}`} onClick={() => set({ f0: id })}>{l}</button>)}
           </div>
-          {v.device === 'cpu' && <p className="hint">On the CPU the AI voice needs a fast processor; if you hear dropouts, use Best quality (longer blocks) or the GPU.</p>}
+          {v.device === 'cpu' && <p className="hint">On the CPU the AI voice needs a fast processor; if you hear dropouts, use Studio quality (longer blocks) or the GPU.</p>}
         </section>
       </> : (
         <section className="panel vc-grid">

@@ -129,6 +129,7 @@ public sealed class Engine
     readonly FloatRing micRing = new(48000 * 2);
     // mic chain
     readonly NoiseGate gate = new(); readonly Compressor comp = new(); readonly Equalizer micEq = new(); readonly Limiter micLim = new();
+    readonly BusMixer bus = new(); // v2.6.0
     readonly VoiceChain vc = new(); readonly VoiceChanger changer = new(); bool changerOn; bool nsOn, clearcast, bypass; float micGain = 1; bool micMuted;
     DeviceSource aecRef; string aecRefId; OutputSink monitor; bool monitorOn; float monitorVol = 0.8f;
     bool micInStream = true, micInClip = true, micInRec = true, streamMode, chainOn;
@@ -168,6 +169,7 @@ public sealed class Engine
             var seen = new HashSet<string>(); var wantCables = new HashSet<string>(); var wantPids = new HashSet<int>();
             bool needCaptures = streamMode || ((bool?)cfg["clip"]?["enabled"] ?? false) || ((bool?)cfg["record"]?["active"] ?? false);
             string personalId = (string)cfg["personalOut"]; string streamId = (string)cfg["streamOut"];
+            try { bus.Configure(cfg["bus"], en, Err); } catch (Exception e) { Err("bus mixer", e); }
             foreach (var c in (cfg["channels"] as JsonArray) ?? new JsonArray())
             {
                 var id = (string)c["id"]; seen.Add(id);
@@ -181,7 +183,7 @@ public sealed class Engine
                 if (!ch.Hear) ch.Comp = 1;
                 ch.Pids = ((c["pids"] as JsonArray) ?? new JsonArray()).Select(p => (int)p).ToArray();
                 if (ch.Mode == "cable" && !string.IsNullOrEmpty(ch.CableId) && ch.CableId != personalId && ch.CableId != streamId) wantCables.Add(ch.CableId);
-                else if (needCaptures || ch.Hear) foreach (var p in ch.Pids) wantPids.Add(p);
+                else if (needCaptures || ch.Hear || bus.NeedsCapture(id)) foreach (var p in ch.Pids) wantPids.Add(p);
             }
             foreach (var k in chans.Keys.Where(k => !seen.Contains(k)).ToList()) chans.Remove(k);
             // cable loopbacks
@@ -198,7 +200,7 @@ public sealed class Engine
             }
             // ----- outputs -----
             bool anyCable = chans.Values.Any(c => c.Mode == "cable" && cables.ContainsKey(c.CableId ?? ""));
-            string pid2 = anyCable ? (personalId ?? DefaultRender()) : null;
+            string pid2 = anyCable || bus.InputsTo("A1") ? (personalId ?? DefaultRender()) : null;
             personal = Swap(personal, pid2, "personal");
             stream = Swap(stream, streamMode ? streamId : null, "stream");
             // v2.4.2: one low-latency sink per device that EQ'd Direct channels play on
@@ -229,7 +231,8 @@ public sealed class Engine
                 aecRef = null; aecRefId = refWant; vc.Reference = null;
                 if (refWant != null) { try { aecRef = new DeviceSource(en, refWant, true); vc.Reference = aecRef.Ring; } catch (Exception e) { Err("echo reference", e); } }
             }
-            monitorOn = (chainOn || ((bool?)m?["changer"]?["enabled"] ?? false)) && ((bool?)m?["monitor"]?["enabled"] ?? false); // v2.5.0: "hear myself" also works for the voice changer alone monitorVol = (float)Math.Clamp((double?)m?["monitor"]?["volume"] ?? 0.8, 0, 1.5);
+            monitorOn = (chainOn || ((bool?)m?["changer"]?["enabled"] ?? false)) && ((bool?)m?["monitor"]?["enabled"] ?? false); // v2.5.0: "hear myself" also works for the voice changer alone
+            monitorVol = (float)Math.Clamp((double?)m?["monitor"]?["volume"] ?? 0.8, 0, 1.5);
             monitor = Swap(monitor, monitorOn ? ((string)m?["monitor"]?["deviceId"] ?? personalId ?? DefaultRender()) : null, "mic monitor");
             comp.Enabled = (bool?)m?["comp"]?["enabled"] ?? false; comp.ThresholdDb = (double?)m?["comp"]?["thresholdDb"] ?? -18;
             comp.Ratio = (double?)m?["comp"]?["ratio"] ?? 3; comp.MakeupDb = (double?)m?["comp"]?["makeupDb"] ?? 4;
@@ -317,15 +320,45 @@ public sealed class Engine
         var st = new float[avail * 2];
         for (int i = 0; i < avail; i++) { st[i * 2] = micMono[i]; st[i * 2 + 1] = micMono[i]; }
         micRing.Write(st, st.Length);
-        micOut?.Write(st, st.Length);
+        if (micOut != null)
+        {
+            if (bus.Enabled)
+            {   // v2.6.0 B1 bus: extra inputs routed to the virtual mic + B1 processing
+                try { var b1 = (float[])st.Clone(); var ex = new float[b1.Length]; int got = bus.B1Ring.Count >= b1.Length ? bus.B1Ring.Read(ex, b1.Length, 9600) : 0; if (got > 0) for (int i = 0; i < b1.Length; i++) b1[i] += ex[i]; bus.ApplyFx("B1", b1, b1.Length); micOut.Write(b1, b1.Length); }
+                catch (Exception e) { Err("B1", e); micOut.Write(st, st.Length); }
+            }
+            else micOut.Write(st, st.Length);
+        }
         if (monitor != null) { if (monitorVol != 1) for (int i = 0; i < st.Length; i++) st[i] *= monitorVol; monitor.Write(st, st.Length); }
+    }
+
+    // v2.6.0 calibration recording: raw mic + exactly what the voice changer receives, local files only
+    WaveFileWriter calRaw, calIn; long calFrames, calMax; float calPeak; readonly object calL = new();
+    public void CalStart(string inPath, string rawPath, double maxSec)
+    {
+        lock (calL) { CalStopInner(); Directory.CreateDirectory(Path.GetDirectoryName(inPath)); calIn = new WaveFileWriter(inPath, WaveFormat.CreateIeeeFloatWaveFormat(48000, 1)); calRaw = new WaveFileWriter(rawPath, WaveFormat.CreateIeeeFloatWaveFormat(48000, 1)); calFrames = 0; calPeak = 0; calMax = (long)(Math.Clamp(maxSec, 5, 60) * 48000); }
+        lock (l) { if (mic == null) throw new Exception("no microphone is open"); }
+    }
+    void CalStopInner() { try { calIn?.Dispose(); } catch { } try { calRaw?.Dispose(); } catch { } calIn = null; calRaw = null; }
+    public JsonObject CalStop() { lock (calL) { var r = new JsonObject { ["seconds"] = Math.Round(calFrames / 48000.0, 2), ["peakDb"] = Math.Round(20 * Math.Log10(calPeak + 1e-9), 1) }; CalStopInner(); return r; } }
+    public JsonObject CalState() { lock (calL) return new JsonObject { ["recording"] = calIn != null, ["seconds"] = Math.Round(calFrames / 48000.0, 2), ["peak"] = Math.Round(calPeak, 3) }; }
+    void CalWrite(WaveFileWriter w, float[] x, int n, bool count)
+    {
+        lock (calL)
+        {
+            if (w == null || calIn == null) return;
+            w.WriteSamples(x, 0, n);
+            if (count) { for (int i = 0; i < n; i++) { var a = Math.Abs(x[i]); if (a > calPeak) calPeak = a; } calFrames += n; if (calFrames >= calMax) CalStopInner(); }
+        }
     }
 
     void MicChain(float[] mono, int n)
     {
         bool on = chainOn && !bypass;
+        if (calIn != null) CalWrite(calRaw, mono, n, false);
         // HPF -> echo cancel -> DeepFilterNet/RNNoise, then the voice gate (much easier once the noise floor is gone)
         if (on) { try { vc.Process(mono, n); } catch (Exception e) { Err("voice chain", e); } gate.Process(mono, n); }
+        if (calIn != null) CalWrite(calIn, mono, n, true);
         // v2.5.0: voice changer works on the cleaned-up voice, before EQ/compressor shape the final sound
         if (changerOn) { try { changer.Process(mono, n); } catch (Exception e) { Err("voice changer", e); } }
         if (on) { micEq.Process(mono, n, 1); comp.Process(mono, n); }
@@ -398,6 +431,7 @@ public sealed class Engine
                 {
                     Array.Clear(pBus, 0, n); Array.Clear(sBus, 0, n); Array.Clear(cBus, 0, n); Array.Clear(rBus, 0, n);
                     foreach (var hb in hearBus.Values) Array.Clear(hb, 0, n);
+                    bus.Begin(n);
                     bool chatMixApplied = false; long nowTicks = DateTime.UtcNow.Ticks;
                     foreach (var ch in chans.Values)
                     {
@@ -417,6 +451,8 @@ public sealed class Engine
                         // stream copy without the left-out apps (voice chat on the mic cable), EQ'd on its own filter state
                         if (excluded) { for (int i = 0; i < n; i++) exBuf[i] = chBuf[i] - exBuf[i]; ch.EqS.Process(exBuf, frames, 2); }
                         ch.Eq.Process(chBuf, frames, 2);
+                        bus.ChannelFx(ch.Id, chBuf, frames);
+                        bus.AddStrip("ch:" + ch.Id, chBuf, n, ch.Muted ? 0 : ch.Vol);
                         float pk = 0; for (int i = 0; i < n; i++) { var a = Math.Abs(chBuf[i]); if (a > pk) pk = a; }
                         ch.Peak = Math.Max(ch.Peak * 0.7f, pk * (ch.Muted ? 0 : ch.Vol));
                         if (ch.Mode == "cable" && !ch.Muted) Add(pBus, chBuf, n, ch.Vol);
@@ -455,10 +491,13 @@ public sealed class Engine
                         micRing.Read(micBuf, n, 4800);
                         if (streamMode && micInStream) Add(sBus, micBuf, n, 1);
                         if (micInRec) Add(rBus, micBuf, n, 1);
+                        bus.AddStrip("mic", micBuf, n, 1);
                     }
-                    if (personal != null) { Clip(pBus, n); personal.Write(pBus, n); }
+                    bus.Inputs(n, personal != null ? pBus : null, sBus, stream != null);
+                    if (personal != null) { bus.ApplyFx("A1", pBus, n); Clip(pBus, n); personal.Write(pBus, n); }
                     foreach (var (hid, hs) in hearSinks) { var hb = hearBus[hid]; hearLim[hid].Process(hb, n); Clip(hb, n); hs.Write(hb, n); }
-                    if (stream != null) { if (streamGain != 1) for (int i = 0; i < n; i++) sBus[i] *= streamGain; Clip(sBus, n); stream.Write(sBus, n); }
+                    if (stream != null) { if (streamGain != 1) for (int i = 0; i < n; i++) sBus[i] *= streamGain; bus.ApplyFx("B2", sBus, n); Clip(sBus, n); stream.Write(sBus, n); }
+                    bus.End(n);
                     if (clipOn)
                     {
                         Clip(cBus, n); float dk = 0, mk = 0;
@@ -496,6 +535,7 @@ public sealed class Engine
         // v2.3.1: what actually went into the virtual-mic / stream cables
         var mo = micOut; var so = stream; r["micOutPk"] = mo != null ? Math.Round(mo.Peak, 3) : -1; r["streamPk"] = so != null ? Math.Round(so.Peak, 3) : -1; if (mo != null) mo.Peak *= 0.5f; if (so != null) so.Peak *= 0.5f;
         r["changer"] = changer.Status();
+        lock (l) r["bus"] = bus.Levels();
         r["ns"] = new JsonObject { ["engine"] = vc.NsActive, ["cutDb"] = Math.Round(vc.NsCutDb, 1), ["lsnr"] = Math.Round(vc.Lsnr, 1), ["cpuMs"] = Math.Round(vc.CpuMs, 2), ["error"] = vc.NsError,
             ["aecCutDb"] = Math.Round(vc.AecCutDb, 1), ["refActive"] = vc.RefActive, ["nearTalk"] = vc.NearTalk, ["aecDelayMs"] = Math.Round(vc.AecDelayMs), ["aec"] = vc.AecOn && aecRef != null, ["bypass"] = bypass };
         MicPeakPre *= 0.5f; MicPeakPost *= 0.5f;
@@ -578,7 +618,7 @@ public sealed class Engine
             foreach (var hs in hearSinks.Values) hs?.Dispose(); hearSinks.Clear(); hearBus.Clear(); hearLim.Clear();
             try { changer.Configure(new VcConfig()); } catch { } changerOn = false;
             monitor?.Dispose(); monitor = null; try { aecRef?.Dispose(); } catch { } aecRef = null; aecRefId = null; vc.Reference = null;
-            chans.Clear(); streamMode = false;
+            chans.Clear(); streamMode = false; bus.Dispose();
             try { sysLoop?.Dispose(); } catch { } sysLoop = null; clipSysWant = null;
         }
     }

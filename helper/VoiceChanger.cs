@@ -15,7 +15,10 @@ public sealed class VcConfig
     public bool Enabled; public string Engine = "ai"; public bool Bypass;
     public string CvPath, F0Path, VoicePath, SpkPath; public int Sid, Sid2 = -1; public double Blend;
     public double Pitch; public bool AutoPitch = true; public double TargetHz = 210; public double Formant; // formant: percent (DSP engine)
-    public string Quality = "balanced", Device = "gpu", F0Method = "auto"; public double Expressive = 1.0, EnvMix = 0.35;
+    public string Quality = "balanced", Device = "gpu", F0Method = "auto"; public double Expressive = 0.5, EnvMix = 0.7;
+    // v2.6.0: natural sounds (breaths / sniffles / laughs) + calibration from the user's own voice
+    public bool Natural = true; public double NatBlend = 0.75, NatFormant = double.NaN;
+    public double UserHz, RangeScale = 1.0, Adapt, GateDb = double.NaN; public string AdaptPath;
     public static VcConfig From(JsonNode v)
     {
         var c = new VcConfig();
@@ -26,10 +29,15 @@ public sealed class VcConfig
         c.Pitch = Math.Clamp((double?)v["pitch"] ?? 0, -24, 24); c.AutoPitch = (bool?)v["autoPitch"] ?? true; c.TargetHz = Math.Clamp((double?)v["targetHz"] ?? 210, 60, 600);
         c.Formant = Math.Clamp((double?)v["formant"] ?? 0, -40, 60);
         c.Quality = (string)v["quality"] ?? "balanced"; c.Device = (string)v["device"] ?? "gpu"; c.F0Method = (string)v["f0"] ?? "auto";
-        c.Expressive = Math.Clamp((double?)v["expressive"] ?? 1.0, 0, 1.5); c.EnvMix = Math.Clamp((double?)v["envMix"] ?? 0.35, 0, 1);
+        c.Expressive = Math.Clamp((double?)v["expressive"] ?? 0.5, 0, 1.5); c.EnvMix = Math.Clamp((double?)v["envMix"] ?? 0.7, 0, 1);
+        c.Natural = (bool?)v["natural"] ?? true; c.NatBlend = Math.Clamp((double?)v["natBlend"] ?? 0.75, 0, 1);
+        c.NatFormant = v["natFormant"] is JsonValue nfv && nfv.TryGetValue<double>(out var nf) ? Math.Clamp(nf, -30, 40) : double.NaN;
+        c.UserHz = Math.Clamp((double?)v["userHz"] ?? 0, 0, 600); c.RangeScale = Math.Clamp((double?)v["rangeScale"] ?? 1, 0.5, 1.6);
+        c.Adapt = Math.Clamp((double?)v["adapt"] ?? 0, 0, 1); c.AdaptPath = (string)v["adaptPath"];
+        c.GateDb = v["gateDb"] is JsonValue gv && gv.TryGetValue<double>(out var gd) ? Math.Clamp(gd, -90, -10) : double.NaN;
         return c;
     }
-    public string ModelKey => $"{CvPath}|{F0Path}|{VoicePath}|{Quality}|{Device}|{F0Method}";
+    public string ModelKey => $"{CvPath}|{F0Path}|{VoicePath}|{Quality}|{Device}|{F0Method}|{AdaptPath}";
 }
 
 public sealed class VoiceChanger : IDisposable
@@ -39,7 +47,7 @@ public sealed class VoiceChanger : IDisposable
     public bool Ready => ai?.Ready == true;
     VcConfig cfg = new(); AiVoice ai; PsolaVoice dsp; string loadedKey; Task loading;
     readonly object l = new(); float bypassGain = 0; // 0 = wet, 1 = dry
-    float[] dry = new float[4096];
+    float[] dry = new float[4096]; readonly NoiseGate inGate = new() { HoldMs = 200, ReleaseMs = 150, RangeDb = -40 };
 
     public void Configure(VcConfig c)
     {
@@ -75,6 +83,8 @@ public sealed class VoiceChanger : IDisposable
         if (!c.Enabled || (a == null && d == null)) return; // pass-through while loading or on error, so the mic never goes silent
         if (dry.Length < n) dry = new float[n];
         Array.Copy(mono, dry, n);
+        // v2.6.0: calibrated input gate, so room noise between words is not turned into a voice
+        inGate.Enabled = !double.IsNaN(c.GateDb); if (inGate.Enabled) { inGate.ThresholdDb = c.GateDb; inGate.Process(mono, n); }
         if (a != null)
         {
             a.Set(c); a.Process(mono, n);
@@ -94,6 +104,7 @@ public sealed class VoiceChanger : IDisposable
         ["state"] = State, ["error"] = Error, ["provider"] = Provider, ["f0"] = F0Engine, ["inferMs"] = Math.Round(InferMs, 1), ["inferP95"] = Math.Round(InferP95, 1),
         ["latencyMs"] = Math.Round(LatencyMs), ["dropouts"] = Dropouts, ["inHz"] = Math.Round(InHz), ["outHz"] = Math.Round(OutHz), ["shift"] = Math.Round(ShiftSemis, 1),
         ["bypass"] = cfg.Bypass, ["engine"] = cfg.Engine,
+        ["natural"] = ai != null && cfg.Natural ? new JsonObject { ["now"] = ai.Nat.Now, ["laughs"] = ai.Nat.Laughs, ["noises"] = ai.Nat.Noises } : null,
     };
 
     public void Dispose() { lock (l) { ai?.Dispose(); ai = null; dsp = null; } }
@@ -118,7 +129,7 @@ public sealed class VoiceChanger : IDisposable
         }
         Wav.Write(outWav, y, 48000);
         var a2 = vc.ai; string stages = a2 != null ? $" f0Ms={a2.MsF0:F1} cvMs={a2.MsCv:F1} genMs={a2.MsGen:F1}" : "";
-        var r = $"provider={vc.Provider} f0={vc.F0Engine}{stages} load={loadS:F1}s inferMs={vc.InferMs:F1} p95={vc.InferP95:F1} latencyMs={vc.LatencyMs:F0} dropouts={vc.Dropouts} inHz={vc.InHz:F0} outHz={vc.OutHz:F0} shift={vc.ShiftSemis:F1}";
+        var r = $"provider={vc.Provider} f0={vc.F0Engine}{stages} load={loadS:F1}s inferMs={vc.InferMs:F1} p95={vc.InferP95:F1} latencyMs={vc.LatencyMs:F0} dropouts={vc.Dropouts} inHz={vc.InHz:F0} outHz={vc.OutHz:F0} shift={vc.ShiftSemis:F1}" + (a2 != null ? $" laughs={a2.Nat.Laughs} noises={a2.Nat.Noises}" : "");
         r = r.Replace(" dropouts=", " dropouts=") ; vc.Dispose(); return r;
     }
 }
@@ -128,7 +139,8 @@ public sealed class AiVoice : IDisposable
 {
     readonly InferenceSession cv, f0s, gen; readonly float[] spkTable; readonly int spkCount;
     public readonly string Provider, F0Name; public bool Ready = true;
-    readonly int B, X, C, S, W, T, skip; // 16 kHz samples / 10 ms frames
+    readonly int B, X, C, S, W, T, skip, R, M; // 16 kHz samples / 10 ms frames; R = look-ahead frames, M = decoder left-margin frames (v2.6.0)
+    bool v2; float[] noiseHist; readonly double[] phHist; int decLen;
     readonly float[] win16; readonly float[] f0hist; readonly float[] rndHist; bool first = true;
     readonly FloatRing inRing = new(48000 * 4), outRing = new(48000 * 4);
     readonly Rational down = new(1, 3, 7600.0 / 48000, 96); Rational up; int spf = 320; // output samples per 10 ms frame: 320 (32k voices), 400 (40k), 480 (48k)
@@ -137,27 +149,32 @@ public sealed class AiVoice : IDisposable
     VcConfig cfg; readonly Random rng = new(1234);
     int jitter; bool started; readonly Queue<double> times = new();
     public double InferMs, InferP95, LatencyMs, InHz, OutHz, Shift; public int Dropouts; public double MsF0, MsCv, MsGen;
-    double medLogF0 = Math.Log(120); bool medInit; float[] tmpIn = new float[1];
+    double medLogF0 = Math.Log(120); bool medInit; readonly double[] hist = new double[520]; double histW; float[] ratioHist; bool ratioInit; float[] tmpIn = new float[1];
     readonly Yin yin = new();
+    public readonly NatSounds Nat = new(); long consumed; float[] adapt; // v2.6.0
+    public string NatNow => Nat.Now;
 
-    public AiVoice(VcConfig c)
+    readonly Dictionary<string, (InferenceSession s, bool dml)> cache; // calibration shares loaded models between candidate voices
+    public AiVoice(VcConfig c, Dictionary<string, (InferenceSession s, bool dml)> cache = null)
     {
-        cfg = c;
+        cfg = c; this.cache = cache;
         foreach (var p in new[] { c.CvPath, c.VoicePath }) if (string.IsNullOrEmpty(p) || !File.Exists(p)) throw new Exception("voice model file missing: " + Path.GetFileName(p ?? "(none)"));
-        (B, X, C, S) = c.Quality switch { "fast" => (960, 16000, 480, 160), "quality" => (3200, 24000, 960, 320), _ => (1600, 16000, 640, 160) };
-        var ov = Environment.GetEnvironmentVariable("BSP_VC_PARAMS"); // experiments: B,X,C,S in 16 kHz samples
-        if (!string.IsNullOrEmpty(ov)) { var q = ov.Split(',').Select(int.Parse).ToArray(); (B, X, C, S) = (q[0], q[1], q[2], q[3]); }
-        W = X + C + S + B; T = W / 160; skip = X / 160;
-        win16 = new float[W]; f0hist = new float[T]; rndHist = new float[192 * T];
+        // v2.6.0: every mode now keeps a look-ahead (R frames) so the newest audio is never decoded at the window edge, and
+        // decodes M extra frames on the left so the vocoder has context. Both were the main cause of the "robotic" sound.
+        (B, X, C, S, R, M) = Presets(c.Quality);
+        var ov = Environment.GetEnvironmentVariable("BSP_VC_PARAMS"); // experiments: B,X,C,S[,R,M] in 16 kHz samples / frames
+        if (!string.IsNullOrEmpty(ov)) { var q = ov.Split(',').Select(int.Parse).ToArray(); (B, X, C, S) = (q[0], q[1], q[2], q[3]); if (q.Length > 5) { R = q[4]; M = q[5]; } }
+        W = X + C + S + B + R * 160; T = W / 160; skip = X / 160 - M;
+        win16 = new float[W]; f0hist = new float[T]; rndHist = new float[192 * T]; phHist = new double[T]; ratioHist = new float[T];
         for (int i = 0; i < rndHist.Length; i++) rndHist[i] = Gauss();
         string prov = "CPU";
-        int rFrames = 32 * (((C + S + B + 160 * 32) / 160 + 1 - 1) / 32 + 1);
+        int rFrames = 32 * (((C + S + B + R * 160 + 160 * 32) / 160 + 1 - 1) / 32 + 1);
         SessionOptions Opt(bool gpu, string p)
         {
             var o = new SessionOptions { GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL, LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR };
             if (Environment.GetEnvironmentVariable("BSP_VC_STATIC") != "0")
             { // every block has the same shape: tell ORT so it can plan static kernels (big win on DirectML)
-                if (p == c.VoicePath) o.AddFreeDimensionOverrideByName("T", T);
+                if (p == c.VoicePath) { o.AddFreeDimensionOverrideByName("T", T); if (decLen > 0) o.AddFreeDimensionOverrideByName("L", decLen); }
                 if (p == c.CvPath) o.AddFreeDimensionOverrideByName("N", W);
                 if (p == c.F0Path) o.AddFreeDimensionOverrideByName("time", rFrames);
             }
@@ -169,11 +186,23 @@ public sealed class AiVoice : IDisposable
         var gpuOnly = Environment.GetEnvironmentVariable("BSP_VC_GPU"); // diagnostics: comma list of cv,f0,gen to put on the GPU
         InferenceSession Load(string p)
         {
+            if (cache != null)
+            {
+                string key = $"{p}|{wantGpu}|{T}|{W}|{rFrames}";
+                if (cache.TryGetValue(key, out var hit)) { if (hit.dml) prov = "DirectML"; return hit.s; }
+                var s0 = Load0(p); cache[key] = (s0, prov == "DirectML"); return s0;
+            }
+            return Load0(p);
+        }
+        InferenceSession Load0(string p)
+        {
             if (wantGpu && gpuOnly != null && !gpuOnly.Split(',').Any(k => (k == "cv" && p == c.CvPath) || (k == "f0" && p == c.F0Path) || (k == "gen" && p == c.VoicePath))) return new InferenceSession(p, Opt(false, p));
             if (wantGpu) { try { var s = new InferenceSession(p, Opt(true, p)); prov = "DirectML"; return s; } catch { wantGpu = false; } }
             return new InferenceSession(p, Opt(false, p));
         }
+        decLen = (T - skip) * SpfHint(c.VoicePath);
         gen = Load(c.VoicePath); cv = Load(c.CvPath);
+        v2 = gen.InputMetadata.ContainsKey("phase0");
         bool useRmvpe = c.F0Method != "yin" && !string.IsNullOrEmpty(c.F0Path) && File.Exists(c.F0Path) && (c.F0Method == "rmvpe" || prov == "DirectML");
         if (useRmvpe) f0s = Load(c.F0Path);
         F0Name = f0s != null ? "RMVPE" : "YIN";
@@ -182,34 +211,56 @@ public sealed class AiVoice : IDisposable
         if (!string.IsNullOrEmpty(c.SpkPath) && File.Exists(c.SpkPath)) { var b = File.ReadAllBytes(c.SpkPath); spkTable = new float[b.Length / 4]; Buffer.BlockCopy(b, 0, spkTable, 0, b.Length); }
         else spkTable = new float[256];
         spkCount = spkTable.Length / 256;
+        if (!string.IsNullOrEmpty(c.AdaptPath) && File.Exists(c.AdaptPath)) { var b = File.ReadAllBytes(c.AdaptPath); if (b.Length == 768 * 4) { adapt = new float[768]; Buffer.BlockCopy(b, 0, adapt, 0, b.Length); } }
+        Nat.Configure(c);
         // warm up (DirectML compiles kernels for the fixed window shape on first run)
         spf = ProbeSpf();
         up = spf == 320 ? new Rational(3, 2, 15000.0 / 96000, 144) : spf == 400 ? new Rational(6, 5, 18000.0 / 240000, 360) : new Rational(1, 1, 0.49, 3);
         sola = new float[C * spf / 160]; fadeIn = new float[sola.Length];
+        decLen = (T - skip) * spf; noiseHist = new float[decLen]; for (int i = 0; i < decLen; i++) noiseHist[i] = Gauss();
         for (int i = 0; i < fadeIn.Length; i++) { double s = Math.Sin(0.5 * Math.PI * i / fadeIn.Length); fadeIn[i] = (float)(s * s); }
-        RunBlock(); RunBlock(); var t0 = Stopwatch.StartNew(); for (int i = 0; i < 3; i++) RunBlock(); first = true; // first runs compile kernels; time the steady state Array.Clear(win16); Array.Clear(f0hist); haveSola = false;
+        RunBlock(); RunBlock(); var t0 = Stopwatch.StartNew(); for (int i = 0; i < 3; i++) RunBlock(); first = true; // first runs compile kernels; time the steady state
+        Array.Clear(win16); Array.Clear(f0hist); haveSola = false; medInit = false; Shift = 0; Array.Clear(hist); histW = 0; ratioInit = false; Array.Clear(phHist);
         double warm = t0.Elapsed.TotalMilliseconds / 3;
         jitter = (int)Math.Clamp(warm * 1.2 * 48 + 240, 960, 48 * 150); // grows by 10 ms on any dropout
         worker = new Thread(Loop) { IsBackground = true, Priority = ThreadPriority.AboveNormal, Name = "bsp-voice" }; worker.Start();
     }
 
+    public static (int, int, int, int, int, int) Presets(string q) => q switch
+    {   // B, X, C, S (16 kHz samples), R look-ahead frames, M left-margin frames
+        "fast" => (1280, 16000, 960, 160, 6, 16),
+        "quality" => (2400, 24000, 1600, 320, 10, 16),
+        _ => (1600, 16000, 1280, 160, 8, 16),
+    };
+    static int SpfHint(string path) { var n = Path.GetFileName(path ?? "").ToLowerInvariant(); return n.Contains("48k") ? 480 : n.Contains("40k") ? 400 : 320; }
     int ProbeSpf()
     {
         int t = T, sk = skip;
-        using var r = gen.Run(new[] {
+        foreach (int cand in new[] { decLen / (T - skip), 320, 400, 480 }.Distinct())
+        {
+            try { return ProbeSpf(t, sk, cand); } catch when (v2) { }
+        }
+        throw new Exception("could not run this voice model");
+    }
+    int ProbeSpf(int t, int sk, int cand)
+    {
+        var inputs = new List<NamedOnnxValue> {
             NamedOnnxValue.CreateFromTensor("phone", new DenseTensor<float>(new float[t * 768], new[] { 1, t, 768 })),
             NamedOnnxValue.CreateFromTensor("phone_lengths", new DenseTensor<long>(new long[] { t }, new[] { 1 })),
             NamedOnnxValue.CreateFromTensor("pitch", new DenseTensor<long>(Enumerable.Repeat(50L, t).ToArray(), new[] { 1, t })),
             NamedOnnxValue.CreateFromTensor("nsff0", new DenseTensor<float>(Enumerable.Repeat(150f, t).ToArray(), new[] { 1, t })),
             NamedOnnxValue.CreateFromTensor("spk", new DenseTensor<float>(new float[256], new[] { 1, 256 })),
             NamedOnnxValue.CreateFromTensor("rnd", new DenseTensor<float>(new float[192 * t], new[] { 1, 192, t })),
-            NamedOnnxValue.CreateFromTensor("skip_head", new DenseTensor<long>(new long[] { sk }, new[] { 1 })) });
+            NamedOnnxValue.CreateFromTensor("skip_head", new DenseTensor<long>(new long[] { sk }, new[] { 1 })) };
+        if (v2) { inputs.Add(NamedOnnxValue.CreateFromTensor("phase0", new DenseTensor<float>(new float[1], new[] { 1 }))); inputs.Add(NamedOnnxValue.CreateFromTensor("noise", new DenseTensor<float>(new float[(t - sk) * cand], new[] { 1, (t - sk) * cand }))); }
+        using var r = gen.Run(inputs);
         int n = (int)r.First().AsTensor<float>().Length / (t - sk);
         if (n != 320 && n != 400 && n != 480) throw new Exception($"unsupported voice sample rate ({n * 100} Hz)");
+        if (v2 && n != cand) throw new Exception("rate mismatch");
         return n;
     }
     float Gauss() { double u1 = 1 - rng.NextDouble(), u2 = rng.NextDouble(); return (float)(Math.Sqrt(-2 * Math.Log(u1)) * Math.Cos(2 * Math.PI * u2)); }
-    public void Set(VcConfig c) => cfg = c;
+    public void Set(VcConfig c) { cfg = c; Nat.Configure(c); }
     public void WaitIdle() { while (inRing.Count >= B * 3 || !idle.IsSet) { idle.Wait(50); Thread.Yield(); if (inRing.Count >= B * 3) kick.Set(); } }
 
     public void Process(float[] mono, int n)
@@ -220,7 +271,7 @@ public sealed class AiVoice : IDisposable
         int maxBacklog = B * 3 + jitter + 960;
         int got = outRing.Read(mono, n, maxBacklog);
         if (got < n) { Dropouts++; jitter = Math.Min(jitter + 480, 48 * 200); started = false; }
-        LatencyMs = (B + C + S) / 16.0 + jitter / 48.0 + 3;
+        LatencyMs = (B + C + S + R * 160) / 16.0 + jitter / 48.0 + 3 + Nat.ExtraMs;
     }
 
     void Loop()
@@ -233,6 +284,7 @@ public sealed class AiVoice : IDisposable
             {
                 idle.Reset();
                 inRing.Read(blk, B * 3, 48000 * 4);
+                Nat.Shift = Shift; Nat.FeedInput(blk, blk.Length); consumed += blk.Length;
                 var d16 = down.Process(blk, blk.Length);
                 Array.Copy(win16, d16.Length, win16, 0, W - d16.Length); Array.Copy(d16, 0, win16, W - d16.Length, d16.Length);
                 var sw = Stopwatch.StartNew();
@@ -240,8 +292,11 @@ public sealed class AiVoice : IDisposable
                 try { y = RunBlock(); }
                 catch (Exception) { y = new float[B * spf / 160]; }
                 var y48 = up.Process(y, y.Length);
+                // the AI block covers input [consumed - (B+C+S)*3, +B*3) (window tail minus crossfade + search), plus filter delay
+                Nat.PushAi(y48, y48.Length, consumed - (long)(B + C + S + R * 160) * 3 + AiAlign);
+                var mixed = Nat.Emit();
                 if (!started && outRing.Count == 0) { var z = new float[jitter]; outRing.Write(z, z.Length); }
-                outRing.Write(y48, y48.Length);
+                outRing.Write(mixed, mixed.Length);
                 double ms = sw.Elapsed.TotalMilliseconds;
                 lock (times) { times.Enqueue(ms); while (times.Count > 50) times.Dequeue(); InferMs = times.Average(); var s = times.OrderBy(v => v).ToArray(); InferP95 = s[(int)(s.Length * 0.95)]; }
                 idle.Set();
@@ -249,36 +304,67 @@ public sealed class AiVoice : IDisposable
         }
     }
 
+    static readonly int AiAlign = int.TryParse(Environment.GetEnvironmentVariable("BSP_VC_ALIGN"), out var al) ? al : 288;
     float[] RunBlock()
     {
         var c = cfg;
         // ----- pitch (shift history by one block, analyse the newest part) -----
         int nb = B / 160;
         Array.Copy(f0hist, nb, f0hist, 0, T - nb);
-        int R = Math.Min(W, C + S + B + 160 * 32);
+        int Rt = Math.Min(W, C + S + B + R * 160 + 160 * 32);
         int keepFrom = first ? 0 : 12; // re-estimate everything but a little context at the left edge of the tail
         var stw = Stopwatch.StartNew();
-        float[] f0tail = f0s != null ? Rmvpe(win16, W - R, R) : yin.Track(win16, W - R, R);
+        bool laugh = Nat.Laughing && c.Natural;
+        float[] f0tail = f0s != null ? Rmvpe(win16, W - Rt, Rt, laugh ? 0.02f : 0.03f) : yin.Track(win16, W - Rt, Rt);
         MsF0 = MsF0 * 0.9 + 0.1 * stw.Elapsed.TotalMilliseconds; stw.Restart();
-        int baseFrame = (W - R) / 160;
-        for (int k = keepFrom; k < f0tail.Length && baseFrame + k < T; k++) f0hist[baseFrame + k] = f0tail[k];
+        int baseFrame = (W - Rt) / 160;
+        for (int k = keepFrom; k < f0tail.Length && baseFrame + k < T; k++)
+        {
+            // v2.6.0 octave guard: a jump of ~2x (or ~0.5x) between neighbouring 10 ms frames is a tracker slip, never a voice
+            float cur = f0tail[k]; int j = baseFrame + k; float prev = j > 0 ? f0hist[j - 1] : 0;
+            if (cur > 0 && prev > 0) { float rr = cur / prev; if (rr > 1.78f && rr < 2.25f) cur *= 0.5f; else if (rr > 0.444f && rr < 0.562f) cur *= 2f; }
+            f0hist[j] = cur;
+        }
         first = false;
+        Nat.PushF0(f0hist, T, W);
         // auto pitch: running median of your voiced pitch -> shift that lands it on the voice's natural pitch
         double sumL = 0; int cnt = 0;
         for (int k = T - nb; k < T; k++) if (f0hist[k] > 0) { sumL += Math.Log(f0hist[k]); cnt++; }
-        if (cnt > 0)
+        // v2.6.0: the old version followed the last 100 ms (+-35 cents per block), which flattened your intonation and made
+        // the pitch step at every block - a big part of the "robotic" sound. Now: a decaying histogram of your pitch over the
+        // last ~15 s, its median moves at most ~3 cents per block, and the shift is attached to time so overlapping windows agree.
+        bool justInit = false;
+        if (c.UserHz > 0) { if (!medInit || Math.Abs(medLogF0 - Math.Log(c.UserHz)) > 1e-9) { medLogF0 = Math.Log(c.UserHz); justInit = !medInit; medInit = true; } } // calibrated: exact
+        else if (cnt > 0)
         {
             double m = sumL / cnt; InHz = Math.Exp(m);
-            if (!medInit) { medLogF0 = m; medInit = true; } else medLogF0 += Math.Clamp(m - medLogF0, -0.02, 0.02); // slew-limited, ~5 s to settle
+            double decay = Math.Exp(-(B / 16000.0) / 15.0); for (int i = 0; i < hist.Length; i++) hist[i] *= decay;
+            if (!laugh)
+                for (int k = T - nb; k < T; k++) if (f0hist[k] > 0)
+                {
+                    double lf = Math.Log(f0hist[k]); if (medInit && Math.Abs(lf - medLogF0) > 0.69) continue; // > 1 octave away: tracker slip / squeal
+                    int bi = (int)Math.Round(1200 * Math.Log2(f0hist[k] / 50.0) / 10); if (bi >= 0 && bi < hist.Length) { hist[bi] += 1; histW += 1; }
+                }
+            double tot = hist.Sum(), half = tot / 2, run = 0; double est = m;
+            for (int i = 0; i < hist.Length; i++) { run += hist[i]; if (run >= half && tot > 0) { est = Math.Log(50 * Math.Pow(2, i * 10 / 1200.0)); break; } }
+            if (!medInit) { double s0 = 0; int n0 = 0; for (int k = 0; k < T; k++) if (f0hist[k] > 0) { s0 += Math.Log(f0hist[k]); n0++; } medLogF0 = n0 > 0 ? s0 / n0 : m; medInit = true; justInit = true; }
+            else if (histW < 150) medLogF0 += Math.Clamp(est - medLogF0, -0.008, 0.008); // first ~1.5 s of voice: settle quicker
+            else medLogF0 += Math.Clamp(est - medLogF0, -0.002, 0.002); // then drift slowly
         }
-        double shift = c.AutoPitch && medInit ? 12 * (Math.Log(c.TargetHz) - medLogF0) / Math.Log(2) + c.Pitch * 0 : c.Pitch;
-        if (c.AutoPitch) shift += c.Pitch; // manual offset on top of auto
+        if (cnt > 0) InHz = Math.Exp(sumL / cnt);
+        double shift = c.AutoPitch && medInit ? 12 * (Math.Log(c.TargetHz) - medLogF0) / Math.Log(2) + c.Pitch : (c.AutoPitch ? c.Pitch : c.Pitch);
+        if (!c.AutoPitch) shift = c.Pitch;
         shift = Math.Clamp(shift, -24, 24); Shift = shift;
         double ratio = Math.Pow(2, shift / 12);
+        Array.Copy(ratioHist, nb, ratioHist, 0, T - nb);
+        for (int k = justInit || !ratioInit ? 0 : T - nb; k < T; k++) ratioHist[k] = (float)ratio; ratioInit = true;
         var f0 = new float[T]; var pitch = new long[T];
+        double rs = c.RangeScale;
         for (int k = 0; k < T; k++)
         {
-            f0[k] = (float)(f0hist[k] * ratio);
+            double fk = f0hist[k];
+            if (fk > 0 && rs != 1 && medInit) fk = Math.Exp(medLogF0 + (Math.Log(fk) - medLogF0) * rs); // calibrated intonation range
+            f0[k] = (float)(fk * ratioHist[k]);
             double mel = 1127 * Math.Log(1 + f0[k] / 700.0), lo = 1127 * Math.Log(1 + 50 / 700.0), hi = 1127 * Math.Log(1 + 1100 / 700.0);
             double mm = mel > 0 ? (mel - lo) * 254 / (hi - lo) + 1 : mel; pitch[k] = (long)Math.Round(Math.Clamp(mm, 1, 255));
         }
@@ -289,10 +375,15 @@ public sealed class AiVoice : IDisposable
         {
             var t = r.First().AsTensor<float>(); int t50 = t.Dimensions[1]; var src = t.ToArray(); feats = new float[T * 768];
             for (int k = 0; k < T; k++) { int j = Math.Min(k / 2, t50 - 1); Array.Copy(src, j * 768, feats, k * 768, 768); }
+            if (adapt != null && c.Adapt > 0) { float a = (float)c.Adapt; for (int k = 0; k < T; k++) for (int d = 0; d < 768; d++) feats[k * 768 + d] += a * adapt[d]; } // per-user feature offset (calibration)
         }
         MsCv = MsCv * 0.9 + 0.1 * stw.Elapsed.TotalMilliseconds; stw.Restart();
         // ----- noise attached to time (keeps overlapping windows consistent) -----
         for (int ch = 0; ch < 192; ch++) { Array.Copy(rndHist, ch * T + nb, rndHist, ch * T, T - nb); for (int k = T - nb; k < T; k++) rndHist[ch * T + k] = Gauss(); }
+        // v2.6.0: the vocoder's noise and sine phase are also attached to time, so every window agrees with the previous one
+        if (noiseHist != null) { int sh = nb * spf; Array.Copy(noiseHist, sh, noiseHist, 0, decLen - sh); for (int i = decLen - sh; i < decLen; i++) noiseHist[i] = Gauss(); }
+        Array.Copy(phHist, nb, phHist, 0, T - nb);
+        float phase0 = (float)phHist[skip];
         var rnd = new float[192 * T]; float ex = (float)c.Expressive; for (int i = 0; i < rnd.Length; i++) rnd[i] = rndHist[i] * ex;
         // ----- speaker (optionally blended with a second voice) -----
         var spk = new float[256];
@@ -306,18 +397,30 @@ public sealed class AiVoice : IDisposable
             NamedOnnxValue.CreateFromTensor("nsff0", new DenseTensor<float>(f0, new[] { 1, T })),
             NamedOnnxValue.CreateFromTensor("spk", new DenseTensor<float>(spk, new[] { 1, 256 })),
             NamedOnnxValue.CreateFromTensor("rnd", new DenseTensor<float>(rnd, new[] { 1, 192, T })),
-            NamedOnnxValue.CreateFromTensor("skip_head", new DenseTensor<long>(new long[] { skip }, new[] { 1 })) }))
+            NamedOnnxValue.CreateFromTensor("skip_head", new DenseTensor<long>(new long[] { skip }, new[] { 1 })),
+            NamedOnnxValue.CreateFromTensor("phase0", new DenseTensor<float>(new[] { phase0 }, new[] { 1 })),
+            NamedOnnxValue.CreateFromTensor("noise", new DenseTensor<float>(noiseHist ?? new float[decLen], new[] { 1, decLen })) }.Take(v2 ? 9 : 7).ToList()))
             o = r.First().AsTensor<float>().ToArray();
+        { double acc = phase0; for (int k = skip; k < T; k++) { phHist[k] = acc; acc += f0[k] / 100.0; acc -= Math.Floor(acc); } }
+        if (M > 0) { var o2 = new float[Math.Max(0, o.Length - M * spf)]; Array.Copy(o, M * spf, o2, 0, o2.Length); o = o2; } // drop the left margin
         MsGen = MsGen * 0.9 + 0.1 * stw.Elapsed.TotalMilliseconds;
         // ----- loudness follows your voice (silence stays silent, dynamics preserved) -----
         int frames = Math.Min(o.Length / spf, (W - X) / 160);
         if (c.EnvMix < 1)
         {
-            var g = new float[frames + 1];
+            // v2.5.1: energies are smoothed over 50 ms (5 frames, centred) before the gain is taken. Per-10 ms gains imposed
+            // your envelope's micro-flutter on the AI voice, which was a big part of the "robotic" sound at 100% follow.
+            var g = new float[frames + 1]; var EI = new double[frames]; var EO = new double[frames];
             for (int k = 0; k < frames; k++)
             {
                 double ei = 0, eo = 0; for (int i = 0; i < 160; i++) { float v = win16[X + k * 160 + i]; ei += v * v; } for (int i = 0; i < spf; i++) { float v = o[k * spf + i]; eo += v * v; }
-                double ri = Math.Sqrt(ei / 160) + 1e-6, ro = Math.Sqrt(eo / spf) + 1e-6;
+                EI[k] = ei / 160; EO[k] = eo / spf;
+            }
+            for (int k = 0; k < frames; k++)
+            {
+                double si = 0, so = 0; int n5 = 0;
+                for (int q = Math.Max(0, k - 2); q <= Math.Min(frames - 1, k + 2); q++) { si += EI[q]; so += EO[q]; n5++; }
+                double ri = Math.Sqrt(si / n5) + 1e-6, ro = Math.Sqrt(so / n5) + 1e-6;
                 g[k] = (float)Math.Min(4.0, Math.Pow(ri / ro, 1 - c.EnvMix));
             }
             g[frames] = frames > 0 ? g[frames - 1] : 1;
@@ -384,7 +487,7 @@ public sealed class AiVoice : IDisposable
         return mel;
     }
     static readonly double[] CentsMap = Enumerable.Range(0, 368).Select(i => i < 4 || i >= 364 ? 0.0 : 20 * (i - 4) + 1997.3794084376191).ToArray();
-    float[] Rmvpe(float[] x, int start, int len)
+    float[] Rmvpe(float[] x, int start, int len, float thr = 0.03f)
     {
         var mel = LogMel(x, start, len, out int frames); int padded = mel.Length / 128;
         float[] h;
@@ -394,7 +497,7 @@ public sealed class AiVoice : IDisposable
         for (int f = 0; f < frames; f++)
         {
             int bestI = 0; float bestV = -1; for (int i = 0; i < 360; i++) { float v = h[f * 360 + i]; if (v > bestV) { bestV = v; bestI = i; } }
-            if (bestV <= 0.03f) { f0[f] = 0; continue; }
+            if (bestV <= thr) { f0[f] = 0; continue; }
             double num = 0, den = 0; int cIdx = bestI + 4;
             for (int d = -4; d <= 4; d++) { int pi = cIdx + d - 4; double sal = pi >= 0 && pi < 360 ? h[f * 360 + pi] : 0; num += sal * CentsMap[cIdx + d]; den += sal; }
             double cents = num / den; f0[f] = (float)(10 * Math.Pow(2, cents / 1200));
@@ -402,7 +505,31 @@ public sealed class AiVoice : IDisposable
         return f0;
     }
 
-    public void Dispose() { stop = true; kick.Set(); try { worker?.Join(2000); } catch { } cv?.Dispose(); f0s?.Dispose(); gen?.Dispose(); }
+    public void Dispose() { stop = true; kick.Set(); try { worker?.Join(2000); } catch { } if (cache == null) { cv?.Dispose(); f0s?.Dispose(); gen?.Dispose(); } }
+
+    // ---- v2.6.0 calibration helpers ----
+    // Runs a whole 48 kHz clip through the streaming engine (as fast as the worker allows) and returns the output, time-aligned.
+    public float[] ConvertOffline(float[] x)
+    {
+        var y = new float[x.Length + 48000]; var chunk = new float[480]; var src = new float[x.Length + 48000]; Array.Copy(x, src, x.Length);
+        for (int p = 0; p + 480 <= src.Length; p += 480) { Array.Copy(src, p, chunk, 0, 480); WaitIdle(); Process(chunk, 480); Array.Copy(chunk, 0, y, p, 480); }
+        int lag = Calib.Lag(x, y, 48000 * 6 / 10);
+        var o = new float[x.Length]; Array.Copy(y, lag, o, 0, Math.Min(x.Length, y.Length - lag)); return o;
+    }
+    // ContentVec features (768 x frames at 50 Hz) of a 16 kHz signal, in windows of the session's fixed length.
+    public float[][] Features(float[] x16)
+    {
+        var res = new List<float[]>();
+        for (int p = 0; p + W <= x16.Length || (p == 0 && x16.Length > 0); p += W)
+        {
+            var w = new float[W]; Array.Copy(x16, p, w, 0, Math.Min(W, x16.Length - p));
+            using var r = cv.Run(new[] { NamedOnnxValue.CreateFromTensor("audio", new DenseTensor<float>(w, new[] { 1, W })) });
+            var t = r.First().AsTensor<float>(); int n = t.Dimensions[1]; var a = t.ToArray();
+            for (int k = 0; k < n; k++) { var f = new float[768]; Array.Copy(a, k * 768, f, 0, 768); res.Add(f); }
+            if (p + W > x16.Length) break;
+        }
+        return res.ToArray();
+    }
 }
 
 // ---------------------------------------------------------------- YIN pitch (CPU) ----------------------------------------------------------------
@@ -445,7 +572,7 @@ public sealed class PsolaVoice
     // 48 kHz, absolute sample clock. Analysis grains (2 periods, Hann) are taken pitch-synchronously from the input and
     // re-spaced at the new period; each grain is resampled by the formant factor, which moves the vocal-tract resonances
     // independently of the pitch.
-    const int Look = 1200, MaxGh = 1000, Delay = Look + MaxGh + 48, Cap = 1 << 16, Mask = Cap - 1;
+    const int Look = 1200, MaxGh = 1000, Delay = Look + MaxGh + 48, Cap = 1 << 16, Mask = Cap - 1; public const int DelaySamples = Delay;
     readonly float[] x = new float[Cap], acc = new float[Cap], wsum = new float[Cap];
     long inEnd, ts, outPos, ma; readonly float[] f0Frames = new float[Cap / 480]; long f0Done; // one f0 per 10 ms (480 samples)
     readonly Yin yin = new(); readonly float[] dec = new float[2048];
