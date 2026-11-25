@@ -68,7 +68,39 @@ const HEAR_DUCK = 0.01;
 let engineCaptured = new Set();
 function hearChannel(id) {
   const ch = S().mixer.channels[id]; if (!ch || S().mixer.eqHear === false) return false;
-  return ch.mode !== 'cable' && !!(ch.eq && ch.eq.enabled) && helperStatus.status === 'running';
+  return ch.mode !== 'cable' && (!!(ch.eq && ch.eq.enabled) || busNeedsHear(id)) && helperStatus.status === 'running';
+}
+// ---- v2.6.0 bus mixer (Voicemeeter-style) ----
+// A1 = what you hear, A2/A3 = extra hardware outputs, B1 = the virtual mic cable, B2 = the stream mix. A1/B2 for apps and
+// A1/B1/B2 for the mic ARE the existing settings (channel mute / stream mute / Hear myself / Mic on stream), so with nothing
+// changed here every path is exactly what it was. The extra bits (pan, gate, comp, solo, A2/A3, apps -> B1, input strips,
+// bus effects) are stored in mixer.bus and only sent to the engine once something is actually used.
+const BUSES = ['A1', 'A2', 'A3', 'B1', 'B2'];
+function BUS() { const m = S().mixer; if (!m.bus) m.bus = { strips: {}, inputs: [], outs: {}, scenes: [] }; const b = m.bus; b.strips ||= {}; b.inputs ||= []; b.outs ||= {}; b.scenes ||= []; return b; }
+const bstrip = (id) => (S().mixer.bus && S().mixer.bus.strips && S().mixer.bus.strips[id]) || {};
+const dynOn = (x) => !!(x && ((x.gate && x.gate.enabled) || (x.comp && x.comp.enabled) || (x.pan && Math.abs(x.pan) > 0.001)));
+function busOutActive(o) { return !!(o && ((o.gainDb && Math.abs(o.gainDb) > 0.01) || o.mute || o.mono || (o.eq && o.eq.enabled) || (o.limiter && o.limiter.enabled) || (o.delayMs > 0))); }
+function soloActive() { const b = S().mixer.bus; if (!b) return false; return Object.values(b.strips || {}).some((x) => x && x.solo) || (b.inputs || []).some((x) => x.solo); }
+function busNeedsHear(chId) { const b = S().mixer.bus; if (!b) return false; return dynOn(b.strips && b.strips['ch:' + chId]) || busOutActive(b.outs && b.outs.A1); }
+function chEffMuted(id) { const ch = S().mixer.channels[id] || {}; const st = bstrip('ch:' + id); return !!(ch.muted || st.mute || (soloActive() && !st.solo)); }
+function chEffStreamMuted(id) { const ch = S().mixer.channels[id] || {}; return !!(ch.streamMuted || bstrip('ch:' + id).mute); }
+function busEngineConfig() {
+  const m = S().mixer; const b = m.bus; if (!b) return null;
+  const strips = []; let used = false;
+  for (const { id } of m.channelList) {
+    const st = b.strips['ch:' + id] || {}; const routes = ['A2', 'A3', 'B1'].filter((r) => st.routes && st.routes[r]);
+    if (routes.length || dynOn(st) || st.solo) used = true;
+    strips.push({ id: 'ch:' + id, kind: 'channel', pan: st.pan || 0, solo: !!st.solo, gate: st.gate || { enabled: false }, comp: st.comp || { enabled: false }, routes });
+  }
+  const ms = b.strips.mic || {}; const mr = ['A2', 'A3'].filter((r) => ms.routes && ms.routes[r]); if (mr.length) used = true;
+  strips.push({ id: 'mic', kind: 'mic', routes: mr });
+  for (const x of b.inputs) {
+    if (!x.deviceId) continue; used = true;
+    strips.push({ id: 'in:' + x.id, kind: 'input', deviceId: x.deviceId, loopback: !!x.loopback, gainDb: x.gainDb || 0, mute: !!x.mute, solo: !!x.solo, pan: x.pan || 0, eq: x.eq || { enabled: false }, gate: x.gate || { enabled: false }, comp: x.comp || { enabled: false },
+      routes: BUSES.filter((r) => x.routes && x.routes[r]) });
+  }
+  const outs = BUSES.map((id) => { const o = b.outs[id] || {}; if (busOutActive(o)) used = true; return { id, deviceId: id === 'A2' || id === 'A3' ? presentOut(o.deviceId) : null, gainDb: o.gainDb || 0, mute: !!o.mute, mono: !!o.mono, eq: o.eq || { enabled: false }, limiter: o.limiter || { enabled: false, ceilingDb: -1 }, delayMs: o.delayMs || 0 }; });
+  return used ? { enabled: true, strips, outs } : null;
 }
 function hearSession(s) { return !s.system && hearChannel(channelFor(s)) && engineCaptured.has(s.pid); }
 function normalVolume(s) {
@@ -79,10 +111,11 @@ function effective(s) {
   const id = channelFor(s);
   const ch = S().mixer.channels[id] || { volume: 1, muted: false };
   const a = appCfg(s.process) || { volume: 1, muted: false };
-  if (hearSession(s)) return { volume: Math.max(0, Math.min(1, a.volume)) * HEAR_DUCK, muted: !!(a.muted || ch.muted), restore: normalVolume(s), hear: true };
+  const chMuted = chEffMuted(id); // v2.6.0: strip mute / solo
+  if (hearSession(s)) return { volume: Math.max(0, Math.min(1, a.volume)) * HEAR_DUCK, muted: !!(a.muted || chMuted), restore: normalVolume(s), hear: true };
   // Cable channels: the engine applies channel volume/ChatMix/EQ, so the app session only carries the app's own level.
   if (ch.mode === 'cable' && ch.cableId) return { volume: Math.max(0, Math.min(1, a.volume)), muted: !!a.muted };
-  return { volume: Math.max(0, Math.min(1, a.volume * ch.volume * chatMixFactor(id))), muted: !!(a.muted || ch.muted) };
+  return { volume: Math.max(0, Math.min(1, a.volume * ch.volume * chatMixFactor(id))), muted: !!(a.muted || chMuted) };
 }
 
 async function applySession(s, force) {
@@ -526,8 +559,8 @@ function engineConfig() {
     channels: m.channelList.map(({ id }) => {
       const ch = m.channels[id];
       return {
-        id, mode: ch.mode === 'cable' && !presentOut(ch.cableId) ? 'direct' : ch.mode, cableId: presentOut(ch.cableId), volume: ch.volume * chatMixFactor(id), muted: ch.muted,
-        streamVolume: ch.streamVolume, streamMuted: ch.streamMuted, inClip: ch.inClip, inRec: ch.inRec, eq: ch.eq,
+        id, mode: ch.mode === 'cable' && !presentOut(ch.cableId) ? 'direct' : ch.mode, cableId: presentOut(ch.cableId), volume: ch.volume * chatMixFactor(id), muted: chEffMuted(id),
+        streamVolume: ch.streamVolume, streamMuted: chEffStreamMuted(id), inClip: ch.inClip, inRec: ch.inRec, eq: ch.eq,
         hear: hearChannel(id), comp: hearChannel(id) ? 1 / HEAR_DUCK : 1, hearOut: presentOut(ch.output) || null,
         pids: sessions.filter((s) => !s.system && channelFor(s) === id).map((s) => s.pid),
       };
@@ -535,12 +568,13 @@ function engineConfig() {
     mic: {
       deviceId: micId, meter: m.mic.meter, chain: mc.enabled, outId: micOutEffective(), gate: mc.gate, ns: { ...mc.ns, modelPath: dfModelPath() }, clearcast: mc.clearcast, comp: mc.comp, eq: mc.eq,
       hpf: mc.hpf, aec: { ...mc.aec, refId: mc.aec && presentOut(mc.aec.refId) ? mc.aec.refId : aecRefDefault() }, bypass: !!mc.bypass, monitor: mc.monitor,
-      gainDb: mc.gainDb, muted: false, inStream: micCableMode() ? false : mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
+      gainDb: mc.gainDb, muted: false, toCable: !(m.bus && m.bus.micToCable === false), inStream: micCableMode() ? false : mc.inStream, inClip: c.includeMic, inRec: r.includeMic,
       changer: vcEngineConfig(), // v2.5.0
     },
     voice: { enabled: !!(c.enabled && c.voice.enabled), phrase: c.voice.phrase || 'clip it', modelPath: voiceModelPath() },
     clip: { enabled: !!c.enabled, bufferSeconds: Math.max(30, (c.seconds || 30) + 5), source: c.audioSource || 'auto', systemDevice: c.systemDevice || null },
     record: { active: !!(media && media.rec) },
+    bus: busEngineConfig(), // v2.6.0; null = untouched
   };
 }
 function dfModelPath() {
@@ -581,6 +615,91 @@ async function patchChannel(ch, patch) {
   return { ok: true };
 }
 ipcMain.handle('mixer:get', () => { pushMixer(); return true; });
+// ---- v2.6.0 bus mixer IPC ----
+function busState() {
+  const m = S().mixer; const mc = S().micChain; const b = BUS(); const outs = (snapshot && snapshot.outputs) || []; const ins = (snapshot && snapshot.inputs) || [];
+  const nm = (id) => (outs.find((o) => o.id === id) || {}).name || '';
+  const strips = m.channelList.map(({ id, label, icon }) => {
+    const ch = m.channels[id]; const st = b.strips['ch:' + id] || {};
+    return { id: 'ch:' + id, ch: id, kind: 'channel', label, icon, volume: ch.volume, muted: !!st.mute, solo: !!st.solo, pan: st.pan || 0, gate: st.gate || { enabled: false, thresholdDb: -50 }, comp: st.comp || { enabled: false, thresholdDb: -18, ratio: 3, makeupDb: 0 }, eq: ch.eq,
+      routes: { A1: !ch.muted, A2: !!(st.routes && st.routes.A2), A3: !!(st.routes && st.routes.A3), B1: !!(st.routes && st.routes.B1), B2: !!m.streamMode && !ch.streamMuted }, streamMode: !!m.streamMode, hear: hearChannel(id) };
+  });
+  const ms = b.strips.mic || {};
+  const mic = { id: 'mic', kind: 'mic', label: 'Mic', name: m.mic && m.mic.name, gainDb: mc.gainDb || 0, gate: mc.gate, comp: mc.comp, eq: mc.eq, chain: !!mc.enabled,
+    routes: { A1: !!(mc.monitor && mc.monitor.enabled), A2: !!(ms.routes && ms.routes.A2), A3: !!(ms.routes && ms.routes.A3), B1: b.micToCable !== false, B2: !!(m.streamMode && mc.inStream && !micCableMode()) || micCableMode() } };
+  const inputs = b.inputs.map((x) => ({ ...x, id: 'in:' + x.id, raw: x.id, kind: 'input', name: (x.loopback ? nm(x.deviceId) : (ins.find((i) => i.id === x.deviceId) || {}).name) || 'Not connected', routes: Object.fromEntries(BUSES.map((r) => [r, !!(x.routes && x.routes[r])])) }));
+  const dev = { A1: m.personalOut || null, A2: (b.outs.A2 || {}).deviceId || null, A3: (b.outs.A3 || {}).deviceId || null, B1: presentOut(mc.outId), B2: m.streamMode ? presentOut(m.streamOut) : null };
+  const busesOut = BUSES.map((id) => ({ id, deviceId: dev[id], name: dev[id] ? nm(dev[id]) : (id === 'A1' ? 'Each app\'s own output (Windows default)' : ''), ...(b.outs[id] || {}) }));
+  return { strips, mic, inputs, buses: busesOut, scenes: b.scenes.map(({ id, name, at }) => ({ id, name, at })), solo: soloActive(), active: !!busEngineConfig(),
+    devices: { outputs: outs.filter((o) => !CABLE_RX.test(o.name) || true).map((o) => ({ id: o.id, name: o.name })), inputs: ins.map((i) => ({ id: i.id, name: i.name })) } };
+}
+async function busCommit(sessionsToo = true) {
+  store.saveSoon(); clearTimeout(engineTimer); await helper.call('engineConfig', { config: engineConfig() });
+  if (sessionsToo) for (const s of visibleSessions()) applySession(s).catch(() => {});
+  pushMixer(); const st = busState(); send('bus:state', st); return st;
+}
+ipcMain.handle('bus:get', () => busState());
+ipcMain.handle('bus:route', async (_e, stripId, busId, on) => {
+  const m = S().mixer; const mc = S().micChain; const b = BUS();
+  if (stripId.startsWith('ch:')) {
+    const id = stripId.slice(3); const ch = m.channels[id]; if (!ch) return busState();
+    if (busId === 'A1') ch.muted = !on;
+    else if (busId === 'B2') { ch.streamMuted = !on; if (on && !m.streamMode) return { ...busState(), note: 'Turn on streaming (Mixer → Stream audio) to use B2.' }; }
+    else { const st = (b.strips[stripId] ||= {}); st.routes = { ...(st.routes || {}), [busId]: !!on }; }
+  } else if (stripId === 'mic') {
+    if (busId === 'A1') mc.monitor = { ...(mc.monitor || { volume: 0.8 }), enabled: !!on };
+    else if (busId === 'B1') b.micToCable = !!on;
+    else if (busId === 'B2') { if (micCableMode()) return { ...busState(), note: 'The mic and streamed apps share Hi-Fi Cable in this setup, so the mic is always on the stream.' }; mc.inStream = !!on; }
+    else { const st = (b.strips.mic ||= {}); st.routes = { ...(st.routes || {}), [busId]: !!on }; }
+    syncMedia && syncMedia();
+  } else if (stripId.startsWith('in:')) { const x = b.inputs.find((i) => 'in:' + i.id === stripId); if (x) x.routes = { ...(x.routes || {}), [busId]: !!on }; }
+  return busCommit();
+});
+ipcMain.handle('bus:strip', async (_e, stripId, patch) => {
+  const m = S().mixer; const mc = S().micChain; const b = BUS(); patch = patch || {};
+  if (stripId.startsWith('ch:')) {
+    const id = stripId.slice(3); const chp = {};
+    if ('volume' in patch) chp.volume = Math.max(0, Math.min(1, patch.volume)); if ('eq' in patch) chp.eq = patch.eq;
+    if (Object.keys(chp).length) await patchChannel(id, chp);
+    const st = (b.strips[stripId] ||= {}); for (const k of ['pan', 'solo', 'mute', 'gate', 'comp']) if (k in patch) st[k] = patch[k];
+  } else if (stripId === 'mic') {
+    if ('gainDb' in patch) mc.gainDb = Math.max(-24, Math.min(24, patch.gainDb));
+    for (const k of ['gate', 'comp', 'eq']) if (k in patch) mc[k] = { ...mc[k], ...patch[k] };
+  } else if (stripId.startsWith('in:')) { const x = b.inputs.find((i) => 'in:' + i.id === stripId); if (x) for (const k of ['label', 'gainDb', 'pan', 'solo', 'mute', 'gate', 'comp', 'eq', 'deviceId', 'loopback']) if (k in patch) x[k] = patch[k]; }
+  return busCommit();
+});
+ipcMain.handle('bus:out', async (_e, busId, patch) => {
+  if (!BUSES.includes(busId)) return busState(); const b = BUS(); const o = (b.outs[busId] ||= {});
+  for (const k of ['gainDb', 'mute', 'mono', 'eq', 'limiter', 'delayMs']) if (k in (patch || {})) o[k] = patch[k];
+  if ((busId === 'A2' || busId === 'A3') && patch && 'deviceId' in patch) { if (patch.deviceId && isGuarded(patch.deviceId)) return { ...busState(), note: 'That device carries your stream / virtual mic, so it can\'t be a hardware bus.' }; o.deviceId = patch.deviceId || null; }
+  if (o.delayMs) o.delayMs = Math.max(0, Math.min(500, Number(o.delayMs) || 0));
+  return busCommit();
+});
+ipcMain.handle('bus:addInput', async (_e, opts) => {
+  const b = BUS(); const id = 'i' + Date.now().toString(36);
+  if (opts && opts.deviceId && opts.loopback && isGuarded(opts.deviceId)) return { ...busState(), note: 'Capturing your stream / mic cable as an input would loop it back into itself.' };
+  b.inputs.push({ id, label: (opts && opts.label) || `Input ${b.inputs.length + 1}`, deviceId: (opts && opts.deviceId) || null, loopback: !!(opts && opts.loopback), gainDb: 0, pan: 0, mute: false, solo: false, routes: { A1: true } });
+  return busCommit(false);
+});
+ipcMain.handle('bus:removeInput', async (_e, stripId) => { const b = BUS(); b.inputs = b.inputs.filter((i) => 'in:' + i.id !== stripId); return busCommit(); });
+// Scenes: the whole matrix plus channel levels / mutes / stream mutes and the mic routes, saved by name.
+function sceneSnapshot() {
+  const m = S().mixer; const mc = S().micChain; const b = BUS();
+  const { scenes, ...rest } = b;
+  return { bus: JSON.parse(JSON.stringify(rest)), channels: Object.fromEntries(Object.entries(m.channels).map(([k, c]) => [k, { volume: c.volume, muted: c.muted, streamMuted: c.streamMuted, streamVolume: c.streamVolume }])),
+    mic: { gainDb: mc.gainDb || 0, inStream: !!mc.inStream, monitor: !!(mc.monitor && mc.monitor.enabled) } };
+}
+ipcMain.handle('bus:sceneSave', (_e, name) => { const b = BUS(); const sc = { id: 's' + Date.now().toString(36), name: String(name || `Scene ${b.scenes.length + 1}`).slice(0, 32), at: new Date().toISOString(), data: sceneSnapshot() }; b.scenes.push(sc); store.saveSoon(); const st = busState(); send('bus:state', st); return st; });
+ipcMain.handle('bus:sceneLoad', async (_e, id) => {
+  const m = S().mixer; const mc = S().micChain; const b = BUS(); const sc = b.scenes.find((x) => x.id === id); if (!sc) return busState();
+  const d = sc.data; const scenes = b.scenes; m.bus = { ...JSON.parse(JSON.stringify(d.bus)), scenes };
+  for (const [k, c] of Object.entries(d.channels || {})) if (m.channels[k]) Object.assign(m.channels[k], c);
+  if (d.mic) { mc.gainDb = d.mic.gainDb; mc.inStream = d.mic.inStream; mc.monitor = { ...(mc.monitor || { volume: 0.8 }), enabled: !!d.mic.monitor }; }
+  return busCommit();
+});
+ipcMain.handle('bus:sceneDelete', (_e, id) => { const b = BUS(); b.scenes = b.scenes.filter((x) => x.id !== id); store.saveSoon(); const st = busState(); send('bus:state', st); return st; });
+// Back to plain routing: drops every bus-mixer extra (keeps scenes). Channel and mic settings are not touched.
+ipcMain.handle('bus:reset', async () => { const b = BUS(); S().mixer.bus = { strips: {}, inputs: [], outs: {}, scenes: b.scenes }; return busCommit(); });
 ipcMain.handle('mixer:global', async (_e, patch) => {
   Object.assign(S().mixer, patch);
   if (patch.streamMode === true && snapshot && !micCableMode()) { const m = S().mixer; const micId = presentOut(S().micChain.outId); if (!presentOut(m.streamOut) || m.streamOut === micId) { const sc = setup.findStreamCable(snapshot, micId); if (sc) { m.streamOut = sc.id; m.streamOutName = sc.name; m.streamVia = 'cable'; } else if (micId) { /* v2.4.2: only one cable -> mic + streamed apps on it */ m.streamOut = micId; m.streamOutName = (snapshot.outputs.find((o) => o.id === micId) || {}).name || ''; m.streamVia = 'mic'; } } }
@@ -878,7 +997,7 @@ const vmodels = new VoiceModels({ dir: path.join(app.getPath('userData'), 'voice
 const VC = () => S().voiceChanger;
 function vcEngineConfig() {
   const v = VC(); if (!v || !v.enabled) return { enabled: false };
-  if (v.engine === 'dsp') return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.autoPitch ? (v.pitch || 0) : v.dsp.pitch, autoPitch: !!v.autoPitch, targetHz: v.dsp.targetHz, formant: v.dsp.formant }; // auto pitch: the shift comes from the target, the slider is a fine-tune
+  if (v.engine === 'dsp') return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.autoPitch ? (v.pitch || 0) : v.dsp.pitch, autoPitch: !!v.autoPitch, targetHz: v.dsp.targetHz, formant: v.dsp.formant, ...vcPersonal(v) }; // auto pitch: the shift comes from the target, the slider is a fine-tune
   const r = vmodels.resolve(v.voice, v.custom); const p = vmodels.paths();
   if (!r || vmodels.need(v.voice, v.custom).length || !fs.existsSync(r.modelPath)) return { enabled: false }; // models not downloaded yet: mic stays untouched
   const r2 = v.blendWith ? vmodels.resolve(v.blendWith, v.custom) : null;
@@ -888,7 +1007,19 @@ function vcEngineConfig() {
     pitch: v.pitch || 0, autoPitch: !!v.autoPitch, targetHz: v.targetHz || r.targetHz, quality: v.quality || 'balanced', device: v.device || 'gpu', f0: v.f0 || 'auto',
     expressive: v.expressive ?? (r.tuned ? r.tuned.expressive : 0.5), envMix: v.envMix ?? (r.tuned ? r.tuned.envMix : 0.7),
     natural: v.natural !== false, natBlend: v.natBlend ?? 0.75,
+    ...vcPersonal(v),
   };
+}
+// v2.5.2 personal calibration: your measured speaking pitch / gate apply to every voice; intonation range, natural-sound
+// formant and the feature adaptation only to the voice (gender) they were made for.
+function vcPersonal(v) {
+  const p = v.personal; if (!p || !p.userHz) return {};
+  const o = { userHz: p.userHz }; if (p.gateDb != null) o.gateDb = p.gateDb;
+  if (p.voice === v.voice) {
+    if (p.rangeScale) o.rangeScale = p.rangeScale; if (p.natFormant != null) o.natFormant = p.natFormant;
+    if (p.adaptPath && fs.existsSync(p.adaptPath) && (p.adapt || 0) > 0) { o.adaptPath = p.adaptPath; o.adapt = p.adapt; }
+  }
+  return o;
 }
 function vcState() { const v = VC(); return { settings: v, models: vmodels.status(v.custom), hotkeyError: vcHotkeyError }; }
 let vcHotkeyError = null;
@@ -918,6 +1049,92 @@ ipcMain.handle('vc:removeCustom', (_e, id) => {
   v.custom = (v.custom || []).filter((x) => x.id !== id); if (v.voice === id) v.voice = 'lyra'; store.saveSoon(); pushEngine(); return vcState();
 });
 ipcMain.handle('vc:openFolder', () => shell.openPath(vmodels.dir));
+// ---------------- v2.5.2 "Calibrate from my voice" ----------------
+// The reading sample, previews and per-voice adaptation files live only in %APPDATA%\Blur Sounds Pro\calibration.
+const calDir = () => path.join(app.getPath('userData'), 'calibration');
+const calPresetDir = () => { const d = path.join(calDir(), 'presets'); fs.mkdirSync(d, { recursive: true }); return d; };
+let calRun = null; // { startedAt, stage, pct }
+function calState() {
+  const v = VC(); const d = calDir(); const has = (f) => fs.existsSync(path.join(d, f));
+  return { running: calRun, result: v.calibration || null, hasSample: has('sample.wav'), personal: v.personal || null, presets: v.presets || [], dir: d };
+}
+function calPush() { send('vc:calib', calState()); }
+ipcMain.handle('vc:calState', () => calState());
+ipcMain.handle('vc:calRecStart', async () => {
+  const d = calDir(); fs.mkdirSync(d, { recursive: true });
+  const r = await helper.call('vcRecStart', { path: path.join(d, 'sample.wav'), rawPath: path.join(d, 'raw.wav'), maxSec: 40 });
+  if (!r || r.ok === false) return { ok: false, error: (r && r.error) === 'no microphone is open' ? 'Your microphone isn\'t open. Pick it on the Mixer page (Mic) and try again.' : (r && r.error) || 'The audio engine isn\'t running.' };
+  return { ok: true };
+});
+ipcMain.handle('vc:calRecState', async () => { const r = await helper.call('vcRecState'); return r && r.ok !== false ? r.result : null; });
+ipcMain.handle('vc:calRecStop', async () => { const r = await helper.call('vcRecStop'); return r && r.ok !== false ? r.result : null; });
+ipcMain.handle('vc:calibrate', async () => {
+  if (calRun) return calState();
+  const v = VC(); const d = calDir(); const sample = path.join(d, 'sample.wav');
+  if (!fs.existsSync(sample)) return { ...calState(), error: 'Record a sample first.' };
+  const st = vmodels.status(v.custom); const p = vmodels.paths();
+  const voices = st.voices.filter((x) => x.ready).map((x) => { const r = vmodels.resolve(x.id, v.custom); return { key: x.id, name: x.name, gender: x.gender === 'male' ? 'M' : 'F', voicePath: r.modelPath, spkPath: r.spkPath, sid: r.sid, targetHz: r.targetHz }; });
+  calRun = { startedAt: Date.now(), stage: 'Starting', pct: 0 }; calPush();
+  const r = await helper.call('vcCalibrate', { sample, raw: path.join(d, 'raw.wav'), outDir: path.join(d, 'run'), cvPath: p.cvPath, f0Path: p.f0Path, device: v.device || 'gpu', adapt: 0, voices, tryVoices: voices.length > 0 });
+  if (!r || r.ok === false) { calRun = null; calPush(); return { ...calState(), error: (r && r.error) || 'The audio engine isn\'t running.' }; }
+  return calState();
+});
+helper.on('vcCalib', (d) => {
+  if (!d) return;
+  if (!d.done) { calRun = { ...(calRun || { startedAt: Date.now() }), stage: d.stage, pct: d.pct }; calPush(); return; }
+  calRun = null; const v = VC(); const res = d.result || {};
+  if (res.error && !res.candidates) v.calibration = { at: new Date().toISOString(), error: res.error, measure: res.measure || null };
+  else {
+    const st = vmodels.status(v.custom); const names = Object.fromEntries(st.voices.map((x) => [x.id, x.name]));
+    v.calibration = { at: new Date().toISOString(), measure: res.measure, before: res.before, recommend: res.recommend || null, error: res.error || null,
+      candidates: (res.candidates || []).map((c) => ({ ...c, name: names[c.key] || c.name })) };
+  }
+  store.saveSoon(); calPush();
+});
+function presetFromCandidate(c, name) {
+  const v = VC(); const rec = (v.calibration && v.calibration.recommend) || {}; const id = 'p' + Date.now().toString(36);
+  let adaptPath = null;
+  if (c.preset.adaptPath && fs.existsSync(c.preset.adaptPath)) { adaptPath = path.join(calPresetDir(), id + '.adapt'); fs.copyFileSync(c.preset.adaptPath, adaptPath); }
+  const r = vmodels.resolve(c.key, v.custom); const tuned = (r && r.tuned) || { expressive: 0.4, envMix: 0.7 };
+  // expressiveness: a flat reader gets a little more life, a very lively one a little less
+  const sd = v.calibration && v.calibration.measure && v.calibration.measure.stdSemis; const ex = sd ? Math.max(0.2, Math.min(1, tuned.expressive * Math.max(0.8, Math.min(1.25, 2.5 / sd)))) : tuned.expressive;
+  return { id, name: name || `My ${c.name}`, voice: c.key, voiceName: c.name, createdAt: new Date().toISOString(), score: c.score,
+    userHz: c.preset.userHz, targetHz: c.preset.targetHz, shift: c.preset.shift, rangeScale: c.preset.rangeScale, natFormant: c.preset.natFormant, gateDb: c.preset.gateDb ?? null,
+    adaptPath, adapt: adaptPath ? (c.preset.adapt ?? 0.5) : 0, expressive: Math.round(ex * 100) / 100, envMix: tuned.envMix,
+    quality: rec.engine === 'dsp' ? 'quality' : (rec.quality || 'balanced'), engine: rec.engine === 'dsp' ? 'dsp' : 'ai' };
+}
+function applyPreset(p) {
+  const patch = { voice: p.voice, engine: 'ai', autoPitch: true, pitch: 0, targetHz: p.targetHz, expressive: p.expressive, envMix: p.envMix, quality: p.quality === 'dsp' ? 'quality' : p.quality, blendWith: null, blend: 0,
+    personal: { presetId: p.id, voice: p.voice, userHz: p.userHz, rangeScale: p.rangeScale, natFormant: p.natFormant, gateDb: p.gateDb, adaptPath: p.adaptPath, adapt: p.adapt } };
+  if (p.engine === 'dsp') { patch.engine = 'dsp'; patch.dsp = { pitch: 0, targetHz: p.targetHz, formant: Math.round(p.natFormant ?? (p.targetHz > 160 ? 17 : -14)) }; }
+  return vcPatch(patch);
+}
+ipcMain.handle('vc:presetSave', (_e, { key, name, apply }) => {
+  const v = VC(); const c = v.calibration && (v.calibration.candidates || []).find((x) => x.key === key); if (!c) return { ...calState(), error: 'Calibrate first.' };
+  const p = presetFromCandidate(c, name && String(name).slice(0, 40)); v.presets = (v.presets || []).concat([p]); store.saveSoon();
+  if (apply) applyPreset(p); calPush(); return calState();
+});
+ipcMain.handle('vc:presetApply', (_e, id) => { const p = (VC().presets || []).find((x) => x.id === id); if (p) applyPreset(p); calPush(); return calState(); });
+ipcMain.handle('vc:presetRename', (_e, id, name) => { const p = (VC().presets || []).find((x) => x.id === id); if (p && name) { p.name = String(name).slice(0, 40); store.saveSoon(); } calPush(); return calState(); });
+ipcMain.handle('vc:presetDelete', (_e, id) => {
+  const v = VC(); const p = (v.presets || []).find((x) => x.id === id);
+  if (p && p.adaptPath) { try { fs.unlinkSync(p.adaptPath); } catch {} }
+  v.presets = (v.presets || []).filter((x) => x.id !== id);
+  if (v.personal && v.personal.presetId === id) { v.personal = null; pushEngine(); }
+  store.saveSoon(); send('vc:state', vcState()); calPush(); return calState();
+});
+ipcMain.handle('vc:personalOff', () => { VC().personal = null; store.saveSoon(); pushEngine(); send('vc:state', vcState()); calPush(); return calState(); });
+// Delete the recording (sample, raw take and previews). Presets keep working: they only hold numbers and a small averaged
+// feature file, never audio. { all: true } also removes every personal preset.
+ipcMain.handle('vc:calDelete', (_e, opts) => {
+  const v = VC(); const d = calDir();
+  for (const f of ['sample.wav', 'raw.wav']) { try { fs.unlinkSync(path.join(d, f)); } catch {} }
+  try { fs.rmSync(path.join(d, 'run'), { recursive: true, force: true }); } catch {}
+  if (v.calibration) v.calibration = { at: v.calibration.at, measure: v.calibration.measure, deleted: true };
+  if (opts && opts.all) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} v.presets = []; v.personal = null; v.calibration = null; pushEngine(); }
+  store.saveSoon(); send('vc:state', vcState()); calPush(); return calState();
+});
+ipcMain.handle('vc:calOpenFolder', () => { fs.mkdirSync(calDir(), { recursive: true }); return shell.openPath(calDir()); });
 // v2.5.1: upgrade voices downloaded by 2.5.0 to the v2 (non-robotic streaming) export, quietly, once the app is up
 setTimeout(() => { const k = vmodels.outdated(); if (k.length) { helperLogLine('voice models: upgrading ' + k.join(', ')); vmodels.download(k).then(() => { pushEngine(); send('vc:state', vcState()); }).catch((e) => helperLogLine('voice model upgrade failed: ' + e.message)); } }, 15000);
 

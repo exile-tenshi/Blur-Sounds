@@ -101,7 +101,7 @@ public static class Calib
         var env = new double[db.Length]; { double e = 0, ae = Math.Exp(-1.0 / (0.005 * 48000)); int fi = 0; double mx = 0; for (int i = 0; i < x48.Length && fi < env.Length; i++) { double a = Math.Abs(x48[i]); e = a > e ? a : ae * e + (1 - ae) * a; if (e > mx) mx = e; if ((i + 1) % 480 == 0) { env[fi++] = 20 * Math.Log10(mx + 1e-9); mx = 0; } } }
         var dbx = FrameDb(x48, 480); double nfx = Pct(dbx, 10); var actx = dbx.Select(d => d > nfx + 10 && d > -62).ToArray(); m.Active = actx;
         var nEnv = env.Where((e, i) => i < actx.Length && !actx[i]).ToArray(); var sEnv = env.Where((e, i) => i < actx.Length && actx[i]).ToArray();
-        if (nEnv.Length > 20 && sEnv.Length > 20) { double n95 = Pct(nEnv, 95), s20 = Pct(sEnv, 20); double g = Math.Min(n95 + 6, s20 - 6); if (s20 - n95 > 10) m.GateDb = Math.Round(Math.Clamp(g, -80, -25), 1); }
+        if (nEnv.Length > 20 && sEnv.Length > 20) { double n95 = Pct(nEnv, 95), s20 = Pct(sEnv, 20); double g = Math.Min(Math.Min(n95 + 3, s20 - 15), -40); if (s20 - n95 > 18) m.GateDb = Math.Round(Math.Clamp(g, -80, -40), 1); } // v2.5.3: only well below your quietest words (a -30 dB gate cost 0.11 UTMOS in tests)
         // checks
         void Check(string id, bool fail, bool warn, string msg) { var lvl = fail ? "fail" : warn ? "warn" : "ok"; if (fail) m.Ok = false; m.Checks.Add(new JsonObject { ["id"] = id, ["level"] = lvl, ["text"] = msg }); }
         Check("level", m.SpeechDb < -50, m.SpeechDb < -40, m.SpeechDb < -40 ? $"Too quiet ({m.SpeechDb:F0} dBFS). Move closer or raise the mic level." : $"Level is good ({m.SpeechDb:F0} dBFS).");
@@ -126,7 +126,7 @@ public static class Calib
     {
         bool fem = v.Gender == "F";
         double shift = 12 * Math.Log2(v.TargetHz / Math.Max(60, m.MedianHz));
-        double rs = m.StdSemis > 0.5 ? Math.Clamp((fem ? FemStdSemis : MaleStdSemis) / m.StdSemis, 0.85, 1.2) : 1;
+        double rs = m.StdSemis > 0.5 ? Math.Clamp((fem ? FemStdSemis : MaleStdSemis) / m.StdSemis, 1.0, 1.2) : 1; // v2.5.3: only livens a flat reader; compressing a lively one sounded less natural
         var norm = fem ? FemFormants : MaleFormants; double num = 0, den = 0; int n = 0;
         for (int i = 0; i < 3; i++) if (!double.IsNaN(m.Formants[i])) { num += Math.Log(norm[i]); den += Math.Log(m.Formants[i]); n++; }
         double fpct = n > 0 ? Math.Clamp(100 * (Math.Exp((num - den) / n) - 1), -20, 25) : (fem ? 15 : -12);
@@ -138,7 +138,7 @@ public static class Calib
     public static JsonObject Run(JsonNode req, Action<string, double> progress)
     {
         string sample = (string)req["sample"], rawPath = (string)req["raw"], outDir = (string)req["outDir"], cvPath = (string)req["cvPath"], f0Path = (string)req["f0Path"], device = (string)req["device"] ?? "gpu";
-        double alpha = (double?)req["adapt"] ?? 0.5; bool tryVoices = (bool?)req["tryVoices"] ?? true;
+        double alpha = (double?)req["adapt"] ?? 0; bool tryVoices = (bool?)req["tryVoices"] ?? true; // v2.5.3: feature adaptation measured no gain (within ±0.06 UTMOS), so it is off unless asked for bool tryVoices = (bool?)req["tryVoices"] ?? true;
         Directory.CreateDirectory(outDir);
         progress("Checking the recording", 0.02);
         var x = Wav.ReadMono48(sample); var raw = !string.IsNullOrEmpty(rawPath) && File.Exists(rawPath) ? Wav.ReadMono48(rawPath) : x;
@@ -176,7 +176,7 @@ public static class Calib
                 // adaptation: the mean feature difference between your voice and the same words in the target voice
                 int nf = Math.Min(fin.Length, fout.Length); var mu = new double[768]; int cnt = 0;
                 for (int k = 0; k < nf; k++) { int fr = k * 2; if (fr >= fi.Length || fi[fr] <= 0) continue; for (int d = 0; d < 768; d++) mu[d] += fout[k][d] - fin[k][d]; cnt++; }
-                if (cnt > 20) { var delta = mu.Select(q => (float)(q / cnt)).ToArray(); var b = new byte[768 * 4]; Buffer.BlockCopy(delta, 0, b, 0, b.Length); File.WriteAllBytes(adaptPath, b); pre["adaptPath"] = adaptPath; pre["adapt"] = alpha; }
+                if (cnt > 20 && alpha > 0) { var delta = mu.Select(q => (float)(q / cnt)).ToArray(); var b = new byte[768 * 4]; Buffer.BlockCopy(delta, 0, b, 0, b.Length); File.WriteAllBytes(adaptPath, b); pre["adaptPath"] = adaptPath; pre["adapt"] = alpha; }
                 // preview with the full preset
                 if (cnt > 20 && alpha > 0)
                 {

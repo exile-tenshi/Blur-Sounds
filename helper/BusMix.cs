@@ -114,7 +114,7 @@ sealed class BusMixer
     public readonly Dictionary<string, StripCfg> Strips = new();
     public readonly FloatRing B1Ring = new(48000 * 2);
     public bool Enabled, AnySolo;
-    float[] tmp = new float[9600], rd = new float[9600];
+    float[] tmp = new float[9600], rd = new float[9600]; readonly float[] b1Acc = new float[9600]; bool b1Has; // B1: strips summed once per block, then handed to the mic thread
     static readonly string[] Extra = { "A2", "A3" };
 
     public void Configure(JsonNode cfg, MMDeviceEnumerator en, Action<string, Exception> err)
@@ -157,15 +157,20 @@ sealed class BusMixer
         }
     }
     public bool Routed(string strip, string bus) => Enabled && Strips.TryGetValue(strip, out var s) && s.Routes.Contains(bus);
-    public bool NeedsCapture(string chId) => Enabled && Strips.TryGetValue("ch:" + chId, out var s) && s.Routes.Any(r => Sinks.ContainsKey(r) || Extra.Contains(r));
+    public bool NeedsCapture(string chId) => Enabled && Strips.TryGetValue("ch:" + chId, out var s) && s.Routes.Any(r => Sinks.ContainsKey(r) || Extra.Contains(r) || r == "B1");
     bool SoloMuted(StripCfg s, string bus) => AnySolo && !s.Solo && bus.StartsWith("A");
-    public void Begin(int n) { foreach (var b in Buf.Values) Array.Clear(b, 0, n); }
+    public void Begin(int n) { foreach (var b in Buf.Values) Array.Clear(b, 0, n); Array.Clear(b1Acc, 0, Math.Min(n, b1Acc.Length)); b1Has = false; }
     // channel strip: processing that applies to every path of the channel (gate / comp / pan); gain & mute stay the channel fader
     public void ChannelFx(string chId, float[] b, int frames) { if (Enabled && Strips.TryGetValue("ch:" + chId, out var s) && !s.Neutral) s.Apply(b, frames, false); }
     public void AddStrip(string stripId, float[] b, int n, float vol)
     {
         if (!Enabled || !Strips.TryGetValue(stripId, out var s)) return;
-        foreach (var r in s.Routes) if (Buf.TryGetValue(r, out var dst) && !SoloMuted(s, r)) for (int i = 0; i < n; i++) dst[i] += b[i] * vol;
+        foreach (var r in s.Routes)
+        {
+            if (SoloMuted(s, r)) continue;
+            if (Buf.TryGetValue(r, out var dst)) for (int i = 0; i < n; i++) dst[i] += b[i] * vol;
+            else if (r == "B1" && stripId != "mic" && n <= b1Acc.Length) { for (int i = 0; i < n; i++) b1Acc[i] += b[i] * vol; b1Has = true; } // the mic reaches B1 on its own path
+        }
     }
     // extra input strips -> A1 (pBus), B2 (sBus), B1 (ring to the mic thread), A2/A3
     public void Inputs(int n, float[] pBus, float[] sBus, bool streamOn)
@@ -182,7 +187,7 @@ sealed class BusMixer
                 if (SoloMuted(s, r)) continue;
                 if (r == "A1" && pBus != null) for (int i = 0; i < n; i++) pBus[i] += tmp[i];
                 else if (r == "B2" && streamOn) for (int i = 0; i < n; i++) sBus[i] += tmp[i];
-                else if (r == "B1") B1Ring.Write(tmp, n);
+                else if (r == "B1" && n <= b1Acc.Length) { for (int i = 0; i < n; i++) b1Acc[i] += tmp[i]; b1Has = true; }
                 else if (Buf.TryGetValue(r, out var dst)) for (int i = 0; i < n; i++) dst[i] += tmp[i];
             }
         }
@@ -190,6 +195,7 @@ sealed class BusMixer
     public bool InputsTo(string bus) => Enabled && Strips.Values.Any(s => s.Kind == "input" && s.Src != null && s.Routes.Contains(bus));
     public void End(int n)
     {
+        if (b1Has) { for (int i = 0; i < n; i++) b1Acc[i] = Math.Clamp(b1Acc[i], -1f, 1f); B1Ring.Write(b1Acc, n); }
         foreach (var (id, sink) in Sinks) { var b = Buf[id]; if (Fx.TryGetValue(id, out var f)) f.Process(b, n / 2, true); for (int i = 0; i < n; i++) b[i] = Math.Clamp(b[i], -1f, 1f); sink.Write(b, n); }
     }
     public void ApplyFx(string bus, float[] b, int n) { if (Enabled && Fx.TryGetValue(bus, out var f) && (!f.Neutral || f.LimOn)) f.Process(b, n / 2, true); }
@@ -201,4 +207,47 @@ sealed class BusMixer
         return new JsonObject { ["strips"] = o, ["buses"] = bo, ["sinks"] = new JsonArray(Sinks.Keys.Select(k => (JsonNode)k).ToArray()) };
     }
     public void Dispose() { foreach (var s in Sinks.Values) s.Dispose(); Sinks.Clear(); Buf.Clear(); foreach (var s in Strips.Values) { try { s.Src?.Dispose(); } catch { } } Strips.Clear(); }
+
+    // --bustest: the strip / bus DSP and the B1 / solo routing on synthetic signals (no audio devices needed).
+    public static string Test()
+    {
+        var sb = new System.Text.StringBuilder(); int fails = 0;
+        void Check(string what, bool ok, string detail) { sb.AppendLine($"{(ok ? "PASS" : "FAIL")}  {what}: {detail}"); if (!ok) fails++; }
+        float[] Tone(double f, double dbfs, int frames, bool stereo = true) { var a = Db.ToLin(dbfs); var t = new float[frames * 2]; for (int i = 0; i < frames; i++) { float v = (float)(a * Math.Sin(2 * Math.PI * f * i / 48000)); t[i * 2] = v; t[i * 2 + 1] = stereo ? v : 0; } return t; }
+        double RmsDb(float[] x, int ch, int from) { double s = 0; int n = 0; for (int i = from; i < x.Length / 2; i++) { s += x[i * 2 + ch] * x[i * 2 + ch]; n++; } return 10 * Math.Log10(s / Math.Max(1, n) + 1e-20); }
+        double PeakDb(float[] x, int from) { double p = 0; for (int i = from * 2; i < x.Length; i++) p = Math.Max(p, Math.Abs(x[i])); return 20 * Math.Log10(p + 1e-20); }
+        JsonNode J(string s) => JsonNode.Parse(s);
+        // pan
+        { var st = new StripCfg(); st.Configure(J("{\"kind\":\"channel\",\"pan\":-1}")); var x = Tone(1000, -20, 48000); double l0 = RmsDb(x, 0, 0); st.Apply(x, 48000, false);
+          Check("pan hard left", RmsDb(x, 1, 0) < -80 && Math.Abs(RmsDb(x, 0, 0) - (l0 + 3.01)) < 0.2, $"L {RmsDb(x, 0, 0) - l0:+0.0;-0.0} dB, R {RmsDb(x, 1, 0):F0} dBFS"); }
+        // gate
+        { var st = new StripCfg(); st.Configure(J("{\"kind\":\"channel\",\"gate\":{\"enabled\":true,\"thresholdDb\":-40}}")); var q = Tone(500, -60, 96000); st.Apply(q, 96000, false); var loud = Tone(500, -20, 48000); st.Apply(loud, 48000, false);
+          Check("gate closes below threshold", RmsDb(q, 0, 48000) < -60 - 3 - 50, $"-60 dBFS tone -> {RmsDb(q, 0, 48000):F0} dBFS"); Check("gate opens above threshold", Math.Abs(RmsDb(loud, 0, 24000) - (-23.01)) < 0.5, $"-20 dBFS tone -> {RmsDb(loud, 0, 24000) + 3.01:F1} dBFS peak-equivalent"); }
+        // compressor: -6 dBFS peak, threshold -18, ratio 3 -> ~8 dB reduction
+        { var st = new StripCfg(); st.Configure(J("{\"kind\":\"channel\",\"comp\":{\"enabled\":true,\"thresholdDb\":-18,\"ratio\":3,\"makeupDb\":0}}")); var x = Tone(1000, -6, 48000); double r0 = RmsDb(x, 0, 24000); st.Apply(x, 48000, false); double gr = r0 - RmsDb(x, 0, 24000);
+          Check("compressor 3:1 at -18 dB", gr > 6.5 && gr < 9.5, $"-6 dBFS tone reduced {gr:F1} dB (expected ~8)"); }
+        // input strip gain + mute
+        { var st = new StripCfg(); st.Configure(J("{\"kind\":\"input\",\"gainDb\":-6}")); var x = Tone(1000, -20, 4800); double r0 = RmsDb(x, 0, 0); st.Apply(x, 4800, true); Check("input gain -6 dB", Math.Abs(RmsDb(x, 0, 0) - r0 + 6) < 0.05, $"{RmsDb(x, 0, 0) - r0:F2} dB");
+          st.Configure(J("{\"kind\":\"input\",\"mute\":true}")); var y = Tone(1000, -20, 4800); st.Apply(y, 4800, true); Check("input mute", PeakDb(y, 0) < -200, "silent"); }
+        // bus limiter / gain / delay / EQ / mono
+        { var b = new BusFx(); b.Configure(J("{\"limiter\":{\"enabled\":true,\"ceilingDb\":-6}}")); var x = Tone(200, 0, 48000); b.Process(x, 48000, true); Check("bus limiter ceiling -6 dB", PeakDb(x, 100) <= -5.9, $"0 dBFS tone -> peak {PeakDb(x, 100):F2} dBFS"); }
+        { var b = new BusFx(); b.Configure(J("{\"gainDb\":-12}")); var x = Tone(1000, -10, 4800); double r0 = RmsDb(x, 0, 0); b.Process(x, 4800, true); Check("bus gain -12 dB", Math.Abs(RmsDb(x, 0, 0) - r0 + 12) < 0.05, $"{RmsDb(x, 0, 0) - r0:F2} dB"); }
+        { var b = new BusFx(); b.Configure(J("{\"delayMs\":100}")); var x = new float[48000 * 2]; x[0] = 1; x[1] = 1; b.Process(x, 48000, true); int at = -1; for (int i = 0; i < 48000; i++) if (x[i * 2] > 0.5f) { at = i; break; } Check("bus delay 100 ms", at == 4800, $"impulse at frame {at} (expected 4800)"); }
+        { var b = new BusFx(); b.Configure(J("{\"eq\":{\"enabled\":true,\"preampDb\":0,\"bands\":[{\"type\":\"peak\",\"f\":1000,\"g\":6,\"q\":1,\"on\":true}]}}")); var x = Tone(1000, -20, 48000); double r0 = RmsDb(x, 0, 24000); b.Process(x, 48000, true); double g = RmsDb(x, 0, 24000) - r0; var y = Tone(100, -20, 48000); double r1 = RmsDb(y, 0, 24000); b.Process(y, 48000, true); double g2 = RmsDb(y, 0, 24000) - r1;
+          Check("bus EQ +6 dB @ 1 kHz", Math.Abs(g - 6) < 0.3 && Math.Abs(g2) < 1, $"1 kHz {g:+0.00} dB, 100 Hz {g2:+0.00;-0.00} dB"); }
+        { var b = new BusFx(); b.Configure(J("{\"mono\":true}")); var x = Tone(1000, -20, 4800, false); b.Process(x, 4800, true); Check("bus mono", Math.Abs(RmsDb(x, 0, 0) - RmsDb(x, 1, 0)) < 0.01, $"L {RmsDb(x, 0, 0):F1} / R {RmsDb(x, 1, 0):F1} dBFS"); }
+        // routing: two strips -> B1 are summed once per block; solo keeps non-solo strips off A buses
+        {
+            var m = new BusMixer(); m.Configure(J("{\"enabled\":true,\"strips\":[{\"id\":\"ch:game\",\"kind\":\"channel\",\"routes\":[\"B1\",\"A2\"]},{\"id\":\"ch:media\",\"kind\":\"channel\",\"routes\":[\"B1\",\"A2\"],\"solo\":true},{\"id\":\"mic\",\"kind\":\"mic\",\"routes\":[\"B1\"]}],\"outs\":[]}"), null, (a, e) => { });
+            m.Buf["A2"] = new float[9600]; int n = 960; m.Begin(n);
+            var g = Tone(1000, -20, n / 2); var md = Tone(1000, -20, n / 2); m.AddStrip("ch:game", g, n, 1); m.AddStrip("ch:media", md, n, 1); m.AddStrip("mic", g, n, 1); m.End(n);
+            var outB1 = new float[n]; int got = m.B1Ring.Read(outB1, n, 9600);
+            double ratio = 20 * Math.Log10((Math.Abs(outB1[2 * 10]) + 1e-12) / (Math.Abs(g[2 * 10]) + 1e-12));
+            Check("B1: two app strips summed once per block (mic excluded)", got == n && m.B1Ring.Count == 0 && Math.Abs(ratio - 6.02) < 0.1, $"{got} samples, level {ratio:+0.00} dB vs one strip (expected +6.02)");
+            double a2 = 20 * Math.Log10(Math.Abs(m.Buf["A2"][20]) / Math.Abs(g[20]));
+            Check("solo: only the soloed strip reaches A2", Math.Abs(a2) < 0.05, $"A2 level {a2:+0.00} dB vs one strip (expected 0)");
+        }
+        sb.AppendLine(fails == 0 ? "BUS CHECK OK" : $"BUS CHECK FAILED ({fails})");
+        return sb.ToString();
+    }
 }

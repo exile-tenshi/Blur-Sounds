@@ -130,7 +130,7 @@ public sealed class Engine
     // mic chain
     readonly NoiseGate gate = new(); readonly Compressor comp = new(); readonly Equalizer micEq = new(); readonly Limiter micLim = new();
     readonly BusMixer bus = new(); // v2.6.0
-    readonly VoiceChain vc = new(); readonly VoiceChanger changer = new(); bool changerOn; bool nsOn, clearcast, bypass; float micGain = 1; bool micMuted;
+    readonly VoiceChain vc = new(); readonly VoiceChanger changer = new(); bool changerOn; bool nsOn, clearcast, bypass; float micGain = 1; bool micMuted, micToCable = true;
     DeviceSource aecRef; string aecRefId; OutputSink monitor; bool monitorOn; float monitorVol = 0.8f;
     bool micInStream = true, micInClip = true, micInRec = true, streamMode, chainOn;
     Resampler micRs; float[] micMono = new float[4096];
@@ -238,7 +238,7 @@ public sealed class Engine
             comp.Ratio = (double?)m?["comp"]?["ratio"] ?? 3; comp.MakeupDb = (double?)m?["comp"]?["makeupDb"] ?? 4;
             comp.AttackMs = (double?)m?["comp"]?["attackMs"] ?? 5; comp.ReleaseMs = (double?)m?["comp"]?["releaseMs"] ?? 120;
             micEq.Configure(m?["eq"]);
-            micGain = Db.ToLin((double?)m?["gainDb"] ?? 0); micMuted = (bool?)m?["muted"] ?? false;
+            micGain = Db.ToLin((double?)m?["gainDb"] ?? 0); micMuted = (bool?)m?["muted"] ?? false; micToCable = (bool?)m?["toCable"] ?? true; // v2.6.0 bus matrix: mic -> B1 off keeps the cable fed with silence
             micInStream = (bool?)m?["inStream"] ?? true; micInClip = (bool?)m?["inClip"] ?? true; micInRec = (bool?)m?["inRec"] ?? true;
             // v2.3.1: the virtual-mic cable gets your mic whenever one is chosen (processed if the chain is on, raw otherwise)
             string micOutId = (string)m?["outId"]; if (string.IsNullOrEmpty(micOutId)) micOutId = null;
@@ -324,10 +324,10 @@ public sealed class Engine
         {
             if (bus.Enabled)
             {   // v2.6.0 B1 bus: extra inputs routed to the virtual mic + B1 processing
-                try { var b1 = (float[])st.Clone(); var ex = new float[b1.Length]; int got = bus.B1Ring.Count >= b1.Length ? bus.B1Ring.Read(ex, b1.Length, 9600) : 0; if (got > 0) for (int i = 0; i < b1.Length; i++) b1[i] += ex[i]; bus.ApplyFx("B1", b1, b1.Length); micOut.Write(b1, b1.Length); }
+                try { var b1 = micToCable ? (float[])st.Clone() : new float[st.Length]; var ex = new float[b1.Length]; int got = bus.B1Ring.Count >= b1.Length ? bus.B1Ring.Read(ex, b1.Length, 9600) : 0; if (got > 0) for (int i = 0; i < b1.Length; i++) b1[i] += ex[i]; bus.ApplyFx("B1", b1, b1.Length); micOut.Write(b1, b1.Length); }
                 catch (Exception e) { Err("B1", e); micOut.Write(st, st.Length); }
             }
-            else micOut.Write(st, st.Length);
+            else micOut.Write(micToCable ? st : new float[st.Length], st.Length);
         }
         if (monitor != null) { if (monitorVol != 1) for (int i = 0; i < st.Length; i++) st[i] *= monitorVol; monitor.Write(st, st.Length); }
     }
@@ -495,7 +495,7 @@ public sealed class Engine
                     }
                     bus.Inputs(n, personal != null ? pBus : null, sBus, stream != null);
                     if (personal != null) { bus.ApplyFx("A1", pBus, n); Clip(pBus, n); personal.Write(pBus, n); }
-                    foreach (var (hid, hs) in hearSinks) { var hb = hearBus[hid]; hearLim[hid].Process(hb, n); Clip(hb, n); hs.Write(hb, n); }
+                    foreach (var (hid, hs) in hearSinks) { var hb = hearBus[hid]; bus.ApplyFx("A1", hb, n); hearLim[hid].Process(hb, n); Clip(hb, n); hs.Write(hb, n); }
                     if (stream != null) { if (streamGain != 1) for (int i = 0; i < n; i++) sBus[i] *= streamGain; bus.ApplyFx("B2", sBus, n); Clip(sBus, n); stream.Write(sBus, n); }
                     bus.End(n);
                     if (clipOn)

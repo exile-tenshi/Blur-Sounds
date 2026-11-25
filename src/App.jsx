@@ -8,6 +8,7 @@ import Clips from './pages/Clips.jsx';
 import Record from './pages/Record.jsx';
 import Cables from './pages/Cables.jsx';
 import Voice from './pages/Voice.jsx';
+import Bus from './pages/Bus.jsx';
 import EngineAlert from './EngineAlert.jsx';
 import { ListenQuick } from './components/ListenSwitch.jsx';
 import { HifiFirstRun } from './components/HifiCable.jsx';
@@ -16,6 +17,7 @@ import { UpdateBadge, UpdateToast } from './components/Updater.jsx';
 
 const NAV = [
   { id: 'mixer', label: 'Mixer', icon: Icon.mixer },
+  // { id: 'bus', label: 'Buses', icon: Icon.buses }, // v2.6.0
   { id: 'voice', label: 'Voice', icon: Icon.vchange },
   { id: 'clips', label: 'Clips', icon: Icon.clip },
   { id: 'record', label: 'Record', icon: Icon.rec },
@@ -74,6 +76,7 @@ export default function App() {
         <HealBanner />
         {['failed', 'error', 'missing'].includes(helper.status) && page !== 'mixer' && <EngineAlert helper={helper} compact />}
         {page === 'mixer' && <Mixer />}
+        {page === 'bus' && <Bus />}
         {page === 'voice' && <Voice />}
         {page === 'clips' && <Clips settings={settings} update={update} />}
         {page === 'record' && <Record settings={settings} update={update} />}

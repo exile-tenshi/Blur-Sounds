@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from '../components/Icons.jsx';
 import { Toggle, Select, MiniMeter } from '../components/Controls.jsx';
 import { keyToAccel } from './Soundboard.jsx';
+import Calibrate from '../components/Calibrate.jsx';
 
 const MB = (b) => `${Math.round(b / 1048576)} MB`;
 const QUAL = [
@@ -91,6 +92,8 @@ export default function Voice() {
           <button className={`chip${v.preset === 'f2m' ? ' on' : ''}`} onClick={() => preset('f2m')}>Female → Male</button>
         </div>
       </section>
+
+      {models.baseReady && <Calibrate eng={eng} voices={models.voices} current={v.voice} onApplied={() => window.bsp.invoke('vc:get').then(setVs)} />}
 
       {v.engine !== 'dsp' ? <>
         <section className="panel">

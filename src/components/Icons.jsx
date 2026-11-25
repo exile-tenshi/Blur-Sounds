@@ -1,6 +1,7 @@
 import React from 'react';
 const P = ({ d, size = 18 }) => (<svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d={d} /></svg>);
 export const Icon = {
+  buses: (p) => <P {...p} d="M4 3h2v6h2v2H6v10H4V11H2V9h2V3zm7 0h2v12h2v2h-2v4h-2v-4H9v-2h2V3zm7 0h2v4h2v2h-2v12h-2V9h-2V7h2V3z" />,
   mixer: (p) => <P {...p} d="M5 3h2v6h2v2H7v10H5V11H3V9h2V3zm6 0h2v12h2v2h-2v4h-2v-4H9v-2h2V3zm6 0h2v4h2v2h-2v12h-2V9h-2V7h2V3z" />,
   chat: (p) => <P {...p} d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3 6v2h2v-2H7zm4 0v2h2v-2h-2zm4 0v2h2v-2h-2z" />,
   pads: (p) => <P {...p} d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" />,
