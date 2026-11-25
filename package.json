@@ -1,6 +1,6 @@
 {
   "name": "blur-sounds-pro",
-  "version": "2.6.4",
+  "version": "2.6.5",
   "description": "Sonar-style per-app audio mixer for Windows with virtual-cable routing, voice-activated clips, platform export presets and a built-in VRChat chatbox.",
   "main": "electron/main.cjs",
   "scripts": {

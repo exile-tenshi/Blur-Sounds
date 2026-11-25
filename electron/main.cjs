@@ -213,6 +213,8 @@ async function onSnapshot(snap) {
   cableSetup();
   await guardDefault().catch(() => {});
   checkListeningDevice();
+  // v2.6.5: repair a stream mix left "on" with destination 'off'/'desktop' (stale device from before)
+  if (!streamChecked) { streamChecked = true; if (m.streamMode && !['cable', 'output', 'mic'].includes(m.streamVia) && repickStream()) dirty = true; }
   if (!appsSanitized) { // v2.6.2: earlier versions could save a leftover 1% duck as an app's own level
     appsSanitized = true;
     for (const [k, a] of Object.entries(m.apps || {})) if (a && isDuckLevel(a.volume)) { a.volume = 1; dirty = true; helperLogLine(`app level for ${k} was a leftover 1% duck, reset to 100%`); }
@@ -339,6 +341,21 @@ function micOutEffective() {
   if (id && m.streamMode && mc.inStream && presentOut(m.streamOut) === id) return null;
   return id;
 }
+// v2.6.5: turning the stream mix on must send it to a real stream destination. Before, a stream turned off (via 'off')
+// and back on kept whatever device it last pointed at (e.g. Realtek Digital Output), so streamed apps went there
+// instead of the Hi-Fi cable. Re-pick unless the user explicitly chose a cable / output / "with my mic".
+function repickStream() {
+  if (!snapshot || micCableMode()) return false;
+  const m = S().mixer; const micId = presentOut(S().micChain.outId);
+  const explicit = (m.streamVia === 'cable' || m.streamVia === 'output') && presentOut(m.streamOut) && m.streamOut !== micId;
+  if (explicit) { m.streamMode = true; return false; }
+  const sc = setup.findStreamCable(snapshot, micId);
+  if (sc) { m.streamOut = sc.id; m.streamOutName = sc.name; m.streamVia = 'cable'; }
+  else if (micId) { /* v2.4.2: only one cable -> mic + streamed apps on it */ m.streamOut = micId; m.streamOutName = (snapshot.outputs.find((o) => o.id === micId) || {}).name || ''; m.streamVia = 'mic'; }
+  else return false;
+  m.streamMode = true; helperLogLine(`stream mix -> ${m.streamOutName} (${m.streamVia})`); return true;
+}
+let streamChecked = false;
 function micCableMode() { const m = S().mixer; const id = presentOut(S().micChain.outId); return !!(m.streamMode && m.streamVia === 'mic' && id && presentOut(m.streamOut) === id); }
 function streamExcludePids() {
   if (!micCableMode() || S().mixer.micCableVoice) return [];
@@ -730,7 +747,7 @@ ipcMain.handle('bus:sceneDelete', (_e, id) => { const b = BUS(); b.scenes = b.sc
 ipcMain.handle('bus:reset', async () => { const b = BUS(); S().mixer.bus = { strips: {}, inputs: [], outs: {}, scenes: b.scenes }; return busCommit(); });
 ipcMain.handle('mixer:global', async (_e, patch) => {
   Object.assign(S().mixer, patch);
-  if (patch.streamMode === true && snapshot && !micCableMode()) { const m = S().mixer; const micId = presentOut(S().micChain.outId); if (!presentOut(m.streamOut) || m.streamOut === micId) { const sc = setup.findStreamCable(snapshot, micId); if (sc) { m.streamOut = sc.id; m.streamOutName = sc.name; m.streamVia = 'cable'; } else if (micId) { /* v2.4.2: only one cable -> mic + streamed apps on it */ m.streamOut = micId; m.streamOutName = (snapshot.outputs.find((o) => o.id === micId) || {}).name || ''; m.streamVia = 'mic'; } } }
+  if (patch.streamMode === true) repickStream();
   if (patch.streamMode === false && S().mixer.streamVia !== 'desktop') S().mixer.streamVia = 'off';
   store.saveSoon();
   if ('chatMix' in patch) { await applyChannel('game'); await applyChannel('chat'); }
