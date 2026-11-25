@@ -87,7 +87,8 @@ function autoSetup(st, snap, { full = true } = {}) {
     // v2.6.5: one cable = the cable is your mic. Apps you turn on for the stream are written straight onto the cable next to
     // the processed mic ("with my mic"), never picked up through the mic. Nothing streams until you switch an app's Stream on.
     m.streamMode = true; m.streamVia = 'mic'; m.streamOut = cable.id; m.streamOutName = cable.name; m.streamFix265 = true; sum.stream = cable.name;
-    if (full) for (const [id, ch] of Object.entries(m.channels || {})) ch.streamMuted = id !== 'media'; // only music by default; game / chat / aux stay off the mic cable sum.streamRecord = recordSideOf(snap, cable).name;
+    // v2.6.6: nothing goes on the mic cable until you switch an app's Stream on (Discord on this cable would hear it)
+    if (full) for (const ch of Object.values(m.channels || {})) ch.streamMuted = true; sum.streamRecord = recordSideOf(snap, cable).name;
     changes.push(`Stream: apps you put on stream go straight out “${cable.name}” with your mic (Streamlabs / OBS: Mic/Aux “${sum.streamRecord}”, Desktop audio off)`);
   }
   else if (full || !present(snap.outputs, m.streamOut) || m.streamOut === mc.outId) {

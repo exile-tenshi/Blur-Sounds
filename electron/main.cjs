@@ -209,6 +209,7 @@ async function onSnapshot(snap) {
   snapshot = snap;
   const m = S().mixer; let dirty = false;
   if (!S().app.setup.auto) await firstRunSetup().catch((e) => helperLogLine('first-run setup failed: ' + e.message));
+  if (splitMicCable()) dirty = true;
   selfHeal();
   cableSetup();
   await guardDefault().catch(() => {});
@@ -356,6 +357,21 @@ function repickStream() {
   m.streamMode = true; helperLogLine(`stream mix -> ${m.streamOutName} (${m.streamVia})`); return true;
 }
 let streamChecked = false;
+// v2.6.6: "with my mic" puts your mic AND your streamed apps (music) on one cable. That's right for VRChat / the stream,
+// but voice chat (Discord) must never hear the music. As soon as a second cable exists (e.g. VB-CABLE from the one-click
+// install), split it: the processed mic alone goes to the second cable (pick its "CABLE Output" in Discord), and the
+// first cable keeps mic + apps exactly as before, so VRChat / Streamlabs don't need any change.
+function splitMicCable() {
+  if (!snapshot || !micCableMode()) return false;
+  const m = S().mixer; const mc = S().micChain; const micId = presentOut(mc.outId);
+  const sc = setup.findStreamCable(snapshot, micId); if (!sc) return false;
+  mc.outId = sc.id; mc.outName = sc.name; mc.autoCable = true; mc.inStream = true;
+  m.streamVia = 'cable'; m.streamMode = true; delete m.streamPending; m.micSplit = { at: Date.now(), voiceCable: sc.id, appsCable: m.streamOut };
+  const rec = setup.recordSideOf(snapshot, sc); const rec2 = setup.recordSideOf(snapshot, snapshot.outputs.find((o) => o.id === m.streamOut));
+  micPathNote = `Your mic alone now also goes to “${sc.name}”. In Discord pick “${rec ? rec.name : 'CABLE Output'}” as the microphone so friends never hear your music. VRChat / Streamlabs stay on “${rec2 ? rec2.name : m.streamOutName}” (mic + music).`;
+  helperLogLine('mic split: voice-only mic -> ' + sc.name + ', mic + apps stay on ' + m.streamOutName);
+  return true;
+}
 // v2.6.5 one-time repair on update. Streamed apps (music) must go straight out the cable, never reach the cable by
 // being picked up by the mic. With only one virtual cable (Hi-Fi Cable carrying the mic) that means "with my mic" mode:
 // apps are written onto the cable directly, next to the processed mic. A stream left pointing at a physical output
