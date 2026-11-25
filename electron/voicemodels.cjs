@@ -22,13 +22,13 @@ const FILES = {
 const BASE = ['contentvec', 'rmvpe'];
 // Built-in voices. gender = what the voice sounds like; targetHz = where auto-pitch puts your average pitch.
 const VOICES = [
-  { id: 'lyra', name: 'Lyra', gender: 'female', desc: 'Warm, clear female voice. Most natural for male → female.', files: ['lyra', 'lyraSpk'], model: 'lyra', spk: 'lyraSpk', sid: 0, targetHz: 205, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 voice trained on LibriSpeech speaker 8312 (public-domain LibriVox reading, LibriSpeech CC BY 4.0); model by KoeAI (MIT).' },
-  { id: 'ava', name: 'Ava', gender: 'female', desc: 'Bright, young female voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 9, targetHz: 215, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 9 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
-  { id: 'nova', name: 'Nova', gender: 'female', desc: 'Soft, smooth female voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 75, targetHz: 210, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 75 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
-  { id: 'mia', name: 'Mia', gender: 'female', desc: 'Lighter, airy female voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 10, targetHz: 220, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 10 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
-  { id: 'rowan', name: 'Rowan', gender: 'male', desc: 'Natural, full male voice. Most natural for female → male.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 17, targetHz: 115, tuned: { expressive: 0.8, envMix: 0.7 }, source: 'RVC v2 base model speaker 17 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
-  { id: 'ezra', name: 'Ezra', gender: 'male', desc: 'Deeper, calm male voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 37, targetHz: 105, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 37 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
-  { id: 'silas', name: 'Silas', gender: 'male', desc: 'Lighter male voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 74, targetHz: 125, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 74 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
+  { id: 'lyra', name: 'Lyra', gender: 'female', desc: 'Warm, clear, mature female voice. Most natural for male → female.', files: ['lyra', 'lyraSpk'], model: 'lyra', spk: 'lyraSpk', sid: 0, targetHz: 202, adult: [220, 185], tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 voice trained on LibriSpeech speaker 8312 (public-domain LibriVox reading, LibriSpeech CC BY 4.0); model by KoeAI (MIT).' },
+  { id: 'ava', name: 'Ava', gender: 'female', desc: 'Bright, clear female voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 9, targetHz: 191, adult: [215, 170], tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 9 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
+  { id: 'nova', name: 'Nova', gender: 'female', desc: 'Soft, youthful female voice (sounds younger than the others).', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 75, targetHz: 172, adult: [190, 155], youthful: true, tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 75 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
+  { id: 'mia', name: 'Mia', gender: 'female', desc: 'Lighter, airy female voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 10, targetHz: 191, adult: [215, 170], tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 10 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
+  { id: 'rowan', name: 'Rowan', gender: 'male', desc: 'Natural, full male voice. Most natural for female → male.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 17, targetHz: 114, adult: [130, 100], tuned: { expressive: 0.8, envMix: 0.7 }, source: 'RVC v2 base model speaker 17 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
+  { id: 'ezra', name: 'Ezra', gender: 'male', desc: 'Deeper, calm male voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 37, targetHz: 109, adult: [125, 95], tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 37 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
+  { id: 'silas', name: 'Silas', gender: 'male', desc: 'Lighter male voice.', files: ['vctk', 'vctkSpk'], model: 'vctk', spk: 'vctkSpk', sid: 74, targetHz: 123, adult: [140, 108], tuned: { expressive: 0.4, envMix: 0.7 }, source: 'RVC v2 base model speaker 74 (VCTK corpus, CC BY 4.0); RVC project (MIT).' },
 ];
 
 class VoiceModels {
@@ -51,9 +51,9 @@ class VoiceModels {
   }
   resolve(voiceId, custom) {
     const v = VOICES.find((x) => x.id === voiceId);
-    if (v) return { modelPath: this.use(v.model), spkPath: this.file(v.spk), sid: v.sid, targetHz: v.targetHz, gender: v.gender, tuned: v.tuned || null };
+    if (v) return { modelPath: this.use(v.model), spkPath: this.file(v.spk), sid: v.sid, targetHz: v.targetHz, gender: v.gender, tuned: v.tuned || null, adult: v.adult || null, youthful: !!v.youthful };
     const c = (custom || []).find((x) => x.id === voiceId);
-    if (c) return { modelPath: c.modelPath, spkPath: c.spkPath || null, sid: c.sid || 0, targetHz: c.targetHz || (c.gender === 'male' ? 115 : 210), gender: c.gender };
+    if (c) return { modelPath: c.modelPath, spkPath: c.spkPath || null, sid: c.sid || 0, targetHz: c.targetHz || (c.gender === 'male' ? 114 : 191), gender: c.gender, adult: null };
     return null;
   }
   // keys whose older version is on disk (v2.5.0 users): the app fetches the improved file in the background

@@ -1030,16 +1030,22 @@ ipcMain.handle('app:info', () => ({
 const { VoiceModels, VOICES } = require('./voicemodels.cjs');
 const vmodels = new VoiceModels({ dir: path.join(app.getPath('userData'), 'voice-models'), log: (m) => helperLogLine(m), send: (p) => send('vc:progress', p) });
 const VC = () => S().voiceChanger;
+// v2.6.4 voice age: every voice has an adult speaking-pitch range [younger, mature]; the "Voice age" slider picks a point in it
+// (0.5 = the middle) and pitch peaks get a soft ceiling. 2.6.3 and older aimed female voices at 205-220 Hz and let a calibrated
+// preset widen your intonation x1.2, so lively speech peaked at 300-400 Hz, which is child territory.
+function adultRange(r, gender) { return (r && r.adult) || (gender === 'male' ? [130, 100] : [215, 170]); }
+function maturityHz(r, gender, m) { const [y, o] = adultRange(r, gender); return Math.round(y * Math.pow(o / y, Math.max(0, Math.min(1, m ?? 0.5)))); }
+const ceilFor = (hz, gender) => Math.round(hz * (gender === 'male' ? 1.6 : 1.45));
 function vcEngineConfig() {
   const v = VC(); if (!v || !v.enabled) return { enabled: false };
-  if (v.engine === 'dsp') return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.autoPitch ? (v.pitch || 0) : v.dsp.pitch, autoPitch: !!v.autoPitch, targetHz: v.dsp.targetHz, formant: v.dsp.formant, ...vcPersonal(v) }; // auto pitch: the shift comes from the target, the slider is a fine-tune
+  if (v.engine === 'dsp') { const g = v.preset === 'f2m' ? 'male' : 'female'; return { enabled: true, engine: 'dsp', bypass: !!v.bypass, pitch: v.autoPitch ? (v.pitch || 0) : v.dsp.pitch, autoPitch: !!v.autoPitch, targetHz: v.autoPitch ? maturityHz(null, g, v.maturity) : v.dsp.targetHz, formant: g === 'female' ? Math.min(14, v.dsp.formant) : Math.max(-18, v.dsp.formant), ...vcPersonal(v) }; } // v2.6.4: adult pitch + formant caps // auto pitch: the shift comes from the target, the slider is a fine-tune
   const r = vmodels.resolve(v.voice, v.custom); const p = vmodels.paths();
   if (!r || vmodels.need(v.voice, v.custom).length || !fs.existsSync(r.modelPath)) return { enabled: false }; // models not downloaded yet: mic stays untouched
   const r2 = v.blendWith ? vmodels.resolve(v.blendWith, v.custom) : null;
   return {
     enabled: true, engine: 'ai', bypass: !!v.bypass, cvPath: p.cvPath, f0Path: p.f0Path, voicePath: r.modelPath, spkPath: r.spkPath, sid: r.sid,
     sid2: r2 && r2.modelPath === r.modelPath ? r2.sid : -1, blend: v.blend || 0,
-    pitch: v.pitch || 0, autoPitch: !!v.autoPitch, targetHz: v.targetHz || r.targetHz, quality: v.quality || 'balanced', device: v.device || 'gpu', f0: v.f0 || 'auto',
+    pitch: v.pitch || 0, autoPitch: !!v.autoPitch, targetHz: maturityHz(r, r.gender, v.maturity), ceilHz: ceilFor(maturityHz(r, r.gender, v.maturity), r.gender), quality: v.quality || 'balanced', device: v.device || 'gpu', f0: v.f0 || 'auto',
     expressive: v.expressive ?? (r.tuned ? r.tuned.expressive : 0.5), envMix: v.envMix ?? (r.tuned ? r.tuned.envMix : 0.7),
     natural: v.natural !== false, natBlend: v.natBlend ?? 0.75,
     ...vcPersonal(v),
@@ -1051,7 +1057,7 @@ function vcPersonal(v) {
   const p = v.personal; if (!p || !p.userHz) return {};
   const o = { userHz: p.userHz }; if (p.gateDb != null) o.gateDb = p.gateDb;
   if (p.voice === v.voice) {
-    if (p.rangeScale) o.rangeScale = p.rangeScale; if (p.natFormant != null) o.natFormant = p.natFormant;
+    if (p.rangeScale) o.rangeScale = Math.min(1, p.rangeScale); // v2.6.4: never widen (x1.2 pushed peaks into a child's range) if (p.natFormant != null) o.natFormant = p.natFormant;
     if (p.adaptPath && fs.existsSync(p.adaptPath) && (p.adapt || 0) > 0) { o.adaptPath = p.adaptPath; o.adapt = p.adapt; }
   }
   return o;
@@ -1108,7 +1114,7 @@ ipcMain.handle('vc:calibrate', async () => {
   const v = VC(); const d = calDir(); const sample = path.join(d, 'sample.wav');
   if (!fs.existsSync(sample)) return { ...calState(), error: 'Record a sample first.' };
   const st = vmodels.status(v.custom); const p = vmodels.paths();
-  const voices = st.voices.filter((x) => x.ready).map((x) => { const r = vmodels.resolve(x.id, v.custom); return { key: x.id, name: x.name, gender: x.gender === 'male' ? 'M' : 'F', voicePath: r.modelPath, spkPath: r.spkPath, sid: r.sid, targetHz: r.targetHz }; });
+  const voices = st.voices.filter((x) => x.ready).map((x) => { const r = vmodels.resolve(x.id, v.custom); return { key: x.id, name: x.name, gender: x.gender === 'male' ? 'M' : 'F', voicePath: r.modelPath, spkPath: r.spkPath, sid: r.sid, targetHz: maturityHz(r, r.gender, v.maturity), ceilHz: ceilFor(maturityHz(r, r.gender, v.maturity), r.gender) }; });
   calRun = { startedAt: Date.now(), stage: 'Starting', pct: 0 }; calPush();
   const r = await helper.call('vcCalibrate', { sample, raw: path.join(d, 'raw.wav'), outDir: path.join(d, 'run'), cvPath: p.cvPath, f0Path: p.f0Path, device: v.device || 'gpu', adapt: 0, voices, tryVoices: voices.length > 0 });
   if (!r || r.ok === false) { calRun = null; calPush(); return { ...calState(), error: (r && r.error) || 'The audio engine isn\'t running.' }; }
@@ -1122,7 +1128,8 @@ helper.on('vcCalib', (d) => {
   else {
     const st = vmodels.status(v.custom); const names = Object.fromEntries(st.voices.map((x) => [x.id, x.name]));
     v.calibration = { at: new Date().toISOString(), measure: res.measure, before: res.before, recommend: res.recommend || null, error: res.error || null,
-      candidates: (res.candidates || []).map((c) => ({ ...c, name: names[c.key] || c.name })) };
+      candidates: (res.candidates || []).map((c) => { const r = vmodels.resolve(c.key, v.custom); return { ...c, name: names[c.key] || c.name, youthful: !!(r && r.youthful), score: r && r.youthful && c.score != null ? Math.round((c.score - 4) * 10) / 10 : c.score }; }) // v2.6.4: youthful voices rank lower
+        .sort((a, b) => (b.score ?? -1) - (a.score ?? -1)).map((c, i, all) => ({ ...c, rank: all.slice(0, i + 1).filter((x) => x.gender === c.gender).length })) };
   }
   store.saveSoon(); calPush();
 });

@@ -129,7 +129,7 @@ export default function Calibrate({ eng, voices, current, onApplied }) {
           {renaming === p.id
             ? <input className="cal-input" autoFocus defaultValue={p.name} onBlur={(e) => { window.bsp.invoke('vc:presetRename', p.id, e.target.value).then(setCs); setRenaming(null); }} onKeyDown={(e) => e.key === 'Enter' && e.target.blur()} />
             : <b onDoubleClick={() => setRenaming(p.id)} title="Double-click to rename">{p.name}</b>}
-          <span>{p.voiceName} · your pitch {Math.round(p.userHz)} Hz → {p.targetHz} Hz</span>
+          <span>{p.voiceName} · your pitch {Math.round(p.userHz)} Hz</span>
           {active === p.id ? <span className="pill live"><i />In use</span> : <button className="chip" onClick={() => window.bsp.invoke('vc:presetApply', p.id).then((s) => { setCs(s); onApplied && onApplied(); })}>Use</button>}
           <button className="chip" onClick={() => setRenaming(p.id)}>Rename</button>
           <button className="chip" onClick={() => { if (confirm(`Delete the preset "${p.name}"?`)) window.bsp.invoke('vc:presetDelete', p.id).then(setCs); }}>Delete</button>

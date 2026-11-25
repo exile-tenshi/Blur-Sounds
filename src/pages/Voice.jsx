@@ -12,6 +12,13 @@ const QUAL = [
   { id: 'quality', label: 'Studio', sub: 'Smoothest, about 410 ms. For recordings and slower conversation.' },
 ];
 
+const ageHz = (r, g, m) => { const [y, o] = (r && r.adult) || (g === 'male' ? [130, 100] : [215, 170]); return Math.round(y * Math.pow(o / y, Math.max(0, Math.min(1, m ?? 0.5)))); };
+// v2.6.4 "Voice age": a point inside an adult speaking-pitch range (never a child's)
+function VoiceAge({ value, hz, onChange }) {
+  const m = value ?? 0.5; const word = m < 0.25 ? 'Younger adult' : m < 0.45 ? 'Young adult' : m <= 0.6 ? 'Adult' : m < 0.8 ? 'Mature' : 'Mature, deeper';
+  return <label>Voice age <span>{word} · {hz} Hz</span><input type="range" min={0} max={100} value={Math.round(m * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} />
+    <span className="range-ends"><i>Younger</i><i>Mature</i></span></label>;
+}
 export default function Voice() {
   const [vs, setVs] = useState(null);
   const [prog, setProg] = useState({});
@@ -41,7 +48,7 @@ export default function Voice() {
   const dlErr = Object.values(prog).find((p) => p.state === 'error');
   const download = async (id) => { setMsg(''); const r = await window.bsp.invoke('vc:download', id || v.voice); setVs(r); };
   const preset = (p) => {
-    if (v.engine === 'dsp') return set({ preset: p, dsp: p === 'm2f' ? { pitch: 11, formant: 17, targetHz: 210 } : { pitch: -11, formant: -14, targetHz: 115 } });
+    if (v.engine === 'dsp') return set({ preset: p, dsp: p === 'm2f' ? { pitch: 11, formant: 11, targetHz: 191 } : { pitch: -11, formant: -12, targetHz: 114 } });
     const pick = models.voices.find((x) => x.gender === (p === 'm2f' ? 'female' : 'male') && x.ready) || models.voices.find((x) => x.id === (p === 'm2f' ? 'lyra' : 'rowan'));
     set({ preset: p, voice: pick.id, pitch: 0, autoPitch: true });
   };
@@ -125,7 +132,7 @@ export default function Voice() {
           <div className="fx">
             <div className="fx-head"><Toggle small on={v.autoPitch} onChange={(on) => set({ autoPitch: on })} /><b>Auto pitch</b><span className="fx-tag">recommended</span></div>
             <p className="hint">Learns your normal speaking pitch and moves it to where this voice naturally sits, keeping your intonation. No guessing semitones.</p>
-            {v.autoPitch && <label>Target pitch <span>{v.targetHz} Hz</span><input type="range" min={80} max={300} value={v.targetHz} onChange={(e) => set({ targetHz: Number(e.target.value) })} /></label>}
+            {v.autoPitch && <VoiceAge value={v.maturity} hz={ageHz(voice, voice && voice.gender, v.maturity)} onChange={(m) => set({ maturity: m })} />}
             <label>{v.autoPitch ? 'Fine-tune' : 'Pitch'} <span>{v.pitch > 0 ? '+' : ''}{v.pitch} semitones</span><input type="range" min={-24} max={24} step={0.5} value={v.pitch} onChange={(e) => set({ pitch: Number(e.target.value) })} /></label>
           </div>
           <div className="fx">
@@ -136,7 +143,7 @@ export default function Voice() {
             <label>Expressiveness <span>{Math.round((v.expressive ?? 0.5) * 100)}%</span><input type="range" min={0} max={150} value={Math.round((v.expressive ?? 0.5) * 100)} onChange={(e) => set({ expressive: Number(e.target.value) / 100 })} /></label>
             <label>Follow my loudness <span>{Math.round((1 - (v.envMix ?? 0.7)) * 100)}%</span><input type="range" min={0} max={100} value={Math.round((1 - (v.envMix ?? 0.7)) * 100)} onChange={(e) => set({ envMix: 1 - Number(e.target.value) / 100 })} /></label>
             {voice && voice.tuned && (Math.abs((v.expressive ?? 0.5) - voice.tuned.expressive) > 0.01 || Math.abs((v.envMix ?? 0.7) - voice.tuned.envMix) > 0.01) &&
-              <button className="chip" onClick={() => set({ expressive: voice.tuned.expressive, envMix: voice.tuned.envMix, targetHz: voice.targetHz })}>Use the tuned settings for {voice.name}</button>}
+              <button className="chip" onClick={() => set({ expressive: voice.tuned.expressive, envMix: voice.tuned.envMix, maturity: 0.5 })}>Use the tuned settings for {voice.name}</button>}
           </div>
           <div className="fx">
             <div className="fx-head"><Toggle small on={v.natural !== false} onChange={(on) => set({ natural: on })} /><b>Natural sounds</b><span className="fx-tag">laughs · sniffles · breaths</span></div>
@@ -163,15 +170,15 @@ export default function Voice() {
           <div className="fx">
             <div className="fx-head"><b>Pitch</b></div>
             <div className="fx-head"><Toggle small on={v.autoPitch} onChange={(on) => set({ autoPitch: on })} /><span className="muted-text small">Auto pitch (aim for a target)</span></div>
-            {v.autoPitch && <label>Target pitch <span>{v.dsp.targetHz} Hz</span><input type="range" min={80} max={300} value={v.dsp.targetHz} onChange={(e) => set({ dsp: { targetHz: Number(e.target.value) } })} /></label>}
+            {v.autoPitch && <VoiceAge value={v.maturity} hz={ageHz(null, v.preset === 'f2m' ? 'male' : 'female', v.maturity)} onChange={(m) => set({ maturity: m })} />}
             {v.autoPitch
               ? <label>Fine-tune <span>{v.pitch > 0 ? '+' : ''}{v.pitch || 0} semitones</span><input type="range" min={-6} max={6} step={0.5} value={v.pitch || 0} onChange={(e) => set({ pitch: Number(e.target.value) })} /></label>
               : <label>Pitch <span>{v.dsp.pitch > 0 ? '+' : ''}{v.dsp.pitch} semitones</span><input type="range" min={-24} max={24} step={0.5} value={v.dsp.pitch} onChange={(e) => set({ dsp: { pitch: Number(e.target.value) } })} /></label>}
           </div>
           <div className="fx">
             <div className="fx-head"><b>Formant</b><span className="fx-tag">vocal-tract size</span></div>
-            <label>Formant shift <span>{v.dsp.formant > 0 ? '+' : ''}{v.dsp.formant}%</span><input type="range" min={-40} max={60} value={v.dsp.formant} onChange={(e) => set({ dsp: { formant: Number(e.target.value) } })} /></label>
-            <p className="hint">Moves the resonances separately from the pitch: about +15 to +20% sounds female, −10 to −15% male. Too far sounds cartoonish.</p>
+            <label>Formant shift <span>{v.dsp.formant > 0 ? '+' : ''}{v.dsp.formant}%</span><input type="range" min={-18} max={v.preset === 'f2m' ? 10 : 14} value={v.dsp.formant} onChange={(e) => set({ dsp: { formant: Number(e.target.value) } })} /></label>
+            <p className="hint">Moves the resonances separately from the pitch: about +8 to +14% sounds like an adult woman, −8 to −15% an adult man. More than that sounds like a child or a cartoon, so it's capped.</p>
           </div>
         </section>
       )}

@@ -121,12 +121,12 @@ public static class Calib
     };
 
     // ---------- 2. per-voice preset ----------
-    public sealed class VoiceInfo { public string Key, Name, Gender, VoicePath, SpkPath; public int Sid; public double TargetHz; }
+    public sealed class VoiceInfo { public string Key, Name, Gender, VoicePath, SpkPath; public int Sid; public double TargetHz, CeilHz; }
     public static JsonObject PresetFor(Measure m, VoiceInfo v)
     {
         bool fem = v.Gender == "F";
         double shift = 12 * Math.Log2(v.TargetHz / Math.Max(60, m.MedianHz));
-        double rs = m.StdSemis > 0.5 ? Math.Clamp((fem ? FemStdSemis : MaleStdSemis) / m.StdSemis, 1.0, 1.2) : 1; // v2.5.3: only livens a flat reader; compressing a lively one sounded less natural
+        double rs = 1; // v2.6.4: never widen or compress your intonation (x1.2 pushed lively speech into a child's pitch range; compressing sounded flat)
         var norm = fem ? FemFormants : MaleFormants; double num = 0, den = 0; int n = 0;
         for (int i = 0; i < 3; i++) if (!double.IsNaN(m.Formants[i])) { num += Math.Log(norm[i]); den += Math.Log(m.Formants[i]); n++; }
         double fpct = n > 0 ? Math.Clamp(100 * (Math.Exp((num - den) / n) - 1), -20, 25) : (fem ? 15 : -12);
@@ -145,7 +145,7 @@ public static class Calib
         var m = Analyze(x, raw);
         var res = new JsonObject { ["measure"] = MeasureJson(m) };
         if (m.MedianHz <= 0 || m.VoicedSec < 4) { res["error"] = "Not enough voice in the recording to calibrate."; return res; }
-        var voices = ((req["voices"] as JsonArray) ?? new JsonArray()).Select(n => new VoiceInfo { Key = (string)n["key"], Name = (string)n["name"], Gender = (string)n["gender"], VoicePath = (string)n["voicePath"], SpkPath = (string)n["spkPath"], Sid = (int?)n["sid"] ?? 0, TargetHz = (double?)n["targetHz"] ?? 200 }).ToList();
+        var voices = ((req["voices"] as JsonArray) ?? new JsonArray()).Select(n => new VoiceInfo { Key = (string)n["key"], Name = (string)n["name"], Gender = (string)n["gender"], VoicePath = (string)n["voicePath"], SpkPath = (string)n["spkPath"], Sid = (int?)n["sid"] ?? 0, TargetHz = (double?)n["targetHz"] ?? 200, CeilHz = (double?)n["ceilHz"] ?? 0 }).ToList();
         // excerpt with the most voice (10 s) for the listening tests and the preview
         int len = Math.Min(x.Length, 48000 * 10), bestStart = 0, bestV = -1;
         for (int s = 0; s + len <= x.Length; s += 48000) { int v = 0; for (int f = s / 480; f < (s + len) / 480 && f < m.F0.Length; f++) if (m.F0[f] > 0) v++; if (v > bestV) { bestV = v; bestStart = s; } }
@@ -164,7 +164,7 @@ public static class Calib
                 if (!tryVoices || string.IsNullOrEmpty(v.VoicePath) || !File.Exists(v.VoicePath)) { cands.Add(c); continue; }
                 progress($"Trying {v.Name} ({++idx} of {voices.Count})", 0.1 + 0.85 * (idx - 1) / Math.Max(1, voices.Count));
                 double shift = (double)pre["shift"];
-                var vc = new VcConfig { Enabled = true, Engine = "ai", CvPath = cvPath, F0Path = f0Path, VoicePath = v.VoicePath, SpkPath = v.SpkPath, Sid = v.Sid, AutoPitch = true, UserHz = m.MedianHz, TargetHz = v.TargetHz,
+                var vc = new VcConfig { Enabled = true, Engine = "ai", CvPath = cvPath, F0Path = f0Path, VoicePath = v.VoicePath, SpkPath = v.SpkPath, Sid = v.Sid, AutoPitch = true, UserHz = m.MedianHz, TargetHz = v.TargetHz, CeilHz = v.CeilHz,
                     RangeScale = (double)pre["rangeScale"], Quality = "balanced", Device = device, Natural = false };
                 float[] y; float[][] fout; string adaptPath = Path.Combine(outDir, v.Key + ".adapt");
                 using (var a = new AiVoice(vc, cache))

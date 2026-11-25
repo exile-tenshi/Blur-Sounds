@@ -19,6 +19,7 @@ public sealed class VcConfig
     // v2.6.0: natural sounds (breaths / sniffles / laughs) + calibration from the user's own voice
     public bool Natural = true; public double NatBlend = 0.75, NatFormant = double.NaN;
     public double UserHz, RangeScale = 1.0, Adapt, GateDb = double.NaN; public string AdaptPath;
+    public double CeilHz; // v2.6.4: soft ceiling for pitch peaks (0 = off). Peaks far above an adult voice read as a child.
     public static VcConfig From(JsonNode v)
     {
         var c = new VcConfig();
@@ -34,6 +35,7 @@ public sealed class VcConfig
         c.NatFormant = v["natFormant"] is JsonValue nfv && nfv.TryGetValue<double>(out var nf) ? Math.Clamp(nf, -30, 40) : double.NaN;
         c.UserHz = Math.Clamp((double?)v["userHz"] ?? 0, 0, 600); c.RangeScale = Math.Clamp((double?)v["rangeScale"] ?? 1, 0.5, 1.6);
         c.Adapt = Math.Clamp((double?)v["adapt"] ?? 0, 0, 1); c.AdaptPath = (string)v["adaptPath"];
+        c.CeilHz = Math.Clamp((double?)v["ceilHz"] ?? 0, 0, 1000);
         c.GateDb = v["gateDb"] is JsonValue gv && gv.TryGetValue<double>(out var gd) ? Math.Clamp(gd, -90, -10) : double.NaN;
         return c;
     }
@@ -365,6 +367,7 @@ public sealed class AiVoice : IDisposable
             double fk = f0hist[k];
             if (fk > 0 && rs != 1 && medInit) fk = Math.Exp(medLogF0 + (Math.Log(fk) - medLogF0) * rs); // calibrated intonation range
             f0[k] = (float)(fk * ratioHist[k]);
+            if (c.CeilHz > 0 && f0[k] > c.CeilHz) f0[k] = (float)(c.CeilHz * Math.Pow(f0[k] / c.CeilHz, 0.35)); // v2.6.4: soft knee, peaks keep their shape but stay adult
             double mel = 1127 * Math.Log(1 + f0[k] / 700.0), lo = 1127 * Math.Log(1 + 50 / 700.0), hi = 1127 * Math.Log(1 + 1100 / 700.0);
             double mm = mel > 0 ? (mel - lo) * 254 / (hi - lo) + 1 : mel; pitch[k] = (long)Math.Round(Math.Clamp(mm, 1, 255));
         }
