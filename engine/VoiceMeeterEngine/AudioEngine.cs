@@ -197,6 +197,14 @@ internal sealed class AudioEngine : IDisposable
         previous?.Stop();
         previous?.Dispose();
         nextBroadcast.Play();
+
+        // Format rebind can invalidate the VB-Audio Output keep-alive client.
+        if (UsesHifiCableInput())
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+        }
+
         foreach (var source in microphoneSources.Values)
         {
             source.Start();
@@ -216,25 +224,22 @@ internal sealed class AudioEngine : IDisposable
             return;
         }
 
-        var recoveredAny = false;
+        // Only recover hard failures (dead process / real error). Peak-based recreation
+        // was re-scanning every audio endpoint and rebinding loopbacks every few seconds.
+        var needsRecovery = false;
         foreach (var route in routeConfigs.Values.Where(route =>
                      string.Equals(route.Target, "hifi-cable", StringComparison.OrdinalIgnoreCase)))
         {
             if (!appLoopbackSources.TryGetValue(route.AppId, out var source))
             {
-                continue;
+                needsRecovery = true;
+                break;
             }
 
-            if (int.TryParse(route.AppId, out var routeProcessId) &&
-                AudioProcessResolver.ShouldRecreateLoopbackCapture(
-                    enumerator,
-                    routeProcessId,
-                    source.CaptureProcessId,
-                    source.Level,
-                    route.ProcessName))
+            if (!AudioProcessResolver.IsProcessRunning(source.CaptureProcessId))
             {
-                recoveredAny = true;
-                continue;
+                needsRecovery = true;
+                break;
             }
 
             if (!string.Equals(source.State, "error", StringComparison.OrdinalIgnoreCase))
@@ -245,20 +250,72 @@ internal sealed class AudioEngine : IDisposable
             if (string.IsNullOrWhiteSpace(source.LastError) ||
                 source.LastError.Contains("Buffer full", StringComparison.OrdinalIgnoreCase))
             {
-                recoveredAny = true;
                 continue;
             }
 
-            recoveredAny = true;
+            needsRecovery = true;
+            break;
         }
 
-        if (!recoveredAny)
+        if (!needsRecovery)
         {
             return;
         }
 
         await SyncAppLoopbackSourcesAsync(routeConfigs.Values.ToList());
         StartSources();
+    }
+
+    public void RefreshSessionPeaksInBackground()
+    {
+        AudioSessionMonitor.RefreshInBackground();
+    }
+
+    /// <summary>
+    /// VB-Audio only loops Input→Output while Output capture is open. If the keep-alive
+    /// client dies mid-stream, restart it so Discord/OBS do not stay silent.
+    /// </summary>
+    public void EnsureHifiOutputKeepAlive()
+    {
+        if (!UsesHifiCableInput())
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            if (!string.Equals(state, "running", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(state, "starting", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+
+        if (hifiOutputActivator?.IsActive == true)
+        {
+            return;
+        }
+
+        try
+        {
+            hifiOutputActivator ??= new HifiCableOutputActivator();
+            hifiOutputActivator.Start();
+            if (hifiOutputActivator.IsActive)
+            {
+                lock (gate)
+                {
+                    message = "Streaming mix to input. Hi-Fi Cable Output is active.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            lock (gate)
+            {
+                message =
+                    $"Hi-Fi Cable Output keep-alive failed ({ex.Message}) — listeners hear silence.";
+            }
+        }
     }
 
     public EngineTelemetry GetTelemetry()
@@ -308,19 +365,23 @@ internal sealed class AudioEngine : IDisposable
             State = state,
             HelperConnected = true,
             Message = message,
-            LatencyMs = LatencyTuning.CaptureBufferMilliseconds
-                + LatencyTuning.LiveEdgeMaxMilliseconds
-                + LatencyTuning.OutputLatencyMilliseconds,
+            LatencyMs = LatencyTuning.MicCaptureBufferMilliseconds
+                + LatencyTuning.MicCaptureMaxMilliseconds
+                + LatencyTuning.OutputStageBufferMilliseconds
+                + LatencyTuning.HiFiOutputLatencyMilliseconds,
             UnderrunCount = CaptureDiagnostics.TotalUnderruns,
             SelectedMicrophoneReady = microphoneSources.Values.Any(source => source.IsReady),
             SelectedInputReady = outputBroadcast is not null &&
                 !string.IsNullOrWhiteSpace(selection.InputDeviceId) &&
                 string.Equals(boundInputSelectionId, selection.InputDeviceId, StringComparison.Ordinal),
+            HifiOutputActive = !UsesHifiCableInput() || hifiOutputActivator?.IsActive == true,
+            HifiOutputError = UsesHifiCableInput() ? hifiOutputActivator?.LastError : null,
             OutputLevel = ComputeMixedOutputLevel(),
             OutputPullLevel = OutputPullMeter.Peak,
             MixPullLevel = mixMeter?.Peak ?? 0f,
             MicrophoneLevel = ComputeMicrophoneOutputLevel(),
-            SessionLevels = AudioSessionMonitor.GetActiveSessionPeaks(enumerator)
+            // Never COM-scan on the fast meter tick — App Library peaks refresh in background.
+            SessionLevels = AudioSessionMonitor.PeekCached()
                 .Select(session => new SessionLevelTelemetry
                 {
                     ProcessId = session.ProcessId,
@@ -545,7 +606,7 @@ internal sealed class AudioEngine : IDisposable
         var minSamples = Math.Max(
             mixFormat.Channels,
             source.CaptureSampleRate * mixFormat.Channels * LatencyTuning.AppLoopbackWarmupMilliseconds / 1000);
-        await WarmupCaptureAsync(() => source.BufferedSamples, minSamples, 250);
+        await WarmupCaptureAsync(() => source.BufferedSamples, minSamples, 80);
         AttachAppToMixer(appId, source);
     }
 
@@ -799,6 +860,9 @@ internal sealed class AudioEngine : IDisposable
                 }
 
                 var newMic = await CreateMicSourceWithRetryAsync(device, config.MicrophoneId!);
+                newMic.SetVolume(Math.Clamp(config.Volume, 0f, 4f));
+                newMic.SetMuted(config.Muted);
+                ApplyNoiseSuppressionSettings(newMic, config);
                 microphoneSources[slotId] = newMic;
                 await AttachMicrophoneToMixerAsync(slotId, newMic);
                 message = $"Bound microphone: {device.FriendlyName}";
@@ -867,6 +931,8 @@ internal sealed class AudioEngine : IDisposable
                     MicrophoneId = slot.MicrophoneId,
                     Muted = slot.Muted,
                     Volume = Math.Clamp(slot.Volume, 0f, 4f),
+                    NoiseSuppression = slot.NoiseSuppression || (slot.NoiseSuppressionSettings?.Enabled ?? false),
+                    NoiseSuppressionSettings = slot.NoiseSuppressionSettings,
                 })
                 .ToList();
         }
@@ -911,7 +977,28 @@ internal sealed class AudioEngine : IDisposable
 
             source.SetVolume(Math.Clamp(slot.Volume, 0f, 4f));
             source.SetMuted(slot.Muted);
+            ApplyNoiseSuppressionSettings(source, slot);
         }
+    }
+
+    private static void ApplyNoiseSuppressionSettings(MicSource source, MicrophoneSlotConfig slot)
+    {
+        var settings = slot.NoiseSuppressionSettings;
+        if (settings is null)
+        {
+            source.SetNoiseSuppression(slot.NoiseSuppression);
+            return;
+        }
+
+        source.SetNoiseSuppressionSettings(
+            settings.Enabled || slot.NoiseSuppression,
+            settings.Strength,
+            settings.Threshold,
+            settings.HighPassHz,
+            settings.Attack,
+            settings.Release,
+            settings.NoiseGateEnabled,
+            settings.NoiseGateThreshold);
     }
 
     private async Task SyncAppLoopbackSourcesAsync(IReadOnlyCollection<RouteConfig> routes)
@@ -1104,10 +1191,27 @@ internal sealed class AudioEngine : IDisposable
 
         EnsureMixerInputsAttached();
 
+        var hifiOutputWarning = string.Empty;
         if (UsesHifiCableInput())
         {
             hifiOutputActivator ??= new HifiCableOutputActivator();
-            hifiOutputActivator.Start();
+            try
+            {
+                hifiOutputActivator.Start();
+            }
+            catch (Exception ex)
+            {
+                hifiOutputWarning =
+                    $" Hi-Fi Cable Output keep-alive failed ({ex.Message}) — listeners on Hi-Fi Cable Output will hear silence.";
+            }
+
+            if (hifiOutputActivator.IsActive != true)
+            {
+                var detail = hifiOutputActivator.LastError;
+                hifiOutputWarning = string.IsNullOrWhiteSpace(detail)
+                    ? " Hi-Fi Cable Output could not be opened — other apps will hear silence until Recording → Hi-Fi Cable Output is Enabled and matching Input format (48 kHz · 24-bit)."
+                    : $" {detail}";
+            }
         }
 
         var boundDevice = FindAudioEndpoint(DataFlow.Render, selection.InputDeviceId);
@@ -1134,19 +1238,32 @@ internal sealed class AudioEngine : IDisposable
 
         lock (gate)
         {
+            // Always start WASAPI render after sources are primed — Bind alone does not Play.
             outputBroadcast?.Play();
         }
 
         lock (gate)
         {
-            state = "running";
             var routeSuffix = voicemeeterRouteEnabled ? " Voicemeeter bus routed." : string.Empty;
-            var hifiSuffix = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true
+            var hifiActive = UsesHifiCableInput() && hifiOutputActivator?.IsActive == true;
+            var hifiSuffix = hifiActive
                 ? " Hi-Fi Cable Output is active."
-                : string.Empty;
+                : hifiOutputWarning;
+
+            // Still mark running so Input playback continues, but surface Output failure loudly.
+            state = "running";
             message = microphoneSources.Count == 0
                 ? $"Streaming application audio to input.{routeSuffix}{hifiSuffix}"
                 : $"Streaming mix to input.{routeSuffix}{hifiSuffix}";
+
+            if (UsesHifiCableInput() && !hifiActive)
+            {
+                // Keep state running (Input may still be useful) but prefer the Output error text.
+                message = string.IsNullOrWhiteSpace(hifiOutputActivator?.LastError)
+                    ? message
+                    : hifiOutputActivator!.LastError +
+                      " Mix is playing to Hi-Fi Cable Input, but Output listeners will hear silence.";
+            }
         }
     }
 
@@ -1242,7 +1359,6 @@ internal sealed class AudioEngine : IDisposable
             foreach (var includeProcessTree in new[] { true, false })
             {
                 ProcessLoopbackPool.Evict(targetProcessId);
-                await Task.Delay(150);
 
                 try
                 {
@@ -1280,6 +1396,7 @@ internal sealed class AudioEngine : IDisposable
                         throw;
                     }
 
+                    // Only wait after a failed reuse attempt, not on the first try.
                     await Task.Delay(150);
                 }
             }
@@ -1518,6 +1635,7 @@ internal sealed class MicSource : IDisposable
     private readonly SmoothCaptureBuffer captureBuffer;
     private readonly WaveFormat captureFormat;
     private readonly int captureSampleRate;
+    private readonly NoiseSuppressionSampleProvider noiseSuppressionProvider;
     private readonly FullBlockVolumeSampleProvider volumeProvider;
     private float baseVolume = 1f;
     private bool muted;
@@ -1529,6 +1647,7 @@ internal sealed class MicSource : IDisposable
         MicWasapiCapture capture,
         SmoothCaptureBuffer captureBuffer,
         WaveFormat captureFormat,
+        NoiseSuppressionSampleProvider noiseSuppressionProvider,
         FullBlockVolumeSampleProvider volumeProvider,
         int mixSampleRate)
     {
@@ -1540,6 +1659,7 @@ internal sealed class MicSource : IDisposable
         this.captureBuffer = captureBuffer;
         this.captureFormat = captureFormat;
         this.captureSampleRate = captureFormat.SampleRate;
+        this.noiseSuppressionProvider = noiseSuppressionProvider;
         this.volumeProvider = volumeProvider;
         SampleProvider = volumeProvider;
         IsReady = false;
@@ -1577,6 +1697,32 @@ internal sealed class MicSource : IDisposable
     {
         baseVolume = Math.Clamp(volume, 0f, 4f);
         ApplyVolume();
+    }
+
+    public void SetNoiseSuppression(bool enabled)
+    {
+        noiseSuppressionProvider.SetEnabled(enabled);
+    }
+
+    public void SetNoiseSuppressionSettings(
+        bool enabled,
+        float strength,
+        float threshold,
+        float highPassHz,
+        float attack,
+        float release,
+        bool noiseGateEnabled = false,
+        float noiseGateThreshold = 35f)
+    {
+        noiseSuppressionProvider.SetSettings(
+            enabled,
+            strength,
+            threshold,
+            highPassHz,
+            attack,
+            release,
+            noiseGateEnabled,
+            noiseGateThreshold);
     }
 
     private void ApplyVolume()
@@ -1623,9 +1769,10 @@ internal sealed class MicSource : IDisposable
             deviceName: deviceName,
             jitterBufferMilliseconds: 0,
             holdLastOnUnderrun: false,
-            enableTrim: false);
+            enableTrim: true);
         var provider = CapturePipeline.Build(captureBuffer, captureFormat, mixFormat, comfortCapture);
-        var volumeProvider = new FullBlockVolumeSampleProvider(provider) { Volume = 1f };
+        var noiseSuppressionProvider = new NoiseSuppressionSampleProvider(provider);
+        var volumeProvider = new FullBlockVolumeSampleProvider(noiseSuppressionProvider) { Volume = 1f };
         return Task.FromResult(new MicSource(
             selectionId,
             device.ID,
@@ -1633,6 +1780,7 @@ internal sealed class MicSource : IDisposable
             capture,
             captureBuffer,
             captureFormat,
+            noiseSuppressionProvider,
             volumeProvider,
             mixFormat.SampleRate));
     }
