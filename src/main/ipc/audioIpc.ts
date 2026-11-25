@@ -5,6 +5,7 @@ import type {
   AudioSnapshot,
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
+  SetMicrophoneNoiseSuppressionPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteEqualizerPayload,
@@ -49,6 +50,11 @@ export function registerAudioIpc(mainWindow: BrowserWindow): RoutingStore {
   )
   ipcMain.handle(audioChannels.setMicrophoneVolume, (_event, payload: SetMicrophoneVolumePayload) =>
     store.setMicrophoneVolume(payload),
+  )
+  ipcMain.handle(
+    audioChannels.setMicrophoneNoiseSuppression,
+    (_event, payload: SetMicrophoneNoiseSuppressionPayload) =>
+      store.setMicrophoneNoiseSuppression(payload),
   )
   ipcMain.handle(audioChannels.openHifiCablePlaybackSettings, () =>
     openWindowsSoundSettings('playback'),

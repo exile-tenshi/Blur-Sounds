@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using NAudio.Wave;
 
 namespace VoiceMeeterEngine;
@@ -47,10 +48,11 @@ internal static class AudioLevelUtility
     private static float ComputeFloatPeak(byte[] buffer, int bytesRecorded)
     {
         var max = 0f;
+        var samples = MemoryMarshal.Cast<byte, float>(buffer.AsSpan(0, bytesRecorded & ~3));
 
-        for (var index = 0; index + 3 < bytesRecorded; index += 4)
+        foreach (var sampleValue in samples)
         {
-            var sample = Math.Abs(BitConverter.ToSingle(buffer, index));
+            var sample = Math.Abs(sampleValue);
             if (sample > max)
             {
                 max = sample;

@@ -2,7 +2,7 @@ import type { AudioDevice, HifiCableEndpointStatus, HifiCableInfo } from './audi
 
 export const HIFI_CABLE_PRODUCT_URL = 'https://vb-audio.com/Cable/index.htm'
 export const HIFI_CABLE_DOWNLOAD_URL =
-  'https://download.vb-audio.com/Download_CABLE/HiFiCableAsioBridgeSetup_v1007.zip'
+  'http://vincent.burel.free.fr/VirtualAudioApps/HiFiCableAsioBridgeSetup_v1007.zip'
 
 export const HIFI_CABLE_QUALITY = {
   sampleRateHz: 48000,
@@ -210,7 +210,7 @@ export function mergeHifiCableFormatStatus(
 }
 
 export function formatHifiCableMissingMessage(): string {
-  return 'Hi-Fi Cable Input is required. Download Hi-Fi Cable from vb-audio.com, install it, then click Refresh.'
+  return `Hi-Fi Cable Input is required. Download Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL}, install it, then click Refresh.`
 }
 
 export function formatHifiCableDisabledMessage(): string {
@@ -225,12 +225,68 @@ export function formatHifiCableUnavailableMessage(info: HifiCableInfo): string {
   return formatHifiCableMissingMessage()
 }
 
+export function formatHifiCableRecordingUnavailableMessage(): string {
+  return 'Hi-Fi Cable Output (recording) is missing or disabled. Enable it under Windows Sound → Recording, then Refresh. Other apps listen on Output — without it the mix never leaves the cable.'
+}
+
+/**
+ * Returns a hard-fail message when Hi-Fi Cable formats cannot carry audio.
+ * MixFormat rates must match (bit-perfect). Prefer both at 48 kHz · 24-bit.
+ */
+export function describeHifiFormatStartBlocker(result: {
+  playbackConfigured: boolean
+  recordingConfigured: boolean
+  playbackStatus?: HifiCableEndpointStatus
+  recordingStatus?: HifiCableEndpointStatus
+  message?: string
+}): string | undefined {
+  const playbackRate = result.playbackStatus?.sampleRate ?? 0
+  const recordingRate = result.recordingStatus?.sampleRate ?? 0
+  const playbackOk = result.playbackStatus?.atStudioQuality === true
+  const recordingOk = result.recordingStatus?.atStudioQuality === true
+
+  // Ideal: both sides report clean 48 kHz MixFormat.
+  if (playbackOk && recordingOk) {
+    return undefined
+  }
+
+  // Also OK: both MixFormats match at any common rate (incl. legacy 384 kHz).
+  if (playbackRate > 0 && recordingRate > 0 && playbackRate === recordingRate) {
+    return undefined
+  }
+
+  if (playbackRate > 0 && recordingRate > 0 && playbackRate !== recordingRate) {
+    return (
+      `Hi-Fi Cable Input is ${playbackRate} Hz but Output is ${recordingRate} Hz. ` +
+      'The cable is bit-perfect — mismatched rates are silent. ' +
+      'In Setup click Apply clean audio settings, or set both Advanced formats to the same rate (48 kHz · 24-bit).'
+    )
+  }
+
+  const inputLabel = result.playbackStatus?.formatLabel ?? 'unknown'
+  const outputLabel = result.recordingStatus?.formatLabel ?? 'unknown'
+  return (
+    result.message ||
+    `Hi-Fi Cable formats could not be verified (Input: ${inputLabel} · Output: ${outputLabel}). ` +
+      'Open Setup → Apply clean audio settings, confirm both Windows Sound Advanced tabs match ' +
+      '(48 kHz · 24-bit), then Start again.'
+  )
+}
+
+/** @deprecated Use describeHifiFormatStartBlocker — Start must not soft-continue on format failure. */
+export function describeHifiFormatStartWarning(
+  result: Parameters<typeof describeHifiFormatStartBlocker>[0],
+): string | undefined {
+  return describeHifiFormatStartBlocker(result)
+}
+
 export function getHifiCableSetupSteps(): string[] {
   return [
-    'Download and install Hi-Fi Cable & ASIO Bridge from vb-audio.com (run setup as administrator, reboot if prompted).',
+    `Download and install Hi-Fi Cable & ASIO Bridge from ${HIFI_CABLE_DOWNLOAD_URL} (run setup as administrator, reboot if prompted).`,
     'Click Apply clean audio settings in Blur Sounds to reset Hi-Fi Cable Input and Output to 24 bit, 48000 Hz with exclusive mode enabled.',
     'If needed, open Windows Sound → Playback or Recording and confirm both Hi-Fi Cable devices show 48000 Hz on the Advanced tab.',
-    'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect).',
-    `Blur Sounds mixes at 48 kHz and sends to ${HIFI_CABLE_PLAYBACK_NAMES[0]}. Windows delivers ${HIFI_CABLE_QUALITY.shortLabel} on the cable. Other apps listen on ${HIFI_CABLE_RECORDING_NAMES[0]}.`,
+    'Input and Output must use the same sample rate and bit depth (Hi-Fi Cable is bit-perfect — mismatched rates = silence).',
+    'Leave ASIO Bridge closed, or set it to Pass-Through (Direct Mode steals the cable and listeners hear silence).',
+    `Blur Sounds sends the mix to ${HIFI_CABLE_PLAYBACK_NAMES[0]}. Point Discord/OBS/etc. at ${HIFI_CABLE_RECORDING_NAMES[0]} (not your real mic).`,
   ]
 }

@@ -122,15 +122,11 @@ internal static class PolicyConfigInterop
 
     public static IEnumerable<IntPtr> CreateStudioFormatPointers(int sampleRate, int validBitsPerSample, int channels)
     {
-        yield return CreateStudioPropertyBlobPointer();
-
-        foreach (var pointer in CreateRawStudioFormatPointers(sampleRate, validBitsPerSample, channels))
-        {
-            yield return pointer;
-        }
+        // Do not pass the registry property blob to SetDeviceFormat — it is not WAVEFORMATEX.
+        return CreateRawStudioFormatPointers(sampleRate, validBitsPerSample, channels);
     }
 
-    private static IEnumerable<IntPtr> CreateRawStudioFormatPointers(int sampleRate, int validBitsPerSample, int channels)
+    public static IEnumerable<IntPtr> CreateRawStudioFormatPointers(int sampleRate, int validBitsPerSample, int channels)
     {
         foreach (var candidate in CreateStudioFormatCandidates(sampleRate, validBitsPerSample, channels))
         {
