@@ -65,6 +65,7 @@ sealed class OutputSink : IDisposable
 {
     public readonly string DeviceId; WasapiOut wo; BufferedWaveProvider bwp; byte[] bytes = new byte[0];
     public string Error; public readonly int Rate, Channels; public float Peak; public long Written;
+    public long LastAccepted = DateTime.UtcNow.Ticks; // v2.6.2 duck watchdog: the device really is taking our audio
     RateOut conv;
     readonly int maxQueueMs;
     public OutputSink(MMDeviceEnumerator en, string id, int latencyMs = 30, int maxQueueMs = 120)
@@ -92,6 +93,7 @@ sealed class OutputSink : IDisposable
     {
         // keep latency bounded: if more than 120 ms queued, drop this block
         if (bwp.BufferedDuration.TotalMilliseconds > maxQueueMs) return;
+        LastAccepted = DateTime.UtcNow.Ticks;
         float pk = 0; for (int i = 0; i < count; i++) { var a = Math.Abs(stereo[i]); if (a > pk) pk = a; }
         if (pk > Peak) Peak = pk; Written += count / 2;
         float[] src = stereo; int n = count;
@@ -144,7 +146,29 @@ public sealed class Engine
     WaveFileWriter rec; string recPath; long recFrames;
     public readonly VoiceTrigger Voice = new(); bool voiceOn; string voiceModel = "", voicePhrase = "clip it";
     Thread thread; volatile bool running;
+    public long LastMixTicks; // v2.6.2
     public Action<JsonObject> Emit;
+
+    // v2.6.2 duck watchdog. An app turned down to 1% for "EQ what you hear" is only OK while the engine really plays it
+    // back boosted: its channel is a Hear channel, its capture is running, and the EQ output device is taking audio.
+    // Returns null when healthy, else why not (the helper then puts the app's Windows volume back).
+    public bool IsHearPid(int pid) { lock (l) return chans.Values.Any(c => c.Hear && c.Mode != "cable" && c.Pids.Contains(pid)); }
+    public string HearProblem(int pid)
+    {
+        long now = DateTime.UtcNow.Ticks;
+        lock (l)
+        {
+            var ch = chans.Values.FirstOrDefault(c => c.Hear && c.Mode != "cable" && c.Pids.Contains(pid));
+            if (ch == null) return "not on an EQ channel";
+            if (!running || LastMixTicks == 0 || now - LastMixTicks > TimeSpan.TicksPerSecond * 2) return "engine not running";
+            if (!procs.TryGetValue(pid, out var pc)) return "app not captured";
+            if (pc.Error != null) return "capture failed: " + pc.Error;
+            if (ch.HearOut == null || !hearSinks.TryGetValue(ch.HearOut, out var hs) || hs == null) return "no EQ output device";
+            if (hs.Error != null) return "EQ output failed: " + hs.Error;
+            if (now - hs.LastAccepted > TimeSpan.TicksPerSecond * 2) return "EQ output device not playing";
+            return null;
+        }
+    }
     readonly List<string> errors = new();
     static readonly HashSet<string> NoCapture = new(StringComparer.OrdinalIgnoreCase) { "audiodg", "SteelSeriesSonar", "BlurSoundsPro", "BspAudioHelper", "SteelSeriesCaptureSvc" };
 
@@ -423,7 +447,7 @@ public sealed class Engine
             long target = sw.ElapsedTicks * 48000 / Stopwatch.Frequency;
             int frames = (int)Math.Min(4800, target - produced);
             if (frames < 240) continue;
-            produced += frames;
+            produced += frames; LastMixTicks = DateTime.UtcNow.Ticks;
             int n = frames * 2;
             lock (l)
             {

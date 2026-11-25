@@ -149,6 +149,42 @@ static class Program
         t.Start();
     }
 
+    // v2.6.2: never leave an app at 1% when its audio isn't actually being played back boosted.
+    // (2.4.2-2.6.1: a duck left behind by an unclean exit stayed at 1% forever, because the next run saw the volume
+    // already "right", never registered it as turned down, and so the engine kept that app silent.)
+    static readonly Dictionary<int, long> staleSince = new();
+    static void DuckWatchdog()
+    {
+        var eng = Eng; long now = DateTime.UtcNow.Ticks;
+        foreach (var (pid, at) in Ducked.ToArray())
+        {
+            if (now - at < TimeSpan.TicksPerSecond * 2) continue; // give a fresh duck time to start playing
+            var why = eng == null ? "engine not running" : eng.HearProblem(pid);
+            if (why == null) continue;
+            float rv; lock (Restore) { if (!Restore.TryGetValue(pid, out rv)) rv = 1f; Restore.Remove(pid); }
+            Ducked.TryRemove(pid, out _);
+            try { ForPid(pid, x => x.SimpleAudioVolume.Volume = rv); } catch { }
+            Send(new JsonObject { ["event"] = "hearFallback", ["data"] = new JsonObject { ["pid"] = pid, ["reason"] = why, ["volume"] = rv } });
+        }
+        // A session sitting at the 1% duck level on an EQ channel that this run never turned down is a leftover:
+        // put it back to full volume (the app turns it down again properly if EQ is still on).
+        if (eng == null) return;
+        List<(int pid, AudioSessionControl s, string deviceId)> list; lock (AudioLock) list = Sessions;
+        if (list == null) return;
+        var seen = new HashSet<int>();
+        foreach (var (pid, sc, _) in list)
+        {
+            if (pid <= 0 || Ducked.ContainsKey(pid) || !seen.Add(pid)) continue;
+            float v; try { v = sc.SimpleAudioVolume.Volume; } catch { continue; }
+            if (v < 0.005f || v > 0.0105f || !eng.IsHearPid(pid)) { staleSince.Remove(pid); continue; }
+            if (!staleSince.TryGetValue(pid, out var t0)) { staleSince[pid] = now; continue; }
+            if (now - t0 < TimeSpan.TicksPerSecond * 4) continue;
+            staleSince.Remove(pid);
+            try { ForPid(pid, x => x.SimpleAudioVolume.Volume = 1f); } catch { }
+            Send(new JsonObject { ["event"] = "hearFallback", ["data"] = new JsonObject { ["pid"] = pid, ["reason"] = "leftover 1% volume", ["volume"] = 1 } });
+        }
+    }
+
     static readonly AutoResetEvent SnapNow = new(false);
     public static Engine Eng;
     static void AudioThread()
@@ -174,6 +210,7 @@ static class Program
             Send(new JsonObject { ["event"] = "levels", ["data"] = lv });
             Thread.Sleep(33); // ~30 Hz meters (UI smooths: instant attack, slow decay)
         });
+        StartMta(() => { Thread.Sleep(1000); DuckWatchdog(); }); // v2.6.2
         StartMta(() =>
         {
             var line = Commands.Take();

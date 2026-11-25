@@ -66,6 +66,13 @@ function chatMixFactor(id) {
 // Only apps the engine is actually capturing are turned down, and they are put back on quit / crash.
 const HEAR_DUCK = 0.01;
 let engineCaptured = new Set();
+// v2.6.2: pids this helper run has really been told to turn down (a leftover 1% from an unclean exit looks "already
+// right", so without this it was never registered and the engine kept the app silent), and pids the helper's duck
+// watchdog put back because their boosted playback wasn't working (not turned down again until the hold expires).
+const duckSent = new Set();
+const hearHold = new Map(); // pid -> { until, n }
+let appsSanitized = false;
+const isDuckLevel = (v) => typeof v === 'number' && v > 0.005 && v <= 0.0105;
 function hearChannel(id) {
   const ch = S().mixer.channels[id]; if (!ch || S().mixer.eqHear === false) return false;
   return ch.mode !== 'cable' && (!!(ch.eq && ch.eq.enabled) || busNeedsHear(id)) && helperStatus.status === 'running';
@@ -102,7 +109,7 @@ function busEngineConfig() {
   const outs = BUSES.map((id) => { const o = b.outs[id] || {}; if (busOutActive(o)) used = true; return { id, deviceId: id === 'A2' || id === 'A3' ? presentOut(o.deviceId) : null, gainDb: o.gainDb || 0, mute: !!o.mute, mono: !!o.mono, eq: o.eq || { enabled: false }, limiter: o.limiter || { enabled: false, ceilingDb: -1 }, delayMs: o.delayMs || 0 }; });
   return used ? { enabled: true, strips, outs } : null;
 }
-function hearSession(s) { return !s.system && hearChannel(channelFor(s)) && engineCaptured.has(s.pid); }
+function hearSession(s) { const h = hearHold.get(s.pid); return !s.system && hearChannel(channelFor(s)) && engineCaptured.has(s.pid) && !(h && h.until > Date.now()); }
 function normalVolume(s) {
   const id = channelFor(s); const ch = S().mixer.channels[id] || { volume: 1 }; const a = appCfg(s.process) || { volume: 1 };
   return Math.max(0, Math.min(1, a.volume * ch.volume * chatMixFactor(id)));
@@ -120,7 +127,11 @@ function effective(s) {
 
 async function applySession(s, force) {
   const e = effective(s);
-  if (force || Math.abs(e.volume - s.volume) > (e.hear ? 0.0005 : 0.005)) await helper.call('setSessionVolume', e.hear ? { pid: s.pid, volume: e.volume, restore: e.restore } : { pid: s.pid, volume: e.volume });
+  const first = e.hear && !duckSent.has(s.pid); // always register a duck with the helper, even if the volume already matches
+  if (force || first || Math.abs(e.volume - s.volume) > (e.hear ? 0.0005 : 0.005)) {
+    await helper.call('setSessionVolume', e.hear ? { pid: s.pid, volume: e.volume, restore: e.restore } : { pid: s.pid, volume: e.volume });
+    if (e.hear) duckSent.add(s.pid); else duckSent.delete(s.pid);
+  }
   if (force || e.muted !== s.muted) await helper.call('setSessionMute', { pid: s.pid, mute: e.muted });
 }
 
@@ -202,12 +213,20 @@ async function onSnapshot(snap) {
   cableSetup();
   await guardDefault().catch(() => {});
   checkListeningDevice();
+  if (!appsSanitized) { // v2.6.2: earlier versions could save a leftover 1% duck as an app's own level
+    appsSanitized = true;
+    for (const [k, a] of Object.entries(m.apps || {})) if (a && isDuckLevel(a.volume)) { a.volume = 1; dirty = true; helperLogLine(`app level for ${k} was a leftover 1% duck, reset to 100%`); }
+  }
   for (const s of visibleSessions()) {
     const key = (s.process || '').toLowerCase();
+    const hold = hearHold.get(s.pid);
+    if (hold && hold.until <= Date.now() && !hold.retried) { hold.retried = true; await applySession(s, true).catch(() => {}); }
     if (!m.apps[key]) {
       // Remember the app's current level relative to its channel so nothing jumps.
       const ch = m.channels[channelFor(s)];
-      m.apps[key] = { volume: ch.volume > 0 ? Math.min(1, s.volume / ch.volume) : s.volume, muted: false };
+      // v2.6.2: a session at the 1% "EQ what you hear" level is a leftover duck, never the app's real level
+      const v0 = isDuckLevel(s.volume) ? 1 : s.volume;
+      m.apps[key] = { volume: ch.volume > 0 ? Math.min(1, v0 / ch.volume) : v0, muted: false };
       dirty = true;
     } else if (!seenPids.has(s.pid)) {
       await applySession(s, false);
@@ -791,7 +810,14 @@ async function restoreHearSessions() {
   for (const s of visibleSessions()) if (hearChannel(channelFor(s))) await helper.call('setSessionVolume', { pid: s.pid, volume: normalVolume(s) }).catch(() => {});
 }
 helper.on('voice', async (d) => { const r = await media.saveClip('voice'); clipDone(r, `Heard “${d.text}”`); });
-helper.on('status', (st) => { if (st === 'running') { seenPids.clear(); pushEngine(); } });
+helper.on('status', (st) => { if (st === 'running') { seenPids.clear(); duckSent.clear(); pushEngine(); } });
+helper.on('hearFallback', (d) => {
+  if (!d || !d.pid) return;
+  const h = hearHold.get(d.pid); const n = h ? h.n + 1 : 1;
+  hearHold.set(d.pid, { until: Date.now() + (n > 1 ? 300000 : 60000), n }); duckSent.delete(d.pid);
+  helperLogLine(`EQ what you hear: put pid ${d.pid} back to ${Math.round((d.volume ?? 1) * 100)}% (${d.reason})`);
+  for (const s of visibleSessions()) if (s.pid === d.pid) applySession(s, true).catch(() => {});
+});
 helper.on('media', (d) => { chatbox.setMedia(d); send('media:state', d); });
 helper.on('status', (st, detail, info) => {
   helperStatus = { status: st, detail: detail || '', ...(info ? { message: info.message, hint: info.hint, code: info.code, fatal: !!info.fatal } : {}), log: helperLog };
