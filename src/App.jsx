@@ -17,7 +17,7 @@ import { UpdateBadge, UpdateToast } from './components/Updater.jsx';
 
 const NAV = [
   { id: 'mixer', label: 'Mixer', icon: Icon.mixer },
-  // { id: 'bus', label: 'Buses', icon: Icon.buses }, // v2.6.0
+  { id: 'bus', label: 'Buses', icon: Icon.buses },
   { id: 'voice', label: 'Voice', icon: Icon.vchange },
   { id: 'clips', label: 'Clips', icon: Icon.clip },
   { id: 'record', label: 'Record', icon: Icon.rec },
