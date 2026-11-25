@@ -7,6 +7,7 @@ import type {
   RoutedInput,
   SetDeviceSelectionPayload,
   SetMicrophoneMutedPayload,
+  SetMicrophoneNoiseSuppressionPayload,
   SetMicrophoneVolumePayload,
   SetRouteAssignmentPayload,
   SetRouteMutedPayload,
@@ -194,10 +195,13 @@ export class RoutingStore {
   private telemetryByAppId = new Map<string, EngineRouteTelemetry>()
   private telemetryEmitTimer?: ReturnType<typeof setTimeout>
   private lastTelemetryEmitAt = 0
-  private readonly telemetryEmitIntervalMs = 66
+  /** Keep level meters near real-time; remap/list work stays on slower timers. */
+  private readonly telemetryEmitIntervalMs = 100
   private lastRouteRemapAt = 0
   private readonly routeRemapIntervalMs = 2000
   private hifiCableFormatStatus?: HifiCableFormatResult
+  private pendingMixSync = false
+  private mixSyncInFlight?: Promise<void>
 
   constructor() {
     this.engine.subscribe((status, routeTelemetry) => {
@@ -206,6 +210,41 @@ export class RoutingStore {
       this.applyTelemetryToRoutes()
       this.maybeRemapApplicationRoutes()
       this.scheduleTelemetryEmit()
+    })
+  }
+
+  /** Coalesce rapid volume/EQ/NS updates so the UI never waits on a backlog of engine IPC. */
+  private scheduleMixSync(): void {
+    if (!this.canSyncMixLevels()) {
+      return
+    }
+
+    this.pendingMixSync = true
+    if (this.mixSyncInFlight) {
+      return
+    }
+
+    this.mixSyncInFlight = (async () => {
+      while (this.pendingMixSync) {
+        this.pendingMixSync = false
+        if (!this.canSyncMixLevels()) {
+          break
+        }
+
+        try {
+          await this.engine.updateMix(this.selection, this.getSortedRoutes())
+        } catch (error) {
+          this.setEngineError(
+            error instanceof Error ? error.message : 'Unable to update mix levels.',
+          )
+          break
+        }
+      }
+    })().finally(() => {
+      this.mixSyncInFlight = undefined
+      if (this.pendingMixSync) {
+        this.scheduleMixSync()
+      }
     })
   }
 
@@ -348,14 +387,8 @@ export class RoutingStore {
       this.engineStatus.sessionLevels,
     )
 
-    const hifiCable = detectHifiCableDependency(devices)
-    if (hifiCable.playbackReady) {
-      try {
-        this.hifiCableFormatStatus = await this.engine.configureHifiCable()
-      } catch {
-        // Format apply is best-effort during refresh; users can retry manually.
-      }
-    }
+    // Do not auto-apply Hi-Fi Cable PolicyConfig on every refresh — that COM/registry
+    // work can freeze the UI for seconds. Users apply via Setup / Start stream.
 
     if (this.isEngineActive()) {
       try {
@@ -395,19 +428,21 @@ export class RoutingStore {
       nextRecordingId = resolveRecordingDeviceId(inputDevice, recordingDevices)
     }
 
+    // Preserve noise-suppression fields — stripping them made Noise look like the mic
+    // was never picked up after Track mic / device changes.
     let nextMicrophones = payload.microphones
-      ? payload.microphones.map((slot) => ({
-          id: slot.id,
-          deviceId: slot.deviceId,
-          muted: slot.muted ?? false,
-          volume: clampVolume(slot.volume ?? DEFAULT_INPUT_GAIN),
-        }))
+      ? normalizeMicrophoneSlots({ microphones: payload.microphones })
       : normalizeMicrophoneSlots(this.selection)
 
     if (payload.microphoneId !== undefined) {
       const firstSlot = nextMicrophones[0] ?? createDefaultMicrophoneSlots()[0]
       nextMicrophones = [
-        { ...firstSlot, deviceId: payload.microphoneId || undefined },
+        {
+          ...firstSlot,
+          deviceId: payload.microphoneId || undefined,
+          noiseSuppression: firstSlot.noiseSuppression,
+          noiseSuppressionSettings: firstSlot.noiseSuppressionSettings,
+        },
         ...nextMicrophones.slice(1),
       ]
     }
@@ -454,10 +489,7 @@ export class RoutingStore {
       microphones: updateMicrophoneSlot(slots, slotId, { muted: payload.muted }),
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -474,8 +506,52 @@ export class RoutingStore {
       microphones: updateMicrophoneSlot(slots, slotId, { volume: clampVolume(payload.volume) }),
     }
 
+    this.scheduleMixSync()
+    return this.emitCachedSnapshot()
+  }
+
+  async setMicrophoneNoiseSuppression(
+    payload: SetMicrophoneNoiseSuppressionPayload,
+  ): Promise<AudioSnapshot> {
+    const slots = normalizeMicrophoneSlots(this.selection)
+    const slotId = payload.slotId ?? slots.find((slot) => slot.deviceId)?.id ?? slots[0]?.id
+
+    if (!slotId) {
+      return this.emitCachedSnapshot()
+    }
+
+    const current = slots.find((slot) => slot.id === slotId)
+    const nextSettings = {
+      ...(current?.noiseSuppressionSettings ?? {}),
+      ...(payload.settings ?? {}),
+      enabled:
+        payload.settings?.enabled ??
+        payload.noiseSuppression ??
+        current?.noiseSuppressionSettings?.enabled ??
+        current?.noiseSuppression ??
+        false,
+    }
+
+    this.selection = {
+      ...this.selection,
+      microphones: updateMicrophoneSlot(slots, slotId, {
+        noiseSuppression: nextSettings.enabled,
+        noiseSuppressionSettings: nextSettings,
+      }),
+    }
+
+    // Re-bind mics when the engine is live so NS applies to a real capture source,
+    // not only volume state on an unbound slot.
     if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
+      try {
+        await this.ensureEngineRunning()
+      } catch (error) {
+        this.setEngineError(
+          error instanceof Error ? error.message : 'Unable to apply noise suppression.',
+        )
+      }
+    } else {
+      this.scheduleMixSync()
     }
 
     return this.emitCachedSnapshot()
@@ -534,10 +610,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -549,10 +622,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.isEngineActive()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -564,10 +634,7 @@ export class RoutingStore {
       this.routedInputs.set(payload.routeId, route)
     }
 
-    if (this.canSyncMixLevels()) {
-      await this.engine.updateMix(this.selection, this.getSortedRoutes())
-    }
-
+    this.scheduleMixSync()
     return this.emitCachedSnapshot()
   }
 
@@ -612,16 +679,19 @@ export class RoutingStore {
       return this.emitCachedSnapshot()
     }
 
+    // Prefer studio format, but do not block Start if PolicyConfig fails — the cable may
+    // already be usable and silence is worse than a format warning.
     try {
       const result = await this.engine.configureHifiCable()
       this.hifiCableFormatStatus = result
     } catch (error) {
-      this.setEngineError(
-        error instanceof Error
-          ? error.message
-          : 'Unable to apply Hi-Fi Cable studio settings before starting.',
-      )
-      return this.emitCachedSnapshot()
+      this.engineStatus = {
+        ...this.engineStatus,
+        message:
+          error instanceof Error
+            ? `Hi-Fi Cable format warning: ${error.message}`
+            : 'Hi-Fi Cable format warning: unable to apply studio settings.',
+      }
     }
 
     if (!this.selection.inputDeviceId) {

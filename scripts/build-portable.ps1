@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $release = Join-Path $root 'release'
 $portableRoot = Join-Path $release 'portable'
+$desktopFolder = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Blur Sounds'
+$clipsFolder = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Blur Sounds Clips'
 
 Push-Location $root
 try {
@@ -33,10 +35,24 @@ start "" "%~dp0portable\win-unpacked\Blur Sounds.exe"
 Start-Process -FilePath (Join-Path `$PSScriptRoot 'portable\win-unpacked\Blur Sounds.exe')
 "@ | Set-Content -Path $launcherPs1 -Encoding UTF8
 
+    New-Item -ItemType Directory -Force -Path $desktopFolder | Out-Null
+    New-Item -ItemType Directory -Force -Path $clipsFolder | Out-Null
+    Copy-Item -Path (Join-Path $portableRoot 'win-unpacked\*') -Destination $desktopFolder -Recurse -Force
+
+    $desktopLauncher = Join-Path $desktopFolder 'Run Blur Sounds.bat'
+    @"
+@echo off
+start "" "%~dp0Blur Sounds.exe"
+"@ | Set-Content -Path $desktopLauncher -Encoding ASCII
+
     Write-Host ""
     Write-Host "Portable app ready (no installer):"
     Write-Host "  $appExe"
     Write-Host "  $launcherBat"
+    Write-Host "Desktop folder copy:"
+    Write-Host "  $desktopFolder"
+    Write-Host "Clips folder:"
+    Write-Host "  $clipsFolder"
 }
 finally {
     Pop-Location
